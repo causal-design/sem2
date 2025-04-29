@@ -4,6 +4,7 @@ from torch import distributions as dist
 
 import scipy.stats as stats
 from graphlib import TopologicalSorter, _NodeInfo
+import numpy as np
 
 
 class rv_distribution:
@@ -38,6 +39,7 @@ class rv_distribution:
         else:
             # Handle custom distribution sampling
             return torch.tensor(self.dist.rvs(bs), device=self.device)
+            # NOTE: With device = "mps", the last step can give an error later if not converted to float32
 
 
 class rv_sem2(_NodeInfo):
@@ -133,3 +135,21 @@ class sem2(TopologicalSorter, nn.Module):
     def static_order(self):
         """Override static_order to return cached topological order"""
         return iter(self._topological_order)
+
+# <<<<<<< HEAD
+# =======
+
+#     def forward(self, batch_size = 1):
+#         n_nodes = len(self._node2info)
+#         x = torch.zeros(batch_size, n_nodes, device=self.device)
+#         for node in self._topological_order:
+#             v = self._node2info[node]
+#             index = self._node2index[node]
+#             if v.is_random is True:
+#                  x[:, index] = torch.tensor(np.float32(v.dist.rvs(batch_size)), device=self.device)
+#             else:
+#                 pred_indices = [self._node2index[p] for p in v.predecessors]
+#                 x[:, index] = self.layer[node](x[:, pred_indices]).squeeze(-1)
+
+#         return x
+# >>>>>>> cc302f2 (Test for GPU support.)
