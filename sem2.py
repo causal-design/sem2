@@ -67,7 +67,11 @@ class rv_sem2(_NodeInfo):
 
 
 class sem2(TopologicalSorter, nn.Module):
-    def __init__(self, model_formula=None, model_components:dict=None, device="cpu"):
+    def __init__(self, model_formula:str, model_components:dict=None, device="cpu"):
+        """ model_formula: a string with the formulas for the model. The formulas should be separated by semicolons.
+            model_components: Dict of node str to nn.Module. If a node is given in the model_components, it will be used, otherwise default linear layer is used.
+                                Can be used to specify MLPs for non-linear models.
+        """
         nn.Module.__init__(self)
         TopologicalSorter.__init__(self, graph = None)
 
