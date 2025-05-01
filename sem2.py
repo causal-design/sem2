@@ -25,7 +25,7 @@ class rv_distribution:
             torch_dist, args = self.dist_map[dist_name]
             if dist_args is not None:
                 args = dist_args
-            args = [torch.tensor(arg, device=self.device) for arg in args]
+            args = [torch.tensor(arg, device=self.device, dtype=torch.float32) for arg in args]
             self.dist = torch_dist(*args)
             self._using_torch = True
         else:
@@ -38,7 +38,7 @@ class rv_distribution:
             return self.dist.sample([bs])
         else:
             # Handle custom distribution sampling
-            return torch.tensor(self.dist.rvs(bs), device=self.device)
+            return torch.tensor(self.dist.rvs(bs), device=self.device, dtype=torch.float32)
             # NOTE: With device = "mps", the last step can give an error later if not converted to float32
 
 
@@ -67,7 +67,11 @@ class rv_sem2(_NodeInfo):
 
 
 class sem2(TopologicalSorter, nn.Module):
-    def __init__(self, model_formula=None, model_components:dict=None, device="cpu"):
+    def __init__(self, model_formula:str, model_components:dict=None, device="cpu"):
+        """ model_formula: a string with the formulas for the model. The formulas should be separated by semicolons.
+            model_components: Dict of node str to nn.Module. If a node is given in the model_components, it will be used, otherwise default linear layer is used.
+                                Can be used to specify MLPs for non-linear models.
+        """
         nn.Module.__init__(self)
         TopologicalSorter.__init__(self, graph = None)
 
@@ -136,20 +140,3 @@ class sem2(TopologicalSorter, nn.Module):
         """Override static_order to return cached topological order"""
         return iter(self._topological_order)
 
-# <<<<<<< HEAD
-# =======
-
-#     def forward(self, batch_size = 1):
-#         n_nodes = len(self._node2info)
-#         x = torch.zeros(batch_size, n_nodes, device=self.device)
-#         for node in self._topological_order:
-#             v = self._node2info[node]
-#             index = self._node2index[node]
-#             if v.is_random is True:
-#                  x[:, index] = torch.tensor(np.float32(v.dist.rvs(batch_size)), device=self.device)
-#             else:
-#                 pred_indices = [self._node2index[p] for p in v.predecessors]
-#                 x[:, index] = self.layer[node](x[:, pred_indices]).squeeze(-1)
-
-#         return x
-# >>>>>>> cc302f2 (Test for GPU support.)
