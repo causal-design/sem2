@@ -99,8 +99,9 @@ class sem2(TopologicalSorter, nn.Module):
                 self.layer[node] = nn.Linear(len(v.predecessors), 1)
                 for i in range(len(v.predecessors)):
                     if v.fix_weights[i]:
-                        with torch.no_grad():
-                            self.layer[node].weight[0, i] = 1.0
+                        [p.requires_grad_(False) for p in self.layer[node].parameters()]
+                        self.layer[node].weight[0, i] = 1.0
+                        self.layer[node].bias[0] = 0.0
             else:
                 self.layer[node] = MLP(len(v.predecessors), [128, 128, 128], 1)
         assert len(model_components) == 0, f"The following nodes were given but not set: {model_components.keys()}"
