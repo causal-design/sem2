@@ -4,13 +4,20 @@ import numpy as np
 import torch
 from torch import nn
 from torch import distributions as dist
+from nn_models import MLP
 
 class rv_sem2(_NodeInfo):
     def __init__(self, formula: str, device="cpu"):
         if "<-" in formula:
             lhs, rhs = formula.replace(" ", "").split("<-")
             super().__init__(lhs) # lhs is the variable name
-            self.predecessors = rhs.split("+") # rhs is the parents of the node
+
+            if rhs.startswith("n("): # rhs is the parents of the node
+                self.predecessors = rhs[2:-1].split(",")
+                self.is_linear = False
+            else:
+                self.predecessors = rhs.split("+")
+                self.is_linear = True
             self.dist = None
             self.is_random = False
         elif "~" in formula:
@@ -18,6 +25,7 @@ class rv_sem2(_NodeInfo):
             super().__init__(lhs) # lhs is the variable name
             self.predecessors = []
             self.is_random = True
+            self.is_linear = None
 
             match = re.match(r'^([A-Za-z0-9]+)\((.*)\)$', rhs)
             dist_name = match.group(1)  # e.g., 'Beta'
@@ -42,6 +50,7 @@ class sem2(TopologicalSorter, nn.Module):
         """ model_formula: a string with the formulas for the model. The formulas should be separated by semicolons.
             model_components: Dict of node str to nn.Module. If a node is given in the model_components, it will be used, otherwise default linear layer is used.
                                 Can be used to specify MLPs for non-linear models.
+            Example:
         """
         nn.Module.__init__(self)
         TopologicalSorter.__init__(self, graph = None)
@@ -50,11 +59,24 @@ class sem2(TopologicalSorter, nn.Module):
         model_components = model_components if model_components is not None else {}
 
         # Initialize node info by formula
+        self.model_formula = model_formula
         formula_list = model_formula.replace(" ", "").split(";")
+
+        # Expand LHS of formula
+        expanded_list = []
+        input_node = set() # All variables appearing on LHS
+        for formula in formula_list:
+            new_formula = self._expand_lhs(formula)
+            input_node.update(new_formula[0])
+            expanded_list.extend(new_formula[1])
+        formula_list = expanded_list
+
+        # Expand RHS
         expanded_list = []
         for formula in formula_list:
-            expanded_list.extend(self._expand_formula(formula))
+            expanded_list.extend(self._expand_rhs(formula))
         formula_list = expanded_list
+        self.formula_list = formula_list
 
         rvs = [rv_sem2(formula, device=device) for formula in formula_list]
         self._node2info = {rv.node: rv for rv in rvs}
@@ -65,31 +87,103 @@ class sem2(TopologicalSorter, nn.Module):
 
         self.layer = nn.ModuleDict()
         for node, v in self._node2info.items():
-            if v.is_random is True:
+            if v.is_random:
                 self.layer[node] = None
             elif node in model_components.keys():       # if the node is given in model_components, use it
                 self.layer[node] = model_components.pop(node)
-            else:
+            elif v.is_linear:
                 self.layer[node] = nn.Linear(len(v.predecessors), 1)
+            else:
+                self.layer[node] = MLP(len(v.predecessors), [128, 128, 128], 1)
         assert len(model_components) == 0, f"The following nodes were given but not set: {model_components.keys()}"
         self.layer.to(device)
 
         self._topological_order = list(super(sem2, self).static_order())
         self._node2index = {node: index for index, node in enumerate(self._topological_order)}
+        self._input_node2index = {node: index for index, node in enumerate(self._topological_order) if node in input_node}
 
-    def _expand_formula(self, formula: str):
+    def _expand_lhs(self, formula: str):
         if "~" in formula:
             sep = "~"
         elif "<-" in formula:
             sep = "<-"
         else:
             raise ValueError("Formula must contain ~ or <-")
+
+        lhs, rhs = formula.replace(" ", "").split(sep)
         if "," not in formula:
-            return [formula]
+            return [[lhs], [formula]]
         else:
-            lhs, rhs = formula.replace(" ", "").split(sep)
             variables = lhs.split(",")
-            return [var + sep + rhs for var in variables]
+            return [variables, [var + sep + rhs for var in variables]]
+
+    def _split_rhs(self, rhs: str, sep: str):
+        """Split by sep ("+" or ",") but preserve content inside parentheses."""
+        if not rhs:
+            return []
+        rhs = rhs.replace(" ", "")
+        terms = []
+        current_term = ""
+        paren_count = 0
+        for char in rhs:
+            if char == sep and paren_count == 0:
+                terms.append(current_term)
+                current_term = ""
+                continue
+            elif char == "(":
+                paren_count += 1
+            elif char == ")":
+                paren_count -= 1
+            current_term += char
+        if current_term:
+            terms.append(current_term)
+        return terms
+
+    def _expand_rhs(self, formula: str):
+        if "~" in formula:
+            return [formula]
+        elif "<-" not in formula:
+            raise ValueError("Formula must contain ~ or <-")
+
+        lhs, rhs = formula.split("<-")
+        if "n(" not in rhs: # formula is linear
+            return [formula]
+
+        plus_terms = self._split_rhs(rhs, "+")
+        if len(plus_terms) == 1 and rhs.startswith("n(") and rhs.count("n(") == 1 and "+" not in rhs:
+            # formula is a single, non-nested, nonlinear term
+            return [formula]
+
+        new_formula = lhs + "<-n("
+        expanded_list = []
+        if len(plus_terms) == 1 and rhs.startswith("n("):
+            # a single, nested, nonlinear term
+            new_formula = lhs + "<-n("
+            comma_terms = self._split_rhs(rhs[2:-1], ",")
+            for i, term in enumerate(comma_terms):
+                if term.startswith("n(") or "+" in term:
+                    new_rv_name = lhs + ":" + str(i)
+                    expanded_list.extend(self._expand_rhs(new_rv_name + "<-" + term)) # nested expansion
+                    new_formula = new_formula + new_rv_name
+                else:
+                    new_formula = new_formula + term
+                if i < len(comma_terms) - 1:
+                    new_formula = new_formula + ","
+            new_formula = new_formula + ")"
+        else:
+            new_formula = lhs + "<-"
+            for i, term in enumerate(plus_terms):
+                if term.startswith("n("): # create a new rv
+                    new_rv_name = lhs + ":" + str(i)
+                    expanded_list.extend(self._expand_rhs(new_rv_name + "<-" + term)) # nested expansion
+                    new_formula = new_formula + new_rv_name
+                else:
+                    new_formula = new_formula + term
+
+                if i < len(plus_terms) - 1:
+                    new_formula = new_formula + "+"
+        expanded_list.append(new_formula)
+        return expanded_list
 
     def forward(self, batch_size=1, set_nodes:dict[str, torch.Tensor] = None):
         """ If set nodes is given, replace the values of the nodes in the model with the given values.
@@ -114,7 +208,7 @@ class sem2(TopologicalSorter, nn.Module):
                 x[:, index] = self.layer[node](x[:, pred_indices]).squeeze(-1)
 
         assert len(set_nodes) == 0, f"The following nodes are not in the model: {set_nodes.keys()}"
-        return x
+        return x[:, list(self._input_node2index.values())]
 
     def _get_nodeinfo(self, node: str):
         """Override original private method, raise an error if node does not exist

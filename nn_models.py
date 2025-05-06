@@ -2,12 +2,13 @@ import torch.nn as nn
 
 
 class MLP(nn.Module):
-    def __init__(self, input_dim, hidden_dims, output_dim, prob=True, dropout=0.0):
+    def __init__(self, input_dim, hidden_dims, output_dim, prob=False, dropout=0.0):
         """
         Args:
             input_dim (int): Dimension of the input features.
             hidden_dims (list of int): List containing the number of units in each hidden layer.
             output_dim (int): Dimension of the output.
+            prob (boolean): Add a final Sigmoid layer?
             dropout (float): Dropout probability (default: 0.0, no dropout).
         """
         super(MLP, self).__init__()
@@ -33,5 +34,3 @@ class MLP(nn.Module):
 
     def forward(self, x):
         return self.net(x)
-
-
