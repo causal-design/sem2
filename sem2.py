@@ -15,8 +15,11 @@ class rv_sem2(_NodeInfo):
             if rhs.startswith("n("): # rhs is the parents of the node
                 self.predecessors = rhs[2:-1].split(",")
                 self.is_linear = False
+                self.fix_weights = None
             else:
-                self.predecessors = rhs.split("+")
+                predecessors = rhs.split("+")
+                self.fix_weights = [p.startswith("1*") for p in predecessors]
+                self.predecessors = [p.lstrip("1*") for p in predecessors]
                 self.is_linear = True
             self.dist = None
             self.is_random = False
@@ -25,6 +28,7 @@ class rv_sem2(_NodeInfo):
             super().__init__(lhs) # lhs is the variable name
             self.predecessors = []
             self.is_random = True
+            self.fix_weights = None
             self.is_linear = None
 
             match = re.match(r'^([A-Za-z0-9]+)\((.*)\)$', rhs)
@@ -93,6 +97,10 @@ class sem2(TopologicalSorter, nn.Module):
                 self.layer[node] = model_components.pop(node)
             elif v.is_linear:
                 self.layer[node] = nn.Linear(len(v.predecessors), 1)
+                for i in range(len(v.predecessors)):
+                    if v.fix_weights[i]:
+                        with torch.no_grad():
+                            self.layer[node].weight[0, i] = 1.0
             else:
                 self.layer[node] = MLP(len(v.predecessors), [128, 128, 128], 1)
         assert len(model_components) == 0, f"The following nodes were given but not set: {model_components.keys()}"
@@ -209,6 +217,16 @@ class sem2(TopologicalSorter, nn.Module):
 
         assert len(set_nodes) == 0, f"The following nodes are not in the model: {set_nodes.keys()}"
         return x[:, list(self._input_node2index.values())]
+
+    def fix_weights(self):
+        """Set weights of fixed coefficients to 1; call this after any update to the model."""
+        for node, v in self._node2info.items():
+            if not v.is_random and not node in model_components.keys() and v.is_linear:
+                for i in range(len(v.predecessors)):
+                    if v.fix_weights[i]:
+                        with torch.no_grad():
+                            self.layer[node].weight[0, i] = 1.0
+
 
     def _get_nodeinfo(self, node: str):
         """Override original private method, raise an error if node does not exist
