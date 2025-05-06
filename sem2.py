@@ -93,7 +93,7 @@ class sem2(TopologicalSorter, nn.Module):
         for node, v in self._node2info.items():
             if v.is_random:
                 self.layer[node] = None
-            elif node in model_components.keys():       # if the node is given in model_components, use it
+            elif node in model_components.keys():       # if the node is given in model_components, use it.
                 self.layer[node] = model_components.pop(node)
             elif v.is_linear:
                 self.layer[node] = nn.Linear(len(v.predecessors), 1)
