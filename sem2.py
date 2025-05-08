@@ -8,15 +8,23 @@ from nn_models import MLP
 
 class rv_sem2(_NodeInfo):
     def __init__(self, formula: str, device="cpu"):
-        if "<-" in formula:
-            lhs, rhs = formula.replace(" ", "").split("<-")
-            super().__init__(lhs) # lhs is the variable name
 
-            if rhs.startswith("n("): # rhs is the parents of the node
+        formula = formula.replace(" ", "") # remove spaces
+        self.formula = formula
+
+        if "<-" in formula:
+            # this is a non-random node
+            lhs, rhs = formula.split("<-")
+            # lhs is the variable name, rhs contains all parents of the node
+            super().__init__(lhs)
+
+            if rhs.startswith("n("):
+                # this is a nonlinear node
                 self.predecessors = rhs[2:-1].split(",")
                 self.is_linear = False
                 self.fix_weights = None
             else:
+                # this is a linear node
                 predecessors = rhs.split("+")
                 self.fix_weights = [p.startswith("1*") for p in predecessors]
                 self.predecessors = [p.lstrip("1*") for p in predecessors]
@@ -24,13 +32,15 @@ class rv_sem2(_NodeInfo):
             self.dist = None
             self.is_random = False
         elif "~" in formula:
-            lhs, rhs = formula.replace(" ", "").split("~")
-            super().__init__(lhs) # lhs is the variable name
+            # this is a random node
+            lhs, rhs = formula.split("~")
+            super().__init__(lhs)
             self.predecessors = []
             self.is_random = True
             self.fix_weights = None
             self.is_linear = None
 
+            # match the name of distribution and its parameters
             match = re.match(r'^([A-Za-z0-9]+)\((.*)\)$', rhs)
             dist_name = match.group(1)  # e.g., 'Beta'
             dist_class = getattr(dist, dist_name)
@@ -41,8 +51,8 @@ class rv_sem2(_NodeInfo):
         else:
             raise ValueError("Formula does not contain <- or ~.")
 
-        self.npredecessors = len(self.predecessors) # NOTE: this will be changed when obtaining topological order
-        self.formula = formula
+        self.npredecessors = len(self.predecessors)
+        # NOTE: npredecessors will be changed in topological ordering and should not be used for other purposes.
 
     def __repr__(self):
         return self.formula
@@ -56,6 +66,8 @@ class sem2(TopologicalSorter, nn.Module):
                                 Can be used to specify MLPs for non-linear models.
             Example:
         """
+
+        # initialize as a neural network and as a DAG
         nn.Module.__init__(self)
         TopologicalSorter.__init__(self, graph = None)
 
@@ -68,27 +80,32 @@ class sem2(TopologicalSorter, nn.Module):
 
         # Expand LHS of formula
         expanded_list = []
-        input_node = set() # All variables appearing on LHS
+        input_node = set() # Record all variables in the input
         for formula in formula_list:
             new_formula = self._expand_lhs(formula)
             input_node.update(new_formula[0])
             expanded_list.extend(new_formula[1])
         formula_list = expanded_list
 
-        # Expand RHS
+        # Expand RHS of formula
         expanded_list = []
         for formula in formula_list:
             expanded_list.extend(self._expand_rhs(formula))
         formula_list = expanded_list
+
+        # Save the expanded formulas
         self.formula_list = formula_list
 
+        # Initialize all nodes (which may contain new latent variables)
         rvs = [rv_sem2(formula, device=device) for formula in formula_list]
         self._node2info = {rv.node: rv for rv in rvs}
 
+        # Find successors
         for node, v in self._node2info.items():
             for p in v.predecessors:
                 self._node2info[p].successors.append(node)
 
+        # Construct the neural network
         self.layer = nn.ModuleDict()
         for node, v in self._node2info.items():
             if v.is_random:
@@ -111,6 +128,8 @@ class sem2(TopologicalSorter, nn.Module):
         self._input_node2index = {node: index for index, node in enumerate(self._topological_order) if node in input_node}
 
     def _expand_lhs(self, formula: str):
+
+        # Determine the separator (could be ~ or <-)
         if "~" in formula:
             sep = "~"
         elif "<-" in formula:
@@ -119,22 +138,19 @@ class sem2(TopologicalSorter, nn.Module):
             raise ValueError("Formula must contain ~ or <-")
 
         lhs, rhs = formula.replace(" ", "").split(sep)
-        if "," not in formula:
-            return [[lhs], [formula]]
-        else:
-            variables = lhs.split(",")
-            return [variables, [var + sep + rhs for var in variables]]
+        variables = lhs.split(",") # split terms on LHS by comma
+
+        return [variables, [var + sep + rhs for var in variables]]
 
     def _split_rhs(self, rhs: str, sep: str):
         """Split by sep ("+" or ",") but preserve content inside parentheses."""
-        if not rhs:
-            return []
         rhs = rhs.replace(" ", "")
         terms = []
         current_term = ""
         paren_count = 0
         for char in rhs:
             if char == sep and paren_count == 0:
+                # Add a new term
                 terms.append(current_term)
                 current_term = ""
                 continue
@@ -144,17 +160,24 @@ class sem2(TopologicalSorter, nn.Module):
                 paren_count -= 1
             current_term += char
         if current_term:
+            # Add the last term
             terms.append(current_term)
         return terms
 
     def _expand_rhs(self, formula: str):
+
+        formula = formula.replace(" ", "")
+
         if "~" in formula:
+            # RHS should be a distribution, no need to expand
             return [formula]
-        elif "<-" not in formula:
-            raise ValueError("Formula must contain ~ or <-")
+        elif formula.count("<-") != 1:
+            raise ValueError("Formula must contain exactly one ~ or <-")
 
         lhs, rhs = formula.split("<-")
-        if "n(" not in rhs: # formula is linear
+
+        if "n(" not in rhs:
+            # formula is linear, no need to expand
             return [formula]
 
         plus_terms = self._split_rhs(rhs, "+")
@@ -162,7 +185,6 @@ class sem2(TopologicalSorter, nn.Module):
             # formula is a single, non-nested, nonlinear term
             return [formula]
 
-        new_formula = lhs + "<-n("
         expanded_list = []
         if len(plus_terms) == 1 and rhs.startswith("n("):
             # a single, nested, nonlinear term
@@ -170,27 +192,35 @@ class sem2(TopologicalSorter, nn.Module):
             comma_terms = self._split_rhs(rhs[2:-1], ",")
             for i, term in enumerate(comma_terms):
                 if term.startswith("n(") or "+" in term:
+                    # a nested term
                     new_rv_name = lhs + ":" + str(i)
                     expanded_list.extend(self._expand_rhs(new_rv_name + "<-" + term)) # nested expansion
                     new_formula = new_formula + new_rv_name
                 else:
+                    # a non-nested term
                     new_formula = new_formula + term
                 if i < len(comma_terms) - 1:
                     new_formula = new_formula + ","
             new_formula = new_formula + ")"
         else:
+            # a number of linear terms
             new_formula = lhs + "<-"
             for i, term in enumerate(plus_terms):
-                if term.startswith("n("): # create a new rv
+                if term.startswith("n("):
+                    # a nested term
                     new_rv_name = lhs + ":" + str(i)
                     expanded_list.extend(self._expand_rhs(new_rv_name + "<-" + term)) # nested expansion
                     new_formula = new_formula + new_rv_name
                 else:
+                    # a non-nested term
                     new_formula = new_formula + term
 
                 if i < len(plus_terms) - 1:
                     new_formula = new_formula + "+"
+
+        # add the transformed formula
         expanded_list.append(new_formula)
+
         return expanded_list
 
     def forward(self, batch_size=1, set_nodes:dict[str, torch.Tensor] = None):
