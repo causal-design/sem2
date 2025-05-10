@@ -1,62 +1,36 @@
-from dataclasses import dataclass
 import torch.nn as nn
 
-@dataclass()
-class MLPConfig:
-    """ Configuration for the MLP model."""
-    input_dim: int = 1                  # Input dimension
-    hidden_dims: list[int] = (128, 128, 128)      # List of hidden layer dimensions
-    output_dim: int = 1                 # Output dimension
-    prob_output: bool = False           # If True, applies Sigmoid to the output to output within range [0, 1]
-    dropout: float = 0.0                # Dropout probability for regularization. 0 means no dropout
-    activation: str = "relu"            # Activation function to use.
-
-    def __post_init__(self):
-        self.hidden_dims = list(self.hidden_dims)
-
-ACTIVATION_FUNCTIONS = {
-    "linear": nn.Identity,
-    "relu": nn.ReLU,
-    "tanh": nn.Tanh,
-    "sigmoid": nn.Sigmoid,
-    "leaky_relu": nn.LeakyReLU,
-    "elu": nn.ELU,
-    "gelu": nn.GELU,
-    "selu": nn.SELU,
-}
 
 class MLP(nn.Module):
-    def __init__(self, config: MLPConfig=None, device="cpu"):
+    def __init__(self, input_dim, hidden_dims, output_dim, prob=False, dropout=0.0):
         """
         Args:
-            config (MLPConfig): Configuration object for the MLP. If None, uses default values.
+            input_dim (int): Dimension of the input features.
+            hidden_dims (list of int): List containing the number of units in each hidden layer.
+            output_dim (int): Dimension of the output.
+            prob (boolean): Add a final Sigmoid layer?
+            dropout (float): Dropout probability (default: 0.0, no dropout).
         """
         super(MLP, self).__init__()
-
-        if config is None:
-            config = MLPConfig()
-
         layers = []
         # Combine input_dim and hidden_dims to create the architecture
-        all_dims = [config.input_dim] + config.hidden_dims
-        activation_fn = ACTIVATION_FUNCTIONS[config.activation]
+        all_dims = [input_dim] + hidden_dims
 
-        # Add hidden layers with selected activation and optional dropout
+        # Add hidden layers with ReLU activation and optional dropout
         for i in range(len(all_dims) - 1):
             layers.append(nn.Linear(all_dims[i], all_dims[i + 1]))
-            layers.append(activation_fn())
-            if config.dropout > 0:
-                layers.append(nn.Dropout(p=config.dropout))
+            layers.append(nn.ReLU())
+            if dropout > 0:
+                layers.append(nn.Dropout(p=dropout))
 
-        layers.append(nn.Linear(all_dims[-1], config.output_dim))
+        # Add the final output layer (without activation; adjust if needed)
+        layers.append(nn.Linear(all_dims[-1], output_dim))
 
-        if config.prob_output:
+        if prob:
             layers.append(nn.Sigmoid())
 
         # Wrap the layers in a Sequential module
         self.net = nn.Sequential(*layers)
-
-        self.to(device)
 
     def forward(self, x):
         return self.net(x)

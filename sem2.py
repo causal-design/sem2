@@ -58,7 +58,7 @@ class rv_sem2(_NodeInfo):
         return self.formula
 
 
-class SEM2(TopologicalSorter, nn.Module):
+class sem2(TopologicalSorter, nn.Module):
 
     def __init__(self, model_formula:str, model_components:dict=None, device="cpu"):
         """ model_formula: a string with the formulas for the model. The formulas should be separated by semicolons.
@@ -123,7 +123,7 @@ class SEM2(TopologicalSorter, nn.Module):
         assert len(model_components) == 0, f"The following nodes were given but not set: {model_components.keys()}"
         self.layer.to(device)
 
-        self._topological_order = list(super(SEM2, self).static_order())
+        self._topological_order = list(super(sem2, self).static_order())
         self._node2index = {node: index for index, node in enumerate(self._topological_order)}
         self._input_node2index = {node: index for index, node in enumerate(self._topological_order) if node in input_node}
 
@@ -271,16 +271,3 @@ class SEM2(TopologicalSorter, nn.Module):
     def static_order(self):
         """Override static_order to return cached topological order"""
         return iter(self._topological_order)
-
-def main():
-    formula1 = "e1, e2, e3, e4, e5 ~ Normal(0,1);"
-    formula2 = "X1 <- e1; X2 <- e2; X3 <- 1 * X1 + X2 + e3; X4 <- n(X1, X3) + n(X2) + e4; X5 <- n(X1 + X2, n(X1 + X3, X4), e5)"
-    model = SEM2(formula1 + formula2)
-    model.formula_list
-
-    # [model._input_node2index]
-    print(model(3).detach())
-
-
-if __name__ == "__main__":
-    main()
