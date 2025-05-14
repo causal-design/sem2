@@ -8,7 +8,6 @@ from torch import distributions as dist
 import torch.nn.functional as F
 from nn_models import MLP, MLPConfig
 
-
 class SEM2Node(ABC, _NodeInfo, nn.Module):
     """ Base class for nodes. All nodes should inherit from this class.
         All nodes are initialised with 2 step proces:
@@ -31,6 +30,7 @@ class SEM2Node(ABC, _NodeInfo, nn.Module):
         self.rhs = rhs     # remove spaces
         self.predecessors = predecessors
         self.npredecessors = len(self.predecessors)
+        # NOTE: npredecessors will be changed in topological ordering and should not be used for other purposes.
         self.device = device
 
     def __repr__(self):
