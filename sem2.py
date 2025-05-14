@@ -55,10 +55,6 @@ class SEM2Node(ABC, _NodeInfo, nn.Module):
         """
         return torch.cat(x, dim=-1)
 
-    @abstractmethod
-    def init_node(self):
-        pass
-
     def forward(self, x: list[torch.Tensor], batch_size=1):
         self.value = self._forward_inner(x, batch_size)
         return self.value
@@ -140,7 +136,7 @@ class NodeNN(SEM2Node):
 
         if cfg is None:
             cfg = MLPConfig()
-        cfg.input_dim = self.npredecessors
+        cfg.input_dim = len(self.predecessors)
         self.mlp = MLP(cfg, device=device)
 
 
@@ -215,6 +211,7 @@ class SEM2(TopologicalSorter, nn.Module):
         return torch.cat([self._node2info[node].get_value() for node in self._topological_order], dim=-1)
 
     def _parse_formula(self, model_formula):
+        "x1 <- ind60 + ex1; x2 <- ind60 + ex2; x3 <- ind60 + ex3; ind60, ex1, ex2 , ex3 ~ Normal(0,1)"
         formula_list = model_formula.replace(" ", "").split(";")
 
         # Expand LHS of formula
