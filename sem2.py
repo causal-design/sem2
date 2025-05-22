@@ -197,17 +197,20 @@ class SEM2(TopologicalSorter, nn.Module):
                 set_nodes.keys(): the names of the nodes to be set
                 set_nodes.values(): Shape = [BS, 1]. Values of the nodes to be set
         """
+
         set_nodes = set_nodes if set_nodes is not None else {}
+        # Check that all set_nodes are valid and in the model:
+        assert set(set_nodes.keys()).issubset(self._node2info.keys()), f"Invalid nodes given: {set_nodes.keys()}"
+
         for node in self._topological_order:
             v = self._node2info[node]
 
             if node in set_nodes.keys():
-                v.set_value(set_nodes.pop(node))
+                v.set_value(set_nodes[node])
             else:
                 pred_values = [self._node2info[p].get_value() for p in v.predecessors]
                 v(pred_values, batch_size)
 
-        assert len(set_nodes) == 0, f"The following nodes are not in the model: {set_nodes.keys()}"
         return torch.cat([self._node2info[node].get_value() for node in self._topological_order], dim=-1)
 
     def _parse_formula(self, model_formula):
@@ -347,7 +350,9 @@ def main():
     model.formula_list
 
     # [model._input_node2index]
-    print(model(3).detach())
+    set_nodes = {"e1": torch.tensor([[1.], [2.], [3.]], device="cuda"),}
+    print(model(3, set_nodes=set_nodes).detach())
+    print(set_nodes)
 
 if __name__ == "__main__":
     main()
