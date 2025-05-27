@@ -192,10 +192,11 @@ class SEM2(TopologicalSorter, nn.Module):
 
         self._topological_order = list(super(SEM2, self).static_order())
 
-    def forward(self, batch_size=1, set_nodes:dict[str, torch.Tensor] = None):
+    def forward(self, batch_size=1, set_nodes:dict[str, torch.Tensor] = None, return_dict:bool = False):
         """ If set nodes is given, replace the values of the nodes in the model with the given values.
                 set_nodes.keys(): the names of the nodes to be set
                 set_nodes.values(): Shape = [BS, 1]. Values of the nodes to be set
+            return_dict: If True, return a dictionary of node names to their values. Otherwise, return tensor.
         """
 
         set_nodes = set_nodes if set_nodes is not None else {}
@@ -211,7 +212,10 @@ class SEM2(TopologicalSorter, nn.Module):
                 pred_values = [self._node2info[p].get_value() for p in v.predecessors]
                 v(pred_values, batch_size)
 
-        return torch.cat([self._node2info[node].get_value() for node in self._topological_order], dim=-1)
+        if return_dict:
+            return {node: self._node2info[node].get_value() for node in self._topological_order}
+        else:
+            return torch.cat([self._node2info[node].get_value() for node in self._topological_order], dim=-1)
 
     def _parse_formula(self, model_formula):
         "x1 <- ind60 + ex1; x2 <- ind60 + ex2; x3 <- ind60 + ex3; ind60, ex1, ex2 , ex3 ~ Normal(0,1)"
@@ -346,13 +350,13 @@ class SEM2(TopologicalSorter, nn.Module):
 def main():
     formula1 = "e1, e2, e3, e4, e5 ~ Normal(0,1);"
     formula2 = "X1 <- e1; X2 <- e2; X3 <- 1 * X1 + X2 + e3; X4 <- n(X1, X3) + n(X2) + e4; X5 <- n(X1 + X2, n(X1 + X3, X4), e5)"
-    model = SEM2(formula1 + formula2, device="cuda")
+    model = SEM2(formula1 + formula2, device="cpu")
     model.formula_list
 
     # [model._input_node2index]
-    set_nodes = {"e1": torch.tensor([[1.], [2.], [3.]], device="cuda"),}
-    print(model(3, set_nodes=set_nodes).detach())
-    print(set_nodes)
+    set_nodes = {"e1": torch.tensor([[1.], [2.], [3.]], device="cpu"),}
+    print(model(3, set_nodes=set_nodes, return_dict=True))
+    # print(set_nodes)
 
 if __name__ == "__main__":
     main()
