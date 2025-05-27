@@ -196,6 +196,7 @@ class SEM2(TopologicalSorter, nn.Module):
         """ If set nodes is given, replace the values of the nodes in the model with the given values.
                 set_nodes.keys(): the names of the nodes to be set
                 set_nodes.values(): Shape = [BS, 1]. Values of the nodes to be set
+            return_dict: If True, return a dictionary of node names to their values. Otherwise, return tensor.
         """
 
         set_nodes = set_nodes if set_nodes is not None else {}
