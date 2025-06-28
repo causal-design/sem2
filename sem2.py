@@ -230,7 +230,6 @@ class SEM2(TopologicalSorter, nn.Module):
                 if node is distribution, the config should be an int specifying the output dimension of the distribution.
         """
 
-        # TODO: If any nodes are not 1 dimensional, then the child node input dims must be manually specifed, since the mode assumes input_dim = len(predecessors) (parent dim is always 1).
         # initialize as a neural network and as a DAG
         nn.Module.__init__(self)
         TopologicalSorter.__init__(self, graph = None)
