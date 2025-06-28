@@ -8,6 +8,8 @@ from torch import distributions as dist
 import torch.nn.functional as F
 from dataclasses import dataclass
 
+from nn_models import MLP, MLPConfig
+
 @dataclass
 class LinearConfig:
     """ Configuration for linear layers. """
@@ -18,7 +20,6 @@ class LinearConfig:
     init_bias_val: torch.Tensor = None      # Initial bias for the linear layer. If not given, bias is initialized randomly.
 
 
-from nn_models import MLP, MLPConfig
 
 class SEM2Node(ABC, _NodeInfo, nn.Module):
     """ Base class for nodes. All nodes should inherit from this class.
