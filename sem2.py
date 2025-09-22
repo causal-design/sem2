@@ -6,7 +6,20 @@ import torch
 from torch import nn
 from torch import distributions as dist
 import torch.nn.functional as F
+from dataclasses import dataclass
+
 from nn_models import MLP, MLPConfig
+
+@dataclass
+class LinearConfig:
+    """ Configuration for linear layers. """
+    use_bias: bool = True           # If to use bias in the linear layer.
+    input_dim: int = None              # Input dimension of the linear layer. Defaults to number of predecessors.
+    output_dim: int = 1             # Output dimension of the linear layer.
+    init_weight_val: torch.Tensor = None    # Initial weights for the linear layer. If not given, weights are initialized randomly.
+    init_bias_val: torch.Tensor = None      # Initial bias for the linear layer. If not given, bias is initialized randomly.
+
+
 
 class SEM2Node(ABC, _NodeInfo, nn.Module):
     """ Base class for nodes. All nodes should inherit from this class.
@@ -18,6 +31,7 @@ class SEM2Node(ABC, _NodeInfo, nn.Module):
     device: str
     rhs: str
     value: torch.Tensor     # shape = [batch_size, 1]
+    out_dim: int            # Output dimension of node.
 
     # TopologicalSorter attributes:
     npredecessors: int
@@ -48,7 +62,7 @@ class SEM2Node(ABC, _NodeInfo, nn.Module):
 
     def _collate_fn(self, x: list[torch.Tensor]):
         """ Collate predeccesor values into a single tensor.
-            x: List[Tensor], shape = [n_predecessors][bs]
+            x: List[Tensor], shape = [n_predecessors][bs, ..., input_dim]
 
             return: Tensor, shape = [bs, input_dim]
             TODO: Different sort of collate. Currently, we just concatenate the tensors.
@@ -64,14 +78,19 @@ class SEM2Node(ABC, _NodeInfo, nn.Module):
         """ Function that sets node value. """
         pass
 
+    @abstractmethod
+    def initialize_model(self, predecessor_nodes: list['SEM2Node']):
+        """ Initialise the model parameters. """
+        pass
+
 
 class NodeDistribution(SEM2Node):
     """ Distribution node. Samples from random distribution, no parent nodes."""
     dist: torch.distributions.Distribution
-
-    def __init__(self, node_name, rhs, device="cpu"):
+    def __init__(self, node_name, rhs, out_dim: int=1, device="cpu"):
         predecessors = []
         super().__init__(node_name, rhs, predecessors, device=device)
+        self.out_dim = out_dim
 
         """ Initialise the distribution. Get parameters by splitting the rhs string."""
         match = re.match(r'^([A-Za-z0-9]+)\((.*)\)$', self.rhs)     # Split apart string name from bracket parameter
@@ -83,7 +102,12 @@ class NodeDistribution(SEM2Node):
 
     def _forward_inner(self, x, batch_size=1):
         # Sample from the distribution (parents not used)
-        return self.dist.sample([batch_size, 1])
+        value = self.dist.sample([batch_size, self.out_dim])
+        return value
+
+    def initialize_model(self, predecessor_nodes: list['SEM2Node']):
+        """ No-op for distribution nodes as they have no predecessors. """
+        pass
 
 
 class NodeLinear(SEM2Node):
@@ -92,35 +116,70 @@ class NodeLinear(SEM2Node):
     _fix_weights: torch.Tensor    # shape = [n_predecessors]
     _weight: torch.Tensor
 
-    def __init__(self, node_name, rhs, device="cpu"):
+    def __init__(self, node_name, rhs, lin_cfg: LinearConfig, device="cpu"):
         """ Linear layer.
             In order to fix some weights, some of the weights are masked off.
-            Use effective weight matrix: A_eff = A * (1 - mask) + 1 * mask
+            Use effective weight matrix: A_eff = A * (1 - mask) + 1 * mask.
+
+            lin_cfg: dict with configuration for the linear layer. Options:
+                use_bias: bool, whether to use bias in the linear layer. Default is True.
+                output_dim: int, output dimension of the linear layer. Default is 1.
+                init_weight_val: torch.Tensor, initial weights for the linear layer. If not given, weights are initialized randomly.
+                init_bias_val: torch.Tensor, initial bias for the linear layer. If not given, bias is initialized randomly.
+
         """
         rhs_vars = rhs.split("+")
         predecessors = [p.lstrip("1*") for p in rhs_vars]
-        super().__init__(node_name, rhs, predecessors)
+        super().__init__(node_name, rhs, predecessors, device=device)
+
+        if lin_cfg is None:
+            lin_cfg = LinearConfig()
+        self.lin_cfg = lin_cfg
+        self.out_dim = lin_cfg.output_dim
 
         # Fix weights by masking off some weights
-        self.fix_weights = torch.tensor([p.startswith("1*") for p in rhs_vars], dtype=bool, device=device)
-        self._ones = torch.ones(1, len(predecessors), device=device)
+        self.fix_weights = torch.tensor([p.startswith("1*") for p in rhs_vars], dtype=torch.bool, device=device)
 
-        self._weight = torch.nn.Parameter(torch.empty(1, len(predecessors), device=device))
-        self._bias = torch.nn.Parameter(torch.empty(1, 1, device=device))
+    def initialize_model(self, predecessor_nodes: list['SEM2Node']):
+        """ Initialize the linear layer's weights and biases. """
+        if self.lin_cfg.input_dim is not None:
+            input_dim = self.lin_cfg.input_dim
+        else:
+            input_dim = sum(p.out_dim for p in predecessor_nodes)
 
-        # Match default pytorch init for nn.Linear layer
-        nn.init.kaiming_uniform_(self._weight, a=np.sqrt(5))
-        fan_in = nn.init._calculate_fan_in_and_fan_out(self._weight)[0]
-        bound = 1 / np.sqrt(fan_in)
-        nn.init.uniform_(self._bias, -bound, bound)
+        self._ones = torch.ones(1, input_dim, device=self.device)
 
+        # If weights are given, use them. Otherwise, initialize them with the default pytorch init for nn.Linear layer
+        if self.lin_cfg.init_weight_val is not None:
+            assert isinstance(self.lin_cfg.init_weight_val, torch.Tensor), "init_weight must be a torch.Tensor"
+            assert self.lin_cfg.init_weight_val.shape == (self.out_dim, input_dim), f"init_weight must have shape ({self.out_dim}, {input_dim})"
+            self._weight = torch.nn.Parameter(self.lin_cfg.init_weight_val.to(self.device))
+        else:
+            self._weight = torch.nn.Parameter(torch.empty(self.out_dim, input_dim, device=self.device))
+            nn.init.kaiming_uniform_(self._weight, a=np.sqrt(5))
+
+        # Initialize bias / use given bias if needed
+        if self.lin_cfg.use_bias:
+            if self.lin_cfg.init_bias_val is not None:
+                self._bias = torch.nn.Parameter(self.lin_cfg.init_bias_val.to(self.device))
+            else:
+                self._bias = torch.nn.Parameter(torch.empty(self.out_dim, device=self.device))
+                fan_in = nn.init._calculate_fan_in_and_fan_out(self._weight)[0]
+                bound = 1 / np.sqrt(fan_in)
+                nn.init.uniform_(self._bias, -bound, bound)
+        else:
+            self._bias = None
+            assert self.lin_cfg.init_bias_val is None, "init_bias_val must be None if use_bias is False"
 
     def weight_matrix(self):
         full_weight = self._weight * (~self.fix_weights) + self._ones * self.fix_weights
         return full_weight, self._bias
 
     def _forward_inner(self, x: list[torch.Tensor], batch_size=1):
-        """ x: List[Tensor], shape = [n_predecessors][bs, 1] """
+        """ x: List[Tensor], shape = [n_predecessors][bs, in_dim_n] for parent n.
+            return.shape = [bs, out_dim]
+        """
+
         full_weight, bias = self.weight_matrix()
         x = self._collate_fn(x)
         return F.linear(x, full_weight, bias)
@@ -129,6 +188,7 @@ class NodeLinear(SEM2Node):
 class NodeNN(SEM2Node):
     """ MLP node. Use default config if not given"""
     dist: torch.distributions.Distribution
+    mlp: MLP
 
     def __init__(self, node_name, rhs, cfg: MLPConfig, device="cpu"):
         predecessors = rhs[2:-1].split(",")
@@ -136,21 +196,39 @@ class NodeNN(SEM2Node):
 
         if cfg is None:
             cfg = MLPConfig()
-        cfg.input_dim = len(self.predecessors)
-        self.mlp = MLP(cfg, device=device)
+        self.cfg = cfg
+        self.device = device
 
+    def initialize_model(self, predecessor_nodes: list['SEM2Node']):
+        """ Initialize the MLP model. """
+        input_dim = sum(p.out_dim for p in predecessor_nodes)
+        if isinstance(self.cfg, MLPConfig):
+            if self.cfg.input_dim is None:
+                self.cfg.input_dim = input_dim
+            self.mlp = MLP(self.cfg, device=self.device)
+            self.out_dim = self.cfg.output_dim
+        elif isinstance(self.cfg, MLP):
+            assert self.mlp.cfg.input_dim == input_dim, "Given MLP input dimension is different from the expected input dimension based on predecessors."
+            self.mlp = self.cfg
+            self.out_dim = self.mlp.cfg.output_dim
+        else:
+            raise ValueError(f"Invalid MLP configuration: {self.cfg}. Must be MLPConfig or MLP instance.")
 
     def _forward_inner(self, x: list[torch.Tensor], batch_size=1):
-        """ x: List[Tensor], shape = [n_predecessors][bs, 1] """
+        """ x: List[Tensor], shape = [n_predecessors][bs, in_dim_n] for parent n
+            return.shape = [bs, out_dim]
+         """
         x = self._collate_fn(x)
         return self.mlp(x)
 
 
 class SEM2(TopologicalSorter, nn.Module):
-    def __init__(self, model_formula:str, mlp_cfgs:dict=None, device="cpu"):
+    def __init__(self, model_formula:str, node_cfgs:dict=None, device="cpu"):
         """ model_formula: a string with the formulas for the model. The formulas should be separated by semicolons.
-            model_components: Dict of node str to nn.Module. If a node is given in the model_components, it will be used, otherwise default linear layer is used.
-                                Can be used to specify MLPs for non-linear models.
+            node_cfgs: Dict of node str to config for nodes.
+                If node is NN, the config should be MLPConfig or MLP instance (for already initialised MLP).
+                If node is linear, the config should be LinearConfig.
+                if node is distribution, the config should be an int specifying the output dimension of the distribution.
         """
 
         # initialize as a neural network and as a DAG
@@ -158,7 +236,7 @@ class SEM2(TopologicalSorter, nn.Module):
         TopologicalSorter.__init__(self, graph = None)
         self.device = device
 
-        mlp_cfgs = mlp_cfgs if mlp_cfgs is not None else {}
+        node_cfgs = node_cfgs if node_cfgs is not None else {}
 
         # Initialize node info by formula
         self.model_formula = model_formula
@@ -169,42 +247,54 @@ class SEM2(TopologicalSorter, nn.Module):
         for formula in self.formula_list:
             if "~" in formula:
                 lhs, rhs = formula.split("~")
-                rvs.append(NodeDistribution(lhs, rhs, device=device))
+                out_dim = node_cfgs.pop(lhs, 1)
+                rvs.append(NodeDistribution(lhs, rhs, out_dim=out_dim, device=device))
             elif "<-" in formula:
                 lhs, rhs = formula.split("<-")
                 if rhs.startswith("n("):        # For NN node, use MLP with config if given, else default.
-                    cfg = mlp_cfgs.pop(lhs, None)
+                    cfg = node_cfgs.pop(lhs, None)
                     rvs.append(NodeNN(lhs, rhs, cfg, device=device))
                 else:
-                    rvs.append(NodeLinear(lhs, rhs, device=device))
+                    lin_cfg = node_cfgs.pop(lhs, None)
+                    rvs.append(NodeLinear(lhs, rhs, lin_cfg, device=device))
 
-        assert len(mlp_cfgs) == 0, f"The following nodes were given but not set: {mlp_cfgs.keys()}"
+        assert len(node_cfgs) == 0, f"The following nodes were given but not set: {node_cfgs.keys()}"
         self._node2info = {rv.node: rv for rv in rvs}               # This is used by TopologicalSorter as well.
 
         # Find successors
         for node, v in self._node2info.items():
+            v.successors = []
+        for node, v in self._node2info.items():
             for p in v.predecessors:
                 self._node2info[p].successors.append(node)
+
+        self._topological_order = list(super(SEM2, self).static_order())
+
+        # Initialize models inside nodes
+        for node_name in self._topological_order:
+            node = self._node2info[node_name]
+            predecessor_nodes = [self._node2info[p] for p in node.predecessors]
+            node.initialize_model(predecessor_nodes)
 
         # Register modules to the model buffers / parameters
         self.layer = nn.ModuleDict(self._node2info)
         self.layer.to(device)
 
-        self._topological_order = list(super(SEM2, self).static_order())
 
     def forward(self, batch_size=1, set_nodes:dict[str, torch.Tensor] = None, return_dict:bool = False):
         """ If set nodes is given, replace the values of the nodes in the model with the given values.
                 set_nodes.keys(): the names of the nodes to be set
                 set_nodes.values(): Shape = [BS, 1]. Values of the nodes to be set
             return_dict: If True, return a dictionary of node names to their values. Otherwise, return tensor.
+                shape = [BS, output_dim], where output_dim is the output of each node.
         """
 
         set_nodes = set_nodes if set_nodes is not None else {}
         # Check that all set_nodes are valid and in the model:
-        assert set(set_nodes.keys()).issubset(self._node2info.keys()), f"Invalid nodes given: {set_nodes.keys()}"
+        assert set(set_nodes.keys()).issubset(self.layer.keys()), f"Invalid nodes given: {set_nodes.keys()}"
 
         for node in self._topological_order:
-            v = self._node2info[node]
+            v = self.layer[node]
 
             if node in set_nodes.keys():
                 v.set_value(set_nodes[node])
@@ -213,9 +303,19 @@ class SEM2(TopologicalSorter, nn.Module):
                 v(pred_values, batch_size)
 
         if return_dict:
-            return {node: self._node2info[node].get_value() for node in self._topological_order}
+            return {node: self.layer[node].get_value() for node in self._topological_order}
         else:
-            return torch.cat([self._node2info[node].get_value() for node in self._topological_order], dim=-1)
+            return torch.cat([self.layer[node].get_value() for node in self._topological_order], dim=-1)
+
+    def forward_single_node(self, node_name:str, inputs:list[torch.Tensor], batch_size=1):
+        """ Forward a single node with given inputs.
+            inputs: List of tensors, each tensor is the value of a predecessor node.
+            batch_size: Batch size to use for the node.
+        """
+        if node_name not in self.layer:
+            raise ValueError(f"Node {node_name} does not exist in the model.")
+        node = self.layer[node_name]
+        return node(inputs, batch_size)
 
     def _parse_formula(self, model_formula):
         "x1 <- ind60 + ex1; x2 <- ind60 + ex2; x3 <- ind60 + ex3; ind60, ex1, ex2 , ex3 ~ Normal(0,1)"
@@ -348,15 +448,21 @@ class SEM2(TopologicalSorter, nn.Module):
         return iter(self._topological_order)
 
 def main():
-    formula1 = "e1, e2, e3, e4, e5 ~ Normal(0,1);"
-    formula2 = "X1 <- e1; X2 <- e2; X3 <- 1 * X1 + X2 + e3; X4 <- n(X1, X3) + n(X2) + e4; X5 <- n(X1 + X2, n(X1 + X3, X4), e5)"
-    model = SEM2(formula1 + formula2, device="cpu")
-    model.formula_list
+    # formula1 = "e1, e2, e3, e4, e5 ~ Normal(0,1);"
+    # formula2 = "X1 <- e1; X2 <- e2; X3 <- 1 * X1 + X2 + e3; X4 <- n(X1, X3) + n(X2) + e4; X5 <- n(X1 + X2, n(X1 + X3, X4), e5)"
+    # model = SEM2(formula1 + formula2, device="cpu")
+    # model.formula_list
+    #
+    # # [model._input_node2index]
+    # set_nodes = {"e1": torch.tensor([[1.], [2.], [3.]], device="cpu"),}
+    # print(model(3))
 
-    # [model._input_node2index]
-    set_nodes = {"e1": torch.tensor([[1.], [2.], [3.]], device="cpu"),}
-    print(model(3, set_nodes=set_nodes, return_dict=True))
-    # print(set_nodes)
+    model_formula = "x1 <- ind60 + ex1; x2 <- ind60 + ex2; x3 <- ind60 + ex3; ind60, ex1, ex2 , ex3 ~ Normal(0,1); x4 <- x1"
+    node_cfgs = {"x1": LinearConfig(output_dim=2, use_bias=False),
+        "x4": LinearConfig(output_dim=1, init_weight_val=torch.tensor([[1.0, 2.]], dtype=torch.float32), use_bias=False)}
+    model = SEM2(model_formula, node_cfgs=node_cfgs)
+    sample1 = model(2, return_dict=True)
+    print(sample1)
 
 if __name__ == "__main__":
     main()
