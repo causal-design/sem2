@@ -4,7 +4,7 @@ import torch.nn as nn
 @dataclass()
 class MLPConfig:
     """ Configuration for the MLP model."""
-    input_dim: int = 1                  # Input dimension
+    input_dim: int = None                  # Input dimension
     hidden_dims: list[int] = (128, 128, 128)      # List of hidden layer dimensions
     output_dim: int = 1                 # Output dimension
     prob_output: bool = False           # If True, applies Sigmoid to the output to output within range [0, 1]
@@ -57,6 +57,7 @@ class MLP(nn.Module):
         self.net = nn.Sequential(*layers)
 
         self.to(device)
+        self.cfg = config
 
     def forward(self, x):
         return self.net(x)
