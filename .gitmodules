@@ -1,0 +1,4 @@
+[submodule "paper"]
+	path = docs
+	url = git@github.com:qingyuanzhao/sem2-docs.git
+	name = docs
