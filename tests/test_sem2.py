@@ -2,7 +2,7 @@ import pytest
 import torch
 
 from sem2 import SEM2, NodeDistribution, NodeLinear, NodeNN, LinearConfig
-from nn_models import MLPConfig
+from sem2 import MLPConfig
 
 
 # Does the parser handle all formula syntax correctly?
