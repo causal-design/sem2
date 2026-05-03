@@ -88,6 +88,7 @@ class ATELoss(SubLoss):
         ATE = (y_t0 - y_t1).mean()
         return ATE, {}
 
+
 class Loss:
     """ Computes loss from Xs and targets, with the ability to combine multiple losses together.
         The Overall loss is:
