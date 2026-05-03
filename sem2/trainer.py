@@ -59,12 +59,11 @@ class Trainer:
             logger.info(f"Epoch {epoch}: {epoch_time:.2f}s")
             # Get loss statistics
             average_loss = torch.stack(losses).mean().item()
-            logging.info(f'{average_loss=:.4g}')
+            logger.info(f'{average_loss=:.4g}')
 
     def _fit_batch(self, batch):
         """ Fit model on a single batch.
             Includes making predictions, calculating gradients and updating model parameters.
-            # TODO - Add in real training code.
         """
         self.optim.zero_grad()
 
