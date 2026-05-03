@@ -63,7 +63,7 @@ class Trainer:
 
     def _fit_batch(self, batch):
         """ Fit model on a single batch.
-            Includes making predictions, calculating gradients and updating model parameters.
+            Includes making predictions, calculating gradients, and updating model parameters.
         """
         self.optim.zero_grad()
 
