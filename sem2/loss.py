@@ -77,16 +77,15 @@ class ATELoss(SubLoss):
 
         # Preds for Y | T=0
         set_nodes = {self.T_node: t0}
-        preds_t0 = self.model.forward(set_nodes=set_nodes)
+        preds_t0 = self.model.forward(batch_size=self.bs, set_nodes=set_nodes, return_dict=True)
         # Preds for Y | T=1
         set_nodes = {self.T_node: t1}
-        prob_t1 = self.model.forward(set_nodes=set_nodes)
+        prob_t1 = self.model.forward(batch_size=self.bs, set_nodes=set_nodes, return_dict=True)
 
         # ATE = E[Y | T=0] - E[Y | T=1]
         y_t0 = preds_t0[self.Y_node]
         y_t1 = prob_t1[self.Y_node]
         ATE = (y_t0 - y_t1).mean()
-
         return ATE, {}
 
 class Loss:
@@ -102,9 +101,9 @@ class Loss:
         sub_losses = []
         if cfg.use_energy_score:
             sub_losses.append((EnergyScoreLoss(cfg, model), cfg.ate_weight))
-        elif cfg.use_ate:
+        if cfg.use_ate:
             sub_losses.append((ATELoss(cfg, model), cfg.ate_weight))
-        elif cfg.use_mmd:
+        if cfg.use_mmd:
             raise NotImplementedError("MMD loss not implemented yet.")
 
         self.sub_losses = sub_losses
