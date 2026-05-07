@@ -1,5 +1,4 @@
 import re
-from graphlib import _NodeInfo
 from abc import ABC, abstractmethod
 import numpy as np
 import torch
@@ -22,7 +21,7 @@ class LinearConfig:
 
 
 
-class SEM2Node(ABC, _NodeInfo, nn.Module):
+class SEM2Node(ABC, nn.Module):
     """ Base class for nodes. All nodes should inherit from this class.
         All nodes are initialised with 2 step proces:
             1) Graph is initialised
@@ -30,6 +29,7 @@ class SEM2Node(ABC, _NodeInfo, nn.Module):
     """
     # Node attributes
     device: str
+    name: str
     rhs: str
     value: torch.Tensor     # shape = [batch_size, 1]
     out_dim: int            # Output dimension of node.
@@ -39,14 +39,16 @@ class SEM2Node(ABC, _NodeInfo, nn.Module):
     predecessors: list[str]
 
     def __init__(self, lhs, rhs, predecessors, device="cpu"):
-        _NodeInfo.__init__(self, lhs)
-        nn.Module.__init__(self)
+        super().__init__()
 
+        self.name = lhs
         self.rhs = rhs     # remove spaces
         self.predecessors = predecessors
         self.npredecessors = len(self.predecessors)
         # NOTE: npredecessors will be changed in topological ordering and should not be used for other purposes.
         self.device = device
+
+        self.formula = lhs + "=" + rhs
 
     def __repr__(self):
         return self.formula
