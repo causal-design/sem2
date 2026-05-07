@@ -5,7 +5,7 @@ from torch import nn
 from .nodes import NodeDistribution, NodeLinear, NodeMLP
 
 
-class SEM2(TopologicalSorter, nn.Module):
+class SEM2(nn.Module):
     def __init__(self, model_formula:str, node_cfgs:dict=None, device="cpu"):
         """ model_formula: a string with the formulas for the model. The formulas should be separated by semicolons.
             node_cfgs: Dict of node str to config for nodes.
@@ -16,7 +16,6 @@ class SEM2(TopologicalSorter, nn.Module):
 
         # initialize as a neural network and as a DAG
         nn.Module.__init__(self)
-        TopologicalSorter.__init__(self, graph = None)
         self.device = device
 
         node_cfgs = node_cfgs if node_cfgs is not None else {}
@@ -26,41 +25,39 @@ class SEM2(TopologicalSorter, nn.Module):
         self.formula_list, self.input_node = self._parse_formula(model_formula)
 
         # Initialize all nodes (which may contain new latent variables)
-        rvs = []
+        name_to_node = {}                      # Map of node name to node instance
         for formula in self.formula_list:
             if "~" in formula:
                 lhs, rhs = formula.split("~")
                 out_dim = node_cfgs.pop(lhs, 1)
-                rvs.append(NodeDistribution(lhs, rhs, out_dim=out_dim, device=device))
+                node = NodeDistribution(lhs, rhs, out_dim=out_dim, device=device)
+                name_to_node[node.name] = node
             elif "<-" in formula:
                 lhs, rhs = formula.split("<-")
                 if rhs.startswith("n("):        # For NN node, use MLP with config if given, else default.
                     cfg = node_cfgs.pop(lhs, None)
-                    rvs.append(NodeMLP(lhs, rhs, cfg, device=device))
+                    node = NodeMLP(lhs, rhs, cfg, device=device)
+                    name_to_node[node.name] = node
                 else:
                     lin_cfg = node_cfgs.pop(lhs, None)
-                    rvs.append(NodeLinear(lhs, rhs, lin_cfg, device=device))
+                    node = NodeLinear(lhs, rhs, lin_cfg, device=device)
+                    name_to_node[node.name] = node
 
         assert len(node_cfgs) == 0, f"The following nodes were given but not set: {node_cfgs.keys()}"
-        self._node2info = {rv.node: rv for rv in rvs}               # This is used by TopologicalSorter as well.
 
-        # Find successors
-        for node, v in self._node2info.items():
-            v.successors = []
-        for node, v in self._node2info.items():
-            for p in v.predecessors:
-                self._node2info[p].successors.append(node)
-
-        self._topological_order = list(super(SEM2, self).static_order())
+        # Get topological order of the nodes for forward pass
+        topological_input = {node_name: node.predecessors for node_name, node in name_to_node.items()}
+        sorter = TopologicalSorter(topological_input)
+        self.topological_order = list(sorter.static_order())
 
         # Initialize models inside nodes
-        for node_name in self._topological_order:
-            node = self._node2info[node_name]
-            predecessor_nodes = [self._node2info[p] for p in node.predecessors]
+        for node_name in self.topological_order:
+            node = name_to_node[node_name]
+            predecessor_nodes = [name_to_node[p] for p in node.predecessors]
             node.initialize_model(predecessor_nodes)
 
-        # Register modules to the model buffers / parameters
-        self.layer = nn.ModuleDict(self._node2info)
+        # Register modules to the model buffers / parameters. This allows training the models parameters.
+        self.layer = nn.ModuleDict(name_to_node)
         self.layer.to(device)
 
     def forward(self, batch_size=1, set_nodes:dict[str, torch.Tensor] = None, return_dict:bool = False):
@@ -75,19 +72,19 @@ class SEM2(TopologicalSorter, nn.Module):
         # Check that all set_nodes are valid and in the model:
         assert set(set_nodes.keys()).issubset(self.layer.keys()), f"Invalid nodes given: {set_nodes.keys()}"
 
-        for node in self._topological_order:
+        for node in self.topological_order:
             v = self.layer[node]
 
             if node in set_nodes.keys():
                 v.set_value(set_nodes[node])
             else:
-                pred_values = [self._node2info[p].get_value() for p in v.predecessors]
+                pred_values = [self.layer[p].get_value() for p in v.predecessors]
                 v(pred_values, batch_size)
 
         if return_dict:
-            return {node: self.layer[node].get_value() for node in self._topological_order}
+            return {node: self.layer[node].get_value() for node in self.topological_order}
         else:
-            return torch.cat([self.layer[node].get_value() for node in self._topological_order], dim=-1)
+            return torch.cat([self.layer[node].get_value() for node in self.topological_order], dim=-1)
 
     def _parse_formula(self, model_formula):
         "x1 <- ind60 + ex1; x2 <- ind60 + ex2; x3 <- ind60 + ex3; ind60, ex1, ex2 , ex3 ~ Normal(0,1)"
@@ -205,19 +202,10 @@ class SEM2(TopologicalSorter, nn.Module):
 
         return expanded_list
 
-    def _get_nodeinfo(self, node: str):
-        """Override original private method, raise an error if node does not exist
-        """
-        return self._node2info[node]
-
-    def add(self, node, *predecessors):
-        """Override original methods, don't do anything
-        """
-        return None
-
     def static_order(self):
         """Override static_order to return cached topological order"""
-        return iter(self._topological_order)
+        return iter(self.topological_order)
+
 
 def main():
     # formula1 = "e1, e2, e3, e4, e5 ~ Normal(0,1);"
