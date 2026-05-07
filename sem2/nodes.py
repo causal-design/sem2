@@ -117,7 +117,7 @@ class NodeLinear(SEM2Node):
     _fix_weights: torch.Tensor    # shape = [n_predecessors]
     _weight: torch.Tensor
 
-    def __init__(self, node_name, rhs, lin_cfg: LinearConfig, device="cpu"):
+    def __init__(self, node_name, rhs, lin_cfg: LinearConfig|None, device="cpu"):
         """ Linear layer.
             In order to fix some weights, some of the weights are masked off.
             Use effective weight matrix: A_eff = A * (1 - mask) + 1 * mask.
@@ -182,16 +182,16 @@ class NodeLinear(SEM2Node):
         """
 
         full_weight, bias = self.weight_matrix()
-        x = self._collate_fn(x)
-        return F.linear(x, full_weight, bias)
+        x_collated = self._collate_fn(x)
+        return F.linear(x_collated, full_weight, bias)
 
 
-class NodeNN(SEM2Node):
+class NodeMLP(SEM2Node):
     """ MLP node. Use default config if not given"""
     dist: torch.distributions.Distribution
     mlp: MLP
 
-    def __init__(self, node_name, rhs, cfg: MLPConfig, device="cpu"):
+    def __init__(self, node_name, rhs, cfg: MLPConfig|None, device="cpu"):
         predecessors = rhs[2:-1].split(",")
         super().__init__(node_name, rhs, predecessors)
 
@@ -208,10 +208,6 @@ class NodeNN(SEM2Node):
                 self.cfg.input_dim = input_dim
             self.mlp = MLP(self.cfg, device=self.device)
             self.out_dim = self.cfg.output_dim
-        elif isinstance(self.cfg, MLP):
-            assert self.mlp.cfg.input_dim == input_dim, "Given MLP input dimension is different from the expected input dimension based on predecessors."
-            self.mlp = self.cfg
-            self.out_dim = self.mlp.cfg.output_dim
         else:
             raise ValueError(f"Invalid MLP configuration: {self.cfg}. Must be MLPConfig or MLP instance.")
 
@@ -219,5 +215,5 @@ class NodeNN(SEM2Node):
         """ x: List[Tensor], shape = [n_predecessors][bs, in_dim_n] for parent n
             return.shape = [bs, out_dim]
          """
-        x = self._collate_fn(x)
-        return self.mlp(x)
+        x_collated = self._collate_fn(x)
+        return self.mlp(x_collated)

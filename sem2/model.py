@@ -2,7 +2,7 @@ from graphlib import TopologicalSorter
 import torch
 from torch import nn
 
-from .nodes import NodeDistribution, NodeLinear, NodeNN
+from .nodes import NodeDistribution, NodeLinear, NodeMLP
 
 
 class SEM2(TopologicalSorter, nn.Module):
@@ -36,7 +36,7 @@ class SEM2(TopologicalSorter, nn.Module):
                 lhs, rhs = formula.split("<-")
                 if rhs.startswith("n("):        # For NN node, use MLP with config if given, else default.
                     cfg = node_cfgs.pop(lhs, None)
-                    rvs.append(NodeNN(lhs, rhs, cfg, device=device))
+                    rvs.append(NodeMLP(lhs, rhs, cfg, device=device))
                 else:
                     lin_cfg = node_cfgs.pop(lhs, None)
                     rvs.append(NodeLinear(lhs, rhs, lin_cfg, device=device))
@@ -63,7 +63,6 @@ class SEM2(TopologicalSorter, nn.Module):
         self.layer = nn.ModuleDict(self._node2info)
         self.layer.to(device)
 
-
     def forward(self, batch_size=1, set_nodes:dict[str, torch.Tensor] = None, return_dict:bool = False):
         """ If set nodes is given, replace the values of the nodes in the model with the given values.
                 set_nodes.keys(): the names of the nodes to be set
@@ -89,16 +88,6 @@ class SEM2(TopologicalSorter, nn.Module):
             return {node: self.layer[node].get_value() for node in self._topological_order}
         else:
             return torch.cat([self.layer[node].get_value() for node in self._topological_order], dim=-1)
-
-    def forward_single_node(self, node_name:str, inputs:list[torch.Tensor], batch_size=1):
-        """ Forward a single node with given inputs.
-            inputs: List of tensors, each tensor is the value of a predecessor node.
-            batch_size: Batch size to use for the node.
-        """
-        if node_name not in self.layer:
-            raise ValueError(f"Node {node_name} does not exist in the model.")
-        node = self.layer[node_name]
-        return node(inputs, batch_size)
 
     def _parse_formula(self, model_formula):
         "x1 <- ind60 + ex1; x2 <- ind60 + ex2; x3 <- ind60 + ex3; ind60, ex1, ex2 , ex3 ~ Normal(0,1)"

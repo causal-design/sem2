@@ -1,21 +1,20 @@
-""" Default configuration. """
-# TODO: What sort of config to use? Dataclass? Frozen dataclass? Pydantic? How should the user specify it?
-from dataclasses import dataclass
-from typing import Literal
+from pydantic import BaseModel, ConfigDict
+from typing import Literal, Union, Any
 import torch
 
 Optimisers = Literal["AdamW", "Adam", "SGD"]
 
-@dataclass(frozen=True)
-class Config:
+class Config(BaseModel):
     """ Configuration for the model and training process. """
-    device: str | torch.device = "cpu"
+    model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True)
+
+    device: Union[str, Any] = "cpu"
 
     # Optimiser parameters
     optim: Optimisers = "AdamW"
     lr: float = 10e-4
     weight_decay: float = 0.
-    momentum = 0.9                  # Only for SGD optimiser
+    momentum: float = 0.9                  # Only for SGD optimiser
 
     # Training parameters
     batch_size: int = 128

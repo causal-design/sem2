@@ -7,7 +7,7 @@ class MLPConfig:
     input_dim: int = None                  # Input dimension
     hidden_dims: list[int] = (128, 128, 128)      # List of hidden layer dimensions
     output_dim: int = 1                 # Output dimension
-    prob_output: bool = True           # If True, applies Sigmoid to the output to output within range [0, 1]
+    prob_output: bool = False           # If True, applies Sigmoid to the output to output within range [0, 1]
     dropout: float = 0.0                # Dropout probability for regularization. 0 means no dropout
     activation: str = "relu"            # Activation function to use.
 

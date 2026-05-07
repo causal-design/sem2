@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from sem2 import SEM2, NodeDistribution, NodeLinear, NodeNN, LinearConfig
+from sem2 import SEM2, NodeDistribution, NodeLinear, NodeMLP, LinearConfig
 from sem2 import MLPConfig
 
 
@@ -12,12 +12,12 @@ def test_formula_parsing():
     assert set(order) == {"x1", "x2", "y", "z"}
     assert isinstance(model.layer["x1"], NodeDistribution)
     assert isinstance(model.layer["y"], NodeLinear)
-    assert isinstance(model.layer["z"], NodeNN)
+    assert isinstance(model.layer["z"], NodeMLP)
     assert model.layer["y"].predecessors == ["x1", "x2"]
 
     model2 = SEM2("u1, u2, u3 ~ Normal(0,1); y <- n(n(u1,u2), u3)")
     assert "y:0" in model2.layer
-    assert isinstance(model2.layer["y:0"], NodeNN)
+    assert isinstance(model2.layer["y:0"], NodeMLP)
 
     model3 = SEM2("u1, u2, e ~ Normal(0,1); y <- n(u1,u2) + e")
     assert isinstance(model3.layer["y"], NodeLinear)

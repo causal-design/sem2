@@ -4,19 +4,19 @@ import torch
 from .config import Config
 from .model import SEM2
 
-class SubLoss(ABC):
+class Loss(ABC):
     """ Base class for loss functions.
-        Loss functions take in batch (Xs, targets) and makes predictions. Then they compute the loss.
+        Loss functions take in a batch of observations and makes predictions. Then they compute the loss.
     """
     pass
 
     @abstractmethod
-    def forward(self, Xs, targets, **kwargs) -> tuple[torch.Tensor, dict]:
+    def forward(self, obs, **kwargs) -> tuple[torch.Tensor, dict]:
         """ Compute the loss. Returns main loss tensor and additional metrics in dictionary. """
         pass
 
 
-class EnergyScoreLoss(SubLoss):
+class EnergyScoreLoss(Loss):
     def __init__(self, cfg: Config, model: SEM2):
         """" Energy score loss function. Sample from our model and compute energy score between our sample and the true sample .
         """
@@ -24,14 +24,14 @@ class EnergyScoreLoss(SubLoss):
         self.bs = cfg.bs
         self.beta = cfg.energy_score_beta
 
-    def forward(self, Xs, targets, **kwargs) -> tuple[torch.Tensor, dict]:
+    def forward(self, obs, **kwargs) -> tuple[torch.Tensor, dict]:
         # Draw sample from the model
         all_preds = self.model.forward(batch_size=self.bs, return_dict=True)
         # Filter out nodes for energy score
         preds = torch.cat([all_preds[node_name] for node_name in ["Z", "D", "Y"]], dim=-1)  # shape = [BS, n_nodes]
 
         # Compute energy score between predictions and sample.
-        return self._energy_score(targets, preds, **kwargs)
+        return self._energy_score(obs, preds, **kwargs)
 
     def _energy_score(self, targets, preds, **kwargs) -> tuple[torch.Tensor, dict]:
         """Loss function based on the energy score.
@@ -51,7 +51,7 @@ class EnergyScoreLoss(SubLoss):
         return loss, {"loss": loss, "estimated-true distance": s1.mean(), "estimated-estimated distance": s2.mean()}
 
 
-class ATELoss(SubLoss):
+class ATELoss(Loss):
     """ Compute ATE from the model. """
     def __init__(self, cfg: Config, model: SEM2):
         """
@@ -67,7 +67,7 @@ class ATELoss(SubLoss):
         self.Y_node = cfg.Y_node
         self.bs = cfg.bs
 
-    def forward(self, Xs, targets, **kwargs) -> tuple[torch.Tensor, dict]:
+    def forward(self, obs, **kwargs) -> tuple[torch.Tensor, dict]:
         """ Evaluate ATE by intervening on D in the model.
             n_samples: Number of samples to evaluate ATE on.
         """
@@ -89,13 +89,13 @@ class ATELoss(SubLoss):
         return ATE, {}
 
 
-class Loss:
+class SEM2Loss:
     """ Computes loss from Xs and targets, with the ability to combine multiple losses together.
         The Overall loss is:
             L = sum_i(weight_i * sub_loss_i)
         Sub losses call the model to get predictions and compute the loss.
     """
-    sub_losses: list[tuple[SubLoss, float]]
+    sub_losses: list[tuple[Loss, float]]
 
     def __init__(self, cfg: Config, model: SEM2):
         self.device = cfg.device
@@ -109,13 +109,13 @@ class Loss:
 
         self.sub_losses = sub_losses
 
-    def forward(self, Xs, targets) -> tuple[torch.Tensor, dict]:
+    def forward(self, observations) -> tuple[torch.Tensor, dict]:
         """ Compute the combined loss. """
         total_loss = torch.tensor(0.0, device=self.device)
         metrics = {}
         # Weighted sum of sub losses
         for sub_loss, weight in self.sub_losses:
-            sub_loss_value, sub_metrics = sub_loss.forward(Xs, targets)
+            sub_loss_value, sub_metrics = sub_loss.forward(observations)
             total_loss += weight * sub_loss_value
             metrics.update(sub_metrics)
         return total_loss, metrics

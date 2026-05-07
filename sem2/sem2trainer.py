@@ -5,7 +5,7 @@ import time
 import logging
 
 from .model import SEM2
-from .loss import Loss
+from .sem2loss import SEM2Loss
 from .config import Config, get_config
 
 logger = logging.getLogger(__name__)
@@ -22,7 +22,7 @@ def get_optimiser(model: nn.Module, cfg) -> torch.optim.Optimizer:
         raise ValueError(f"Invalid optimiser: {cfg.optim}")
 
 
-class Trainer:
+class SEM2Trainer:
     def __init__(self, cfg: Config, sem: SEM2, ds: Iterable):
         """ Trainer class. Handles training a SEM2 model.
         Args:
@@ -36,7 +36,7 @@ class Trainer:
         self.ds = ds
         self.device = cfg.device
 
-        self.loss_fn = Loss(cfg, sem)
+        self.loss_fn = SEM2Loss(cfg, sem)
         self.optim = get_optimiser(sem, cfg)
 
     def train(self):
@@ -69,7 +69,7 @@ class Trainer:
 
         Xs, targets = batch
         # Compute loss
-        loss, loss_metrics = self.loss_fn.forward(Xs, targets)
+        loss, loss_metrics = self.loss_fn.forward(targets)
         # Calculate gradients and update model parameters
         loss.backward()
         self.optim.step()
@@ -90,7 +90,7 @@ def main():
     sem_model = SEM2(model_formula, device=cfg.device)
 
 
-    trainer = Trainer(cfg, sem_model, [(0, 0)])
+    trainer = SEM2Trainer(cfg, sem_model, [[0, 0]])
     trainer.train()
 
 
