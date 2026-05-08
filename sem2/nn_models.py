@@ -82,12 +82,12 @@ class _LinearModel(nn.Module):
 @dataclass
 class MLPConfig:
     """Configuration for the MLP model.  (to move to our default configs folder once we decide on it) """
-    input_dim: Optional[int] = None
-    hidden_dims: list = field(default_factory=lambda: [128, 128, 128])
-    output_dim: int = 1
-    prob_output: bool = False
-    dropout: float = 0.0
-    activation: str = "relu"
+    input_dim: Optional[int] = None                                     # Input dimension
+    hidden_dims: list = field(default_factory=lambda: [128, 128, 128]) # List of hidden layer dimensions
+    output_dim: int = 1                                                  # Output dimension
+    prob_output: bool = False                                           # If True, applies Sigmoid to the output to output within range [0, 1]
+    dropout: float = 0.0                                                # Dropout probability for regularization. 0 means no dropout
+    activation: str = "relu"                                            # Activation function to use.
 
     def __post_init__(self):
         self.hidden_dims = list(self.hidden_dims)
@@ -106,7 +106,10 @@ ACTIVATION_FUNCTIONS = {
 
 
 class MLP(nn.Module):
-
+    """
+    Args:
+        config (MLPConfig): Configuration object for the MLP. If None, uses default values.
+    """
     def __init__(self, config: MLPConfig = None, device="cpu"):
         super().__init__()
 
@@ -114,9 +117,11 @@ class MLP(nn.Module):
             config = MLPConfig()
 
         layers = []
+        # Combine input_dim and hidden_dims to create the architecture
         all_dims = [config.input_dim] + config.hidden_dims
         activation_fn = ACTIVATION_FUNCTIONS[config.activation]
 
+        # Add hidden layers with selected activation and optional dropout
         for i in range(len(all_dims) - 1):
             layers.append(nn.Linear(all_dims[i], all_dims[i + 1]))
             layers.append(activation_fn())
@@ -128,6 +133,7 @@ class MLP(nn.Module):
         if config.prob_output:
             layers.append(nn.Sigmoid())
 
+        # Wrap the layers in a Sequential module
         self.net = nn.Sequential(*layers)
         self.cfg = config
         self.to(device)
