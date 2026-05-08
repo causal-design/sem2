@@ -275,7 +275,7 @@ class SEM2(DAG, nn.Module):
                 node = NodeExogenous(node_name, ns.rhs, out_dim=out_dim, device=device)
 
             elif ns.node_type == "mlp":
-                # rhs guaranteed by _expand_rhs to be flat n(a,b,...) — no nesting
+                # Good to note: rhs guaranteed by _expand_rhs to be flat n(a,b,...) since no nesting
                 node = NodeMLP(node_name, ns.rhs, ns.predecessors, cfg, predecessor_nodes, device=device)
 
             elif ns.node_type == "linear":
