@@ -10,15 +10,14 @@ if TYPE_CHECKING:
 class SEM2EvaluationFunctional(ABC):
     """ An evaluation functional takes in the SEM2 model, data and returns a scalar metric.
             phi : F X V -> R
-            for SEM2 function F, vector V and R output scalar.
+            for SEM2 function F, vector (or similar object) V and R output scalar.
         The input vector may not necessarily be used. An additional dictionary is returned that contains useful debug / tracking information.
         Must always return a scalar value.
     """
     model: SEM2
 
     @abstractmethod
-    def evaluate(self, data: torch.Tensor, **kwargs) -> tuple[torch.Tensor, dict]:
-        """ data.shape = [bs, ...] """
+    def evaluate(self, *args, **kwargs) -> tuple[torch.Tensor, dict]:
         pass
 
 
@@ -44,8 +43,8 @@ class EnergyScore(SEM2EvaluationFunctional):
         """Loss function based on the energy score.
 
         Args:
-            targets (torch.Tensor): iid samples from the true distribution of. Shape = [..., data_dim]
-            preds (torch.Tensor): Predicted. shape = [..., data_dim]
+            targets (torch.Tensor): iid samples from the true distribution of. Shape = [bs, ...]
+            preds (torch.Tensor): Predicted. shape = [bs, ...]
         Returns:
             loss (torch.Tensor): energy loss.
             metrics (dict): dictionary of useful metrics.
@@ -54,8 +53,35 @@ class EnergyScore(SEM2EvaluationFunctional):
         s1 = torch.linalg.vector_norm(preds - targets, 2, dim=-1) ** self.beta
         s2 = (torch.cdist(preds, preds, 2) ** self.beta) * m / (m - 1)
 
-        loss = (s1 - s2 / 2).mean()
-        return loss, {"loss": loss, "estimated-true distance": s1.mean(), "estimated-estimated distance": s2.mean()}
+        energy_score = (s1 - s2 / 2).mean()
+        return energy_score, {"energy_score": energy_score, "estimated-true distance": s1.mean(), "estimated-estimated distance": s2.mean()}
+
+
+class MeanPotentialOutcome(SEM2EvaluationFunctional):
+    """ Expected potential outcome:
+            E[target_node | do(intervene_node = set_value)]
+    """
+
+    def __init__(self, target_node: str, intervene_node: str, cfg: Config, model: SEM2):
+        self.model = model
+        self.device = cfg.device
+        self.intervene_node = intervene_node
+        self.target_node = target_node
+
+    def evaluate(self, set_value: torch.Tensor, **kwargs) -> tuple[torch.Tensor, dict]:
+        """ Get potential outcome, setting 'set_node' equal to 'set_value'.
+                E[target_node | do(intervene_node = set_value)]
+
+            Args:
+                set_value: the value to set the node to. Shape = [BS, 1]
+        """
+        bs = set_value.shape[0]
+        # I think we will eventually modify this class to use a full 'PotentialOutcome'.
+        set_nodes = {self.intervene_node: set_value}
+        potential_outcome = self.model.forward(batch_size=bs, set_nodes=set_nodes, return_dict=True)   # shape = [BS, 1]
+        target_outcome = potential_outcome[self.target_node]
+        mean_target_outcome = target_outcome.mean()
+        return mean_target_outcome, {}
 
 
 class ATE(SEM2EvaluationFunctional):
@@ -63,36 +89,31 @@ class ATE(SEM2EvaluationFunctional):
     def __init__(self, cfg: Config, model: SEM2):
         """
         Compute the average treatment effect from the model. Treatment and Target nodes are selected from the config.
-            ATE = E[Y | T=0] - E[Y | T=1]
+            ATE = E[Y | do(T=0)] - E[Y | do(T=1)]
         Args:
             cfg: Config.
             model: The SEM2 model to evaluate ATE on. Must have methods to generate eps_y and eps_u, and a forward() method that can take set_nodes.
         """
         self.model = model
         self.device = cfg.device
-        self.T_node = cfg.T_node
-        self.Y_node = cfg.Y_node
         self.bs = cfg.bs
+        # Set up potential outcome
+        T_node, Y_node = cfg.T_node, cfg.Y_node       # This might be changed when graph setup is finalized.
+        self.treat_pot_out = MeanPotentialOutcome(Y_node, T_node, cfg, model)
 
-    def evaluate(self, observations, **kwargs) -> tuple[torch.Tensor, dict]:
-        """ Evaluate ATE by intervening on D in the model.
-            n_samples: Number of samples to evaluate ATE on.
-        """
+    def evaluate(self, *args, **kwargs) -> tuple[torch.Tensor, dict]:
+        """ Evaluate ATE by intervening on treatment node in the model."""
 
         t0 = torch.zeros([self.bs, 1], device=self.device, dtype=torch.long)
         t1 = torch.ones([self.bs, 1], device=self.device, dtype=torch.long)
 
         # Preds for Y | T=0
-        set_nodes = {self.T_node: t0}
-        preds_t0 = self.model.forward(batch_size=self.bs, set_nodes=set_nodes, return_dict=True)
+        pot_out_t0, _ = self.treat_pot_out.evaluate(t0)
         # Preds for Y | T=1
-        set_nodes = {self.T_node: t1}
-        prob_t1 = self.model.forward(batch_size=self.bs, set_nodes=set_nodes, return_dict=True)
+        pot_out_t1, _ = self.treat_pot_out.evaluate(t1)
 
         # ATE = E[Y | T=0] - E[Y | T=1]
-        y_t0 = preds_t0[self.Y_node]
-        y_t1 = prob_t1[self.Y_node]
-        ATE = (y_t0 - y_t1).mean()
+        ATE = pot_out_t0 - pot_out_t1
         return ATE, {}
 
 
