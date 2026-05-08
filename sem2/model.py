@@ -1,4 +1,5 @@
 import re
+from dataclasses import dataclass, field
 from graphlib import TopologicalSorter, CycleError
 import torch
 from torch import nn
@@ -23,28 +24,69 @@ class DAG:
         model_formula:     The original formula string.
         formula_list:      Expanded, one-node-per-entry formula list.
         input_node:        Set of node names that appear on any LHS.
+        node_specs:        Dict of node_name -> NodeSpec. Single source of
+                           truth for graph structure — built once, read by SEM2.
         graph:             Dict of node_name -> list of predecessor names.
+                           Derived from node_specs for topological sorting.
         topological_order: Node names in topologically sorted order.
     """
+
+    @dataclass
+    class NodeSpec:
+        """Parsed specification of a single node from the formula string.
+        NESTED inside DAG as it is a DAG implementation detail it is not part
+        of the public API and should NOT be used outside of DAG and SEM2.
+
+        Fields:
+            name:         Node name (LHS of formula).
+            rhs:          Raw RHS string after expansion.
+            node_type:    One of "exogenous", "linear", "mlp".
+            predecessors: Ordered list of predecessor node names.
+            coefficients: One entry per predecessor for linear nodes.
+                            float -> fixed at that value (e.g. 1.0, -0.5)
+                            None  -> learned weight
+                          Empty list for exogenous and mlp nodes.
+        """
+        name: str
+        rhs: str
+        node_type: str
+        predecessors: list[str]
+        coefficients: list[float | None] = field(default_factory=list)
 
     def __init__(self, model_formula: str):
         self.model_formula = model_formula
         self.formula_list, self.input_node = self._parse_formula(model_formula)
 
-        # Build raw graph: name + predecessors (strings only)
-        self.graph: dict[str, list[str]] = {}
+        # Build node_specs: single parse, stored as NodeSpec objects
+        self.node_specs: dict[str, DAG.NodeSpec] = {}
         for formula in self.formula_list:
             if "~" in formula:
-                lhs, _ = formula.split("~")
-                self.graph[lhs] = []
+                lhs, rhs = formula.split("~")
+                self.node_specs[lhs] = DAG.NodeSpec(
+                    name=lhs, rhs=rhs, node_type="exogenous", predecessors=[],
+                )
             elif "<-" in formula:
                 lhs, rhs = formula.split("<-")
                 if rhs.startswith("n("):
                     predecessors = rhs[2:-1].split(",")
+                    self.node_specs[lhs] = DAG.NodeSpec(
+                        name=lhs, rhs=rhs, node_type="mlp", predecessors=predecessors,
+                    )
                 else:
                     terms = rhs.split("+")
-                    predecessors = [self._parse_linear_term(t)[1] for t in terms]
-                self.graph[lhs] = predecessors
+                    parsed_terms = [self._parse_linear_term(t) for t in terms]
+                    self.node_specs[lhs] = DAG.NodeSpec(
+                        name=lhs,
+                        rhs=rhs,
+                        node_type="linear",
+                        predecessors=[name for _, name in parsed_terms],
+                        coefficients=[coeff for coeff, _ in parsed_terms],
+                    )
+
+        # Derive graph from node_specs for topological sorting
+        self.graph: dict[str, list[str]] = {
+            name: ns.predecessors for name, ns in self.node_specs.items()
+        }
 
         try:
             self.topological_order: list[str] = list(
@@ -201,55 +243,56 @@ class SEM2(DAG, nn.Module):
         self.device = device
 
         node_cfgs = node_cfgs if node_cfgs is not None else {}
-        name_to_node = self._build_nodes(node_cfgs, device)
+        name_to_node = self._build_and_initialize_nodes(node_cfgs, device)
 
         assert len(node_cfgs) == 0, \
             f"The following nodes were given but not found in formula: {list(node_cfgs.keys())}"
-
-        self._initialize_nodes(name_to_node)
 
         # Register all nodes as submodules so PyTorch tracks parameters
         self.layer = nn.ModuleDict(name_to_node)
         self.layer.to(device)
 
-    def _build_nodes(self, node_cfgs: dict, device: str) -> dict:
-        """Instantiate SEM2Node objects from the parsed formula list.
+    def _build_and_initialize_nodes(self, node_cfgs: dict, device: str) -> dict:
+        """Build and initialize all SEM2Node objects from DAG.node_specs.
+
+        Two passes are required:
+          Pass 1 — instantiate all nodes (must all exist before any can be
+                   initialized, since initialization requires predecessor objects).
+          Pass 2 — initialize in topological order, passing each node its
+                   actual predecessor SEM2Node objects so it can set up its
+                   internal model (weights, MLP, buffers, etc.).
+
         Pops configs from node_cfgs as nodes are built — any remaining keys
         after this call indicate unused / misspelled configs.
         """
         name_to_node = {}
-        for formula in self.formula_list:
-            if "~" in formula:
-                lhs, rhs = formula.split("~")
-                out_dim = node_cfgs.pop(lhs, 1)
-                node = NodeExogenous(lhs, rhs, out_dim=out_dim, device=device)
 
-            elif "<-" in formula:
-                lhs, rhs = formula.split("<-")
-                cfg = node_cfgs.pop(lhs, None)
+        # ── Pass 1: instantiate ───────────────────────────────────────────────
+        for name, ns in self.node_specs.items():
+            cfg = node_cfgs.pop(name, None)
 
-                if rhs.startswith("n("):
-                    # Good to note : rhs guaranteed by _expand_rhs to be flat n(a,b,...) since no nesting
-                    predecessors = rhs[2:-1].split(",")
-                    node = NodeMLP(lhs, rhs, predecessors, cfg, device=device)
-                else:
-                    terms = rhs.split("+")
-                    parsed = [self._parse_linear_term(t) for t in terms]
-                    coefficients = [coeff for coeff, _ in parsed]
-                    predecessors = [name for _, name in parsed]
-                    node = NodeLinear(lhs, rhs, predecessors, coefficients, cfg, device=device)
+            if ns.node_type == "exogenous":
+                out_dim = cfg if isinstance(cfg, int) else 1
+                node = NodeExogenous(name, ns.rhs, out_dim=out_dim, device=device)
+
+            elif ns.node_type == "mlp":
+                # Good to note: rhs guaranteed by _expand_rhs to be flat n(a,b,...) since no nesting
+                node = NodeMLP(name, ns.rhs, ns.predecessors, cfg, device=device)
+
+            elif ns.node_type == "linear":
+                node = NodeLinear(
+                    name, ns.rhs, ns.predecessors, ns.coefficients, cfg, device=device
+                )
 
             name_to_node[node.name] = node
-        return name_to_node
 
-    def _initialize_nodes(self, name_to_node: dict):
-        """Call initialize_model() on each node in topological order,
-        passing in the actual predecessor node objects.
-        """
+        # ── Pass 2: initialize in topological order ───────────────────────────
         for node_name in self.topological_order:
             node = name_to_node[node_name]
             predecessor_nodes = [name_to_node[p] for p in node.predecessors]
             node.initialize_model(predecessor_nodes)
+
+        return name_to_node
 
     def forward(
         self,
