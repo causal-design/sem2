@@ -1,7 +1,6 @@
 """
 Test suite for SEM2.
 Run with:  python -m pytest tests/ -v
-from the 'SEM2 Refactor' directory.
 """
 
 import sys, os
@@ -331,6 +330,56 @@ class TestDAG:
         dag = DAG("e1, e2 ~ Normal(0,1); x <- e1; y <- x + e2")
         assert len(dag.topological_order) == 4
 
+    # ── NodeSpec ──────────────────────────────────────────────────────────────
+
+    def test_node_spec_is_dag_nested_class(self):
+        """NodeSpec is a DAG implementation detail — must be accessed via DAG.NodeSpec."""
+        dag = DAG("e ~ Normal(0,1)")
+        assert isinstance(dag.node_specs["e"], DAG.NodeSpec)
+
+    def test_node_specs_keys_match_graph(self):
+        dag = DAG("e1, e2 ~ Normal(0,1); y <- e1 + e2")
+        assert set(dag.node_specs.keys()) == set(dag.graph.keys())
+
+    def test_node_spec_exogenous(self):
+        dag = DAG("e ~ Normal(0,1)")
+        ns = dag.node_specs["e"]
+        assert ns.node_type == "exogenous"
+        assert ns.predecessors == []
+        assert ns.coefficients == []
+
+    def test_node_spec_linear(self):
+        dag = DAG("e1, e2 ~ Normal(0,1); y <- 1*e1 + e2")
+        ns = dag.node_specs["y"]
+        assert ns.node_type == "linear"
+        assert ns.predecessors == ["e1", "e2"]
+        assert ns.coefficients == [1.0, None]
+
+    def test_node_spec_mlp(self):
+        dag = DAG("e1, e2 ~ Normal(0,1); y <- n(e1,e2)")
+        ns = dag.node_specs["y"]
+        assert ns.node_type == "mlp"
+        assert ns.predecessors == ["e1", "e2"]
+        assert ns.coefficients == []
+
+    def test_node_spec_linear_negative_coeff(self):
+        dag = DAG("e1, e2 ~ Normal(0,1); y <- -1*e1 + 0.5*e2")
+        ns = dag.node_specs["y"]
+        assert ns.coefficients == [-1.0, 0.5]
+
+    def test_node_spec_intermediate_mlp(self):
+        """Mixed formula creates an intermediate NodeSpec for the MLP part."""
+        dag = DAG("e1, e2, e3 ~ Normal(0,1); y <- n(e1,e2) + e3")
+        intermediates = [k for k in dag.node_specs if k.startswith("y:")]
+        assert len(intermediates) == 1
+        assert dag.node_specs[intermediates[0]].node_type == "mlp"
+
+    def test_graph_derived_from_node_specs(self):
+        """graph must be consistent with node_specs predecessors."""
+        dag = DAG("e1, e2 ~ Normal(0,1); x <- e1; y <- x + e2")
+        for name, ns in dag.node_specs.items():
+            assert dag.graph[name] == ns.predecessors
+
     # ── _parse_linear_term ────────────────────────────────────────────────────
 
     def test_parse_no_prefix(self):
@@ -392,7 +441,7 @@ class TestSEM2Inheritance:
         with pytest.raises(AssertionError):
             make_model("e ~ Normal(0,1); y <- e",
                        cfgs={"nonexistent": LinearNodeConfig()})
-            
+
     def test_node_exogenous_inherits_sem2node(self):
         """NodeExogenous must inherit from SEM2Node.
         If you add a new node type, add a corresponding test here.
@@ -421,6 +470,7 @@ class TestSEM2Inheritance:
         assert isinstance(node, SEM2Node), (
             f"NodeMLP does not inherit from SEM2Node"
         )
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # 6. Formula parser (via SEM2)
