@@ -100,7 +100,7 @@ class SEM2Loss(SEM2EvaluationFunctional):
     """ Computes the loss from overall loss from observations, with the ability to combine multiple losses together.
         The Overall loss is:
             L = sum_i(weight_i * sub_loss_i)
-        Sub losses call the model to get predictions and compute the loss.
+        Loss components call the model to get predictions and compute the loss.
     """
     loss_components: list[tuple[SEM2EvaluationFunctional, float]]
 
