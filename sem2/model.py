@@ -253,44 +253,37 @@ class SEM2(DAG, nn.Module):
         self.layer.to(device)
 
     def _build_and_initialize_nodes(self, node_cfgs: dict, device: str) -> dict:
-        """Build and initialize all SEM2Node objects from DAG.node_specs.
+        """Build all SEM2Node objects from DAG.node_specs in topological order.
 
-        Two passes are required:
-          Pass 1 — instantiate all nodes (must all exist before any can be
-                   initialized, since initialization requires predecessor objects).
-          Pass 2 — initialize in topological order, passing each node its
-                   actual predecessor SEM2Node objects so it can set up its
-                   internal model (weights, MLP, buffers, etc.).
+        Because we iterate in topological order, every node's predecessors are
+        guaranteed to already exist in name_to_node by the time we reach it.
+        This means input_dim can be computed immediately and each node is fully
+        constructed in a single pass.
 
         Pops configs from node_cfgs as nodes are built — any remaining keys
         after this call indicate unused / misspelled configs.
         """
         name_to_node = {}
 
-        # ── Pass 1: instantiate ───────────────────────────────────────────────
-        for name, ns in self.node_specs.items():
-            cfg = node_cfgs.pop(name, None)
+        for node_name in self.topological_order:
+            ns = self.node_specs[node_name]
+            cfg = node_cfgs.pop(node_name, None)
+            predecessor_nodes = [name_to_node[p] for p in ns.predecessors]
 
             if ns.node_type == "exogenous":
                 out_dim = cfg if isinstance(cfg, int) else 1
-                node = NodeExogenous(name, ns.rhs, out_dim=out_dim, device=device)
+                node = NodeExogenous(node_name, ns.rhs, out_dim=out_dim, device=device)
 
             elif ns.node_type == "mlp":
-                # Good to note: rhs guaranteed by _expand_rhs to be flat n(a,b,...) since no nesting
-                node = NodeMLP(name, ns.rhs, ns.predecessors, cfg, device=device)
+                # rhs guaranteed by _expand_rhs to be flat n(a,b,...) — no nesting
+                node = NodeMLP(node_name, ns.rhs, ns.predecessors, cfg, predecessor_nodes, device=device)
 
             elif ns.node_type == "linear":
                 node = NodeLinear(
-                    name, ns.rhs, ns.predecessors, ns.coefficients, cfg, device=device
+                    node_name, ns.rhs, ns.predecessors, ns.coefficients, cfg, predecessor_nodes, device=device
                 )
 
-            name_to_node[node.name] = node
-
-        # ── Pass 2: initialize in topological order ───────────────────────────
-        for node_name in self.topological_order:
-            node = name_to_node[node_name]
-            predecessor_nodes = [name_to_node[p] for p in node.predecessors]
-            node.initialize_model(predecessor_nodes)
+            name_to_node[node_name] = node
 
         return name_to_node
 
