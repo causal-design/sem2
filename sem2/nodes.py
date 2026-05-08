@@ -10,9 +10,10 @@ from .nn_models import _LinearConfig, _LinearModel, LinearNodeConfig, MLPConfig,
 
 class SEM2Node(ABC, nn.Module):
     """Base class for all SEM nodes.
-    Initialisation is a two-step process:
-        1) Node is constructed (graph topology not yet known).
-        2) initialize_model() is called once the full graph is built.
+    Conceptually every node is a random variable:
+
+    Each node is fully initialised in __init__ ===> predecessor nodes must be passed in at construction time 
+    so input dimensions can be computed immediately.
     """
 
     name: str
@@ -55,10 +56,6 @@ class SEM2Node(ABC, nn.Module):
     def _forward_inner(self, x: list[torch.Tensor], batch_size: int = 1) -> torch.Tensor:
         pass
 
-    @abstractmethod
-    def initialize_model(self, predecessor_nodes: list['SEM2Node']):
-        pass
-
 
 # ── Exogenous ─────────────────────────────────────────────────────────────────
 
@@ -81,9 +78,6 @@ class NodeExogenous(SEM2Node):
     def _forward_inner(self, x: list[torch.Tensor], batch_size: int = 1) -> torch.Tensor:
         return self.dist.sample([batch_size, self.out_dim])
 
-    def initialize_model(self, predecessor_nodes: list[SEM2Node]):
-        pass  # no-op: distribution is fully set at __init__
-
 
 # ── Endogenous (abstract) ─────────────────────────────────────────────────────
 
@@ -105,9 +99,8 @@ class NodeLinear(NodeEndogenous):
         - float  -> fixed at that value (e.g. 1.0, -1.0, 0.5)
         - None   -> learned weight
 
-    Stored as a plain Python list until initialize_model(), where it is
-    expanded to match input_dim (accounting for predecessors with out_dim > 1)
-    and split into a boolean mask and a fixed-value tensor.
+    Coefficients are expanded to match input_dim (accounting for predecessors
+    with out_dim > 1) and split into a boolean mask and a fixed-value tensor.
     """
 
     def __init__(
@@ -117,22 +110,20 @@ class NodeLinear(NodeEndogenous):
         predecessors: list[str],
         coefficients: list[float | None],
         cfg: LinearNodeConfig | None,
+        predecessor_nodes: list[SEM2Node],
         device="cpu",
     ):
         super().__init__(name, rhs, predecessors, device=device)
         self.out_dim = cfg.output_dim if cfg is not None else 1
         self.use_bias = cfg.use_bias if cfg is not None else True
-        self._coefficients_raw: list[float | None] = coefficients
-        self.linear: _LinearModel | None = None  # set in initialize_model
 
-    def initialize_model(self, predecessor_nodes: list[SEM2Node]):
         input_dim = sum(p.out_dim for p in predecessor_nodes)
 
         # Expand coefficients from [n_predecessors] -> [input_dim],
         # repeating each entry for all of that predecessor's output dims.
         expanded = [
             coeff
-            for coeff, p in zip(self._coefficients_raw, predecessor_nodes)
+            for coeff, p in zip(coefficients, predecessor_nodes)
             for _ in range(p.out_dim)
         ]
 
@@ -140,15 +131,16 @@ class NodeLinear(NodeEndogenous):
         fix_mask = [c is not None for c in expanded]
         fix_vals = [c if c is not None else 0.0 for c in expanded]
 
-        self.fix_weights = torch.tensor(fix_mask, dtype=torch.bool, device=self.device).unsqueeze(0)
-        self._fixed_vals = torch.tensor(fix_vals, dtype=torch.float32, device=self.device).unsqueeze(0)
+        self.fix_weights = torch.tensor(fix_mask, dtype=torch.bool, device=device).unsqueeze(0)
+        self._fixed_vals = torch.tensor(fix_vals, dtype=torch.float32, device=device).unsqueeze(0)
+        self._ones = torch.ones(1, input_dim, device=device)
 
         internal_cfg = _LinearConfig(
             input_dim=input_dim,
             output_dim=self.out_dim,
             use_bias=self.use_bias,
         )
-        self.linear = _LinearModel(internal_cfg, device=self.device)
+        self.linear = _LinearModel(internal_cfg, device=device)
 
     def _effective_weight(self) -> torch.Tensor:
         """Learned weights where free, fixed values where pinned."""
@@ -170,10 +162,6 @@ class NodeNonlinear(NodeEndogenous, ABC):
         super().__init__(name, rhs, predecessors, device=device)
 
     @abstractmethod
-    def initialize_model(self, predecessor_nodes: list[SEM2Node]):
-        pass
-
-    @abstractmethod
     def _forward_inner(self, x: list[torch.Tensor], batch_size: int = 1) -> torch.Tensor:
         pass
 
@@ -185,16 +173,22 @@ class NodeMLP(NodeNonlinear):
     Predecessors are parsed upstream in DAG (rhs is flat n(a,b,...) post-expansion).
     """
 
-    def __init__(self, name: str, rhs: str, predecessors: list[str], cfg: MLPConfig | None, device="cpu"):
+    def __init__(
+        self,
+        name: str,
+        rhs: str,
+        predecessors: list[str],
+        cfg: MLPConfig | None,
+        predecessor_nodes: list[SEM2Node],
+        device="cpu",
+    ):
         super().__init__(name, rhs, predecessors, device=device)
         self.cfg = cfg if cfg is not None else MLPConfig()
-        self.mlp: MLP | None = None  # set in initialize_model
 
-    def initialize_model(self, predecessor_nodes: list[SEM2Node]):
         input_dim = sum(p.out_dim for p in predecessor_nodes)
         if self.cfg.input_dim is None:
             self.cfg.input_dim = input_dim
-        self.mlp = MLP(self.cfg, device=self.device)
+        self.mlp = MLP(self.cfg, device=device)
         self.out_dim = self.cfg.output_dim
 
     def _forward_inner(self, x: list[torch.Tensor], batch_size: int = 1) -> torch.Tensor:

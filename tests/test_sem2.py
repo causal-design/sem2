@@ -118,17 +118,14 @@ class TestNodeExogenous:
 
     def test_normal_shape(self):
         n = NodeExogenous("e", "Normal(0,1)", out_dim=1)
-        n.initialize_model([])
         assert n([], batch_size=BS).shape == (BS, 1)
 
     def test_multidim_shape(self):
         n = NodeExogenous("e", "Normal(0,1)", out_dim=3)
-        n.initialize_model([])
         assert n([], batch_size=BS).shape == (BS, 3)
 
     def test_beta_range(self):
         n = NodeExogenous("b", "Beta(0.5,0.5)", out_dim=1)
-        n.initialize_model([])
         out = n([], batch_size=100)
         assert out.min() >= 0.0 and out.max() <= 1.0
 
@@ -148,8 +145,7 @@ class TestNodeLinear:
             def __init__(self, d): self.out_dim = d
 
         pred_nodes = [FakeNode(d) for d in out_dims]
-        node = NodeLinear("y", "+".join(predecessors), predecessors, coefficients, cfg)
-        node.initialize_model(pred_nodes)
+        node = NodeLinear("y", "+".join(predecessors), predecessors, coefficients, cfg, pred_nodes)
         return node
 
     def test_basic_shape(self):
@@ -234,8 +230,7 @@ class TestNodeMLP:
             def __init__(self, d): self.out_dim = d
 
         pred_nodes = [FakeNode(d) for d in out_dims]
-        node = NodeMLP("y", rhs, predecessors, cfg)
-        node.initialize_model(pred_nodes)
+        node = NodeMLP("y", rhs, predecessors, cfg, pred_nodes)
         return node
 
     def test_output_shape(self):
@@ -677,7 +672,6 @@ class TestEdgeCases:
 
     def test_get_set_reset_value(self):
         n = NodeExogenous("e", "Normal(0,1)")
-        n.initialize_model([])
         t = torch.tensor([[1.0]])
         n.set_value(t)
         assert torch.allclose(n.get_value(), t)
