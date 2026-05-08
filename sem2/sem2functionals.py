@@ -121,9 +121,9 @@ class SEM2Loss(SEM2EvaluationFunctional):
         total_loss = torch.tensor(0.0, device=self.device)
         metrics = {}
         # Weighted sum of sub losses
-        for sub_loss, weight in self.loss_components:
-            sub_loss_value, sub_metrics = sub_loss.evaluate(observations, **kwargs)
-            total_loss += weight * sub_loss_value
+        for loss_comp, weight in self.loss_components:
+            loss_comp_value, sub_metrics = loss_comp.evaluate(observations, **kwargs)
+            total_loss += weight * loss_comp_value
             metrics.update(sub_metrics)         # Potential collisions here.
         return total_loss, metrics
 
