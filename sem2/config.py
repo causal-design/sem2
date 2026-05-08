@@ -29,7 +29,7 @@ class Config(BaseModel):
     energy_score_beta: float = 1.
     # ATE
     use_ate: bool = True
-    ate_weight: float = 0.01
+    ate_weight: float = 0.0
     T_node: str = "D"
     Y_node: str = "Y"
 

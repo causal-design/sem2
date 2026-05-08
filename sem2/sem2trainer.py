@@ -5,7 +5,7 @@ import time
 import logging
 
 from .model import SEM2
-from .sem2loss import SEM2Loss
+from .sem2functionals import SEM2Loss
 from .config import Config, get_config
 
 logger = logging.getLogger(__name__)
@@ -69,7 +69,7 @@ class SEM2Trainer:
 
         Xs, targets = batch
         # Compute loss
-        loss, loss_metrics = self.loss_fn.forward(targets)
+        loss, loss_metrics = self.loss_fn.evaluate(targets)
         # Calculate gradients and update model parameters
         loss.backward()
         self.optim.step()
