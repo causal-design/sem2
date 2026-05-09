@@ -81,7 +81,9 @@ class _LinearModel(nn.Module):
 
 @dataclass
 class MLPConfig:
-    """Configuration for the MLP model.  (to move to our default configs folder once we decide on it) """
+    """Configuration for the MLP model.  (to move to our default configs folder once we decide on it) 
+    Public API for configuring the MLP model.
+    """
     input_dim: Optional[int] = None                                     # Input dimension
     hidden_dims: list = field(default_factory=lambda: [128, 128, 128]) # List of hidden layer dimensions
     output_dim: int = 1                                                  # Output dimension
@@ -105,10 +107,11 @@ ACTIVATION_FUNCTIONS = {
 }
 
 
-class MLP(nn.Module):
+class _MLP(nn.Module):
     """
     Args:
         config (MLPConfig): Configuration object for the MLP. If None, uses default values.
+        Not part of the public API and used internally by NodeMLP.
     """
     def __init__(self, config: MLPConfig = None, device="cpu"):
         super().__init__()
