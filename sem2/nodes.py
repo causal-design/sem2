@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 import torch
 from torch import nn
 
-from .nn_models import _LinearConfig, _LinearModel, LinearNodeConfig, MLPConfig, MLP
+from .nn_models import _LinearConfig, _LinearModel, LinearNodeConfig, MLPConfig, _MLP
 
 
 # ── Base ──────────────────────────────────────────────────────────────────────
@@ -188,7 +188,7 @@ class NodeMLP(NodeNonlinear):
         input_dim = sum(p.out_dim for p in predecessor_nodes)
         if self.cfg.input_dim is None:
             self.cfg.input_dim = input_dim
-        self.mlp = MLP(self.cfg, device=device)
+        self.mlp = _MLP(self.cfg, device=device)
         self.out_dim = self.cfg.output_dim
 
     def _forward_inner(self, x: list[torch.Tensor], batch_size: int = 1) -> torch.Tensor:
