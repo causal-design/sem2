@@ -32,6 +32,8 @@ class SEM2Node(ABC, nn.Module):
         self.formula = name + "=" + rhs
         self.value = None
 
+        self.formula = lhs + "=" + rhs
+
     def __repr__(self):
         return self.formula
 
