@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 
 if TYPE_CHECKING:
     from .model import SEM2
-    from .config import Config
+    from .default_configs import TrainingConfig
 
 
 class SEM2EvaluationFunctional(ABC):
@@ -22,7 +22,7 @@ class SEM2EvaluationFunctional(ABC):
 
 
 class EnergyScore(SEM2EvaluationFunctional):
-    def __init__(self, cfg: Config, model: SEM2):
+    def __init__(self, cfg: TrainingConfig, model: SEM2):
         """" Energy score loss function. Sample from our model and compute energy score between our sample and the true sample.
         """
         self.model = model
@@ -62,7 +62,7 @@ class MeanPotentialOutcome(SEM2EvaluationFunctional):
             E[target_node | do(intervene_node = set_value)]
     """
 
-    def __init__(self, target_node: str, intervene_node: str, cfg: Config, model: SEM2):
+    def __init__(self, target_node: str, intervene_node: str, cfg: TrainingConfig, model: SEM2):
         self.model = model
         self.device = cfg.device
         self.intervene_node = intervene_node
@@ -86,12 +86,12 @@ class MeanPotentialOutcome(SEM2EvaluationFunctional):
 
 class ATE(SEM2EvaluationFunctional):
     """ Compute ATE from the model. """
-    def __init__(self, cfg: Config, model: SEM2):
+    def __init__(self, cfg: TrainingConfig, model: SEM2):
         """
         Compute the average treatment effect from the model. Treatment and Target nodes are selected from the config.
             ATE = E[Y | do(T=0)] - E[Y | do(T=1)]
         Args:
-            cfg: Config.
+            cfg: TrainingConfig.
             model: The SEM2 model to evaluate ATE on. Must have methods to generate eps_y and eps_u, and a forward() method that can take set_nodes.
         """
         self.model = model
@@ -112,8 +112,8 @@ class ATE(SEM2EvaluationFunctional):
         # Preds for Y | T=1
         pot_out_t1, _ = self.treat_pot_out.evaluate(t1)
 
-        # ATE = E[Y | T=0] - E[Y | T=1]
-        ATE = pot_out_t0 - pot_out_t1
+        # ATE = E[Y | T=1] - E[Y | T=0]
+        ATE = pot_out_t1 - pot_out_t0
         return ATE, {}
 
 
@@ -125,11 +125,11 @@ class SEM2Loss(SEM2EvaluationFunctional):
     """
     loss_components: list[tuple[SEM2EvaluationFunctional, float]]
 
-    def __init__(self, cfg: Config, model: SEM2):
+    def __init__(self, cfg: TrainingConfig, model: SEM2):
         self.device = cfg.device
         loss_components = []
         if cfg.use_energy_score:
-            loss_components.append((EnergyScore(cfg, model), cfg.ate_weight))
+            loss_components.append((EnergyScore(cfg, model), cfg.energy_score_weight))
         if cfg.use_ate:
             loss_components.append((ATE(cfg, model), cfg.ate_weight))
         if cfg.use_mmd:
