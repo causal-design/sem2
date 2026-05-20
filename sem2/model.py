@@ -164,6 +164,12 @@ class DAG:
             "nonlinear"
             "linear_discrete"      "nonlinear_discrete"
             "linear_mixed_exog"    "nonlinear_mixed_exog"
+
+        Note: sem_type is currently descriptive metadata (it does not change
+        core SEM behaviour. Its intended future use is to gate type-specific
+        functionals (e.g. closed-form log-likelihood for linear_gaussian) and
+        guide the user toward a specialised implementation when one exists,
+        without requiring SEM subclasses.)
         """
         exog_specs = [ns for ns in self.node_specs.values() if ns.node_type == "exogenous"]
         endog_specs = [ns for ns in self.node_specs.values() if ns.node_type != "exogenous"]
