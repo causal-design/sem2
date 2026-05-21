@@ -86,7 +86,7 @@ class NodeExogenous(SEM2Node, ABC):
 
 # ── Exogenous — torch.distributions implementation ────────────────────────────
 
-class NodeExogenousTorch(NodeExogenous):
+class NodeExogenousTorchD(NodeExogenous):
     """Exogenous node backed by a torch.distributions.Distribution.
     The distribution name and parameters are parsed upstream in DAG and
     handed in as already-validated objects so this constructor stays simple.

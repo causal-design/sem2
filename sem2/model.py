@@ -6,7 +6,7 @@ import torch
 from torch import nn
 
 from .nn_models import LinearNodeConfig
-from .nodes import NodeExogenous, NodeExogenousTorch, NodeLinear, NodeMLP
+from .nodes import NodeExogenousTorchD, NodeLinear, NodeMLP
 
 
 # Discrete distributions in torch.distributions. This is used for sem_type detection. Probably would be nice to move it elsewhere or compact all the formula parsing.
@@ -423,7 +423,7 @@ class SEM2(DAG, nn.Module):
 
         For exogenous nodes the distribution is instantiated here from the
         already-validated dist_name and dist_params stored on the NodeSpec,
-        keeping NodeExogenousTorch.__init__ free of parsing logic.
+        keeping NodeExogenousTorchD.__init__ free of parsing logic.
         """
         name_to_node = {}
 
@@ -441,7 +441,7 @@ class SEM2(DAG, nn.Module):
                     for p in ns.dist_params
                 ]
                 dist = dist_class(*dist_params)
-                node = NodeExogenousTorch(node_name, ns.rhs, dist, out_dim=out_dim, device=device)
+                node = NodeExogenousTorchD(node_name, ns.rhs, dist, out_dim=out_dim, device=device)
 
             elif ns.node_type == "mlp":
                 # Good to note: rhs guaranteed by _expand_rhs to be flat n(a,b,...) since no nesting

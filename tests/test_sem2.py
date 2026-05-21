@@ -14,7 +14,7 @@ from sem2.nn_models import _LinearConfig, _LinearModel, _MLP
 from sem2.default_configs import LinearNodeConfig, MLPConfig, TrainingConfig
 from sem2.nodes import (
     RandomVariable, SEM2Node,
-    NodeExogenous, NodeExogenousTorch,
+    NodeExogenous, NodeExogenousTorchD,
     NodeEndogenous, NodeLinear, NodeNonlinear, NodeMLP,
 )
 from sem2.model import DAG, SEM2
@@ -120,7 +120,7 @@ class TestMLP:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestNodeExogenous:
-    """Tests for NodeExogenousTorch — the concrete torch-backed exogenous node.
+    """Tests for NodeExogenousTorchD — the concrete torch-backed exogenous node.
     We build instances via the SEM2 model so the distribution is parsed and
     instantiated through the normal path (DAG -> SEM2._build_and_initialize_nodes).
     """
@@ -143,17 +143,17 @@ class TestNodeExogenous:
         assert m.layer["e"].predecessors == []
 
     def test_is_node_exogenous_torch(self):
-        """Concrete exogenous node must be NodeExogenousTorch."""
+        """Concrete exogenous node must be NodeExogenousTorchD."""
         m = make_model("e ~ Normal(0,1)")
-        assert isinstance(m.layer["e"], NodeExogenousTorch)
+        assert isinstance(m.layer["e"], NodeExogenousTorchD)
 
     def test_is_node_exogenous_abstract_base(self):
-        """NodeExogenousTorch must satisfy the NodeExogenous abstract interface."""
+        """NodeExogenousTorchD must satisfy the NodeExogenous abstract interface."""
         m = make_model("e ~ Normal(0,1)")
         assert isinstance(m.layer["e"], NodeExogenous)
 
     def test_dist_attribute_set(self):
-        """NodeExogenousTorch must have a dist attribute after construction."""
+        """NodeExogenousTorchD must have a dist attribute after construction."""
         m = make_model("e ~ Normal(0,1)")
         assert m.layer["e"].dist is not None
 
@@ -463,7 +463,7 @@ class TestSEM2Inheritance:
                        cfgs={"nonexistent": LinearNodeConfig()})
 
     def test_node_exogenous_inherits_sem2node(self):
-        """NodeExogenousTorch must inherit from SEM2Node (via NodeExogenous).
+        """NodeExogenousTorchD must inherit from SEM2Node (via NodeExogenous).
         If you add a new node type, add a corresponding test here.
         """
         m = make_model("e ~ Normal(0,1)")
@@ -735,15 +735,15 @@ class TestClassHierarchy:
         assert inspect.isabstract(NodeExogenous)
 
     def test_node_exogenous_torch_is_concrete(self):
-        """NodeExogenousTorch is the concrete torch implementation."""
+        """NodeExogenousTorchD is the concrete torch implementation."""
         m = make_model("e ~ Normal(0,1)")
         node = m.layer["e"]
-        assert type(node) is NodeExogenousTorch
+        assert type(node) is NodeExogenousTorchD
 
     def test_node_exogenous_torch_inherits_chain(self):
         m = make_model("e ~ Normal(0,1)")
         node = m.layer["e"]
-        assert isinstance(node, NodeExogenousTorch)
+        assert isinstance(node, NodeExogenousTorchD)
         assert isinstance(node, NodeExogenous)
         assert isinstance(node, SEM2Node)
         assert isinstance(node, RandomVariable)
