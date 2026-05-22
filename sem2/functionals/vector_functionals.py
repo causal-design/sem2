@@ -7,7 +7,7 @@ if TYPE_CHECKING:
     from torch import Tensor
 
 
-class Sample(SEM2DataFunctional, SEM2VectorFunctional):
+class SampleContinuous(SEM2DataFunctional, SEM2VectorFunctional):
     """ Sample from the SEM2 model by drawing samples from each node.
         This class allows specifying interventional / fixed nodes.
     """

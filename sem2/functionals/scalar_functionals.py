@@ -1,7 +1,7 @@
 from typing import TYPE_CHECKING
 import torch
 from sem2.functionals.functional_base import SEM2ScalarFunctional, SEM2SelfFunctional, SEM2DataFunctional
-from sem2.functionals.vector_functionals import Sample, PotentialOutcome
+from sem2.functionals.vector_functionals import SampleContinuous, PotentialOutcome
 
 if TYPE_CHECKING:
     from model import SEM2
@@ -16,7 +16,7 @@ class EnergyScore(SEM2SelfFunctional, SEM2ScalarFunctional):
         self.bs = cfg.bs
         self.beta = cfg.energy_score_beta
 
-        self.continuous_sampler = Sample(model)
+        self.continuous_sampler = SampleContinuous(model)
 
     def evaluate(self, observations, **kwargs) -> tuple[torch.Tensor, dict]:
         # Draw sample from the model
