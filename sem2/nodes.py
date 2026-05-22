@@ -1,14 +1,27 @@
 import re
 from abc import ABC, abstractmethod
+from typing import Optional
 import torch
 from torch import nn
+from torch.distributions import Distribution
 
 from .nn_models import _LinearConfig, _LinearModel, LinearNodeConfig, MLPConfig, _MLP
 
 
+# ── RandomVariable ────────────────────────────────────────────────────────────
+
+class RandomVariable(ABC):
+    """Abstract base for any node that is conceptually a random variable.
+    Carries an optional dist attribute — concrete subclasses that wrap a
+    torch.distributions.Distribution should set it; purely deterministic
+    endogenous nodes leave it as None.
+    """
+    dist: Optional[Distribution] = None
+
+
 # ── Base ──────────────────────────────────────────────────────────────────────
 
-class SEM2Node(ABC, nn.Module):
+class SEM2Node(RandomVariable, ABC, nn.Module):
     """Base class for all SEM nodes.
     Conceptually every node is a random variable:
 
@@ -31,8 +44,6 @@ class SEM2Node(ABC, nn.Module):
         self.device = device
         self.formula = name + "=" + rhs
         self.value = None
-
-        self.formula = lhs + "=" + rhs
 
     def __repr__(self):
         return self.formula
@@ -62,20 +73,25 @@ class SEM2Node(ABC, nn.Module):
 # ── Exogenous ─────────────────────────────────────────────────────────────────
 
 class NodeExogenous(SEM2Node):
-    """Exogenous node. No parents. Wraps a torch distribution and samples from it."""
+    """Exogenous node with a known distribution.
+    An exogenous node has no parents. The distribution is instantiated upstream
+    in SEM2._build_and_initialize_nodes and passed in here directly.
 
-    def __init__(self, name: str, rhs: str, out_dim: int = 1, device="cpu"):
+    Attributes:
+        dist: the instantiated torch Distribution object.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        rhs: str,
+        dist: Distribution,
+        out_dim: int = 1,
+        device="cpu",
+    ):
         super().__init__(name, rhs, predecessors=[], device=device)
         self.out_dim = out_dim
-
-        match = re.match(r'^([A-Za-z0-9]+)\((.*)\)$', rhs)
-        dist_name = match.group(1)
-        dist_class = getattr(torch.distributions, dist_name)
-        params = [
-            torch.tensor(float(p), device=device, dtype=torch.float32)
-            for p in match.group(2).split(',')
-        ]
-        self.dist = dist_class(*params)
+        self.dist = dist
 
     def _forward_inner(self, x: list[torch.Tensor], batch_size: int = 1) -> torch.Tensor:
         return self.dist.sample([batch_size, self.out_dim])
@@ -103,6 +119,9 @@ class NodeLinear(NodeEndogenous):
 
     Coefficients are expanded to match input_dim (accounting for predecessors
     with out_dim > 1) and split into a boolean mask and a fixed-value tensor.
+
+    fix_weights, _fixed_vals, and _ones are registered as buffers so they move
+    correctly with model.to(device) and are not counted as learnable parameters.
     """
 
     def __init__(
@@ -129,13 +148,23 @@ class NodeLinear(NodeEndogenous):
             for _ in range(p.out_dim)
         ]
 
-        # Split into mask and fixed values tensor, both shape [1, input_dim]
+        # Split into mask and fixed values tensor, both shape [1, input_dim].
+        # Registered as buffers so they move with model.to(device).
         fix_mask = [c is not None for c in expanded]
         fix_vals = [c if c is not None else 0.0 for c in expanded]
 
-        self.fix_weights = torch.tensor(fix_mask, dtype=torch.bool, device=device).unsqueeze(0)
-        self._fixed_vals = torch.tensor(fix_vals, dtype=torch.float32, device=device).unsqueeze(0)
-        self._ones = torch.ones(1, input_dim, device=device)
+        self.register_buffer(
+            "fix_weights",
+            torch.tensor(fix_mask, dtype=torch.bool, device=device).unsqueeze(0),
+        )
+        self.register_buffer(
+            "_fixed_vals",
+            torch.tensor(fix_vals, dtype=torch.float32, device=device).unsqueeze(0),
+        )
+        self.register_buffer(
+            "_ones",
+            torch.ones(1, input_dim, device=device),
+        )
 
         internal_cfg = _LinearConfig(
             input_dim=input_dim,

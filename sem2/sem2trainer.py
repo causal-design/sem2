@@ -6,7 +6,7 @@ import logging
 
 from .model import SEM2
 from .sem2functionals import SEM2Loss
-from .config import Config, get_config
+from .default_configs import TrainingConfig
 
 logger = logging.getLogger(__name__)
 
@@ -23,10 +23,10 @@ def get_optimiser(model: nn.Module, cfg) -> torch.optim.Optimizer:
 
 
 class SEM2Trainer:
-    def __init__(self, cfg: Config, sem: SEM2, ds: Iterable):
+    def __init__(self, cfg: TrainingConfig, sem: SEM2, ds: Iterable):
         """ Trainer class. Handles training a SEM2 model.
         Args:
-            cfg: Config object containing training configuration.
+            cfg: TrainingConfig object containing training configuration.
             sem: SEM2 model to train.
             ds: Iterable dataset to train on. Each element should be a batch of data.
         """
@@ -82,7 +82,7 @@ class SEM2Trainer:
 
 def main():
     logging.basicConfig(level=logging.INFO)
-    cfg = get_config()
+    cfg = TrainingConfig()
 
     formula1 = "u ~ Uniform(0,1); eps_d ~ Uniform(0,1); eps_y ~ Uniform(0,1); eps_z ~ Uniform(0,1);"
     formula2 = "Z <- n(eps_z); D <- n(Z, u, eps_d); Y <- n(D, u, eps_y)"
