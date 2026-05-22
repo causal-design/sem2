@@ -456,38 +456,6 @@ class SEM2(DAG, nn.Module):
 
         return name_to_node
 
-    def forward(
-        self,
-        batch_size: int = 1,
-        set_nodes: dict[str, torch.Tensor] = None,
-        return_dict: bool = False,
-    ):
-        """Run a forward pass through the SEM.
-
-        Args:
-            batch_size: Number of samples to draw.
-            set_nodes: Optional dict of node name -> tensor to pin specific node
-                       values (e.g. for interventions). Shape: [batch_size, out_dim].
-            return_dict: If True, return {node_name: tensor}. Otherwise return a
-                         single concatenated tensor of shape [batch_size, total_out_dim].
-        """
-        set_nodes = set_nodes if set_nodes is not None else {}
-        assert set(set_nodes.keys()).issubset(self.layer.keys()), \
-            f"set_nodes contains unknown nodes: {set(set_nodes.keys()) - set(self.layer.keys())}"
-
-        for node_name in self.topological_order:
-            v = self.layer[node_name]
-            if node_name in set_nodes:
-                v.set_value(set_nodes[node_name])
-            else:
-                pred_values = [self.layer[p].get_value() for p in v.predecessors]
-                v(pred_values, batch_size)
-
-        if return_dict:
-            return {name: self.layer[name].get_value() for name in self.topological_order}
-        return torch.cat([self.layer[name].get_value() for name in self.topological_order], dim=-1)
-
-
 # ══════════════════════════════════════════════════════════════════════════════
 # TO be moved to integration tests later I think
 def main():
