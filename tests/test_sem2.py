@@ -10,9 +10,14 @@ import pytest
 import torch
 import torch.nn as nn
 
-from sem2.nn_models import _LinearConfig, _LinearModel, MLPConfig, _MLP, LinearNodeConfig
-from sem2.nodes import NodeExogenous, NodeLinear, NodeMLP, SEM2Node
-from sem2.model import DAG, SEM2
+from sem2.nn_models import _LinearConfig, _LinearModel, _MLP
+from sem2.default_configs import LinearNodeConfig, MLPConfig, TrainingConfig
+from sem2.nodes import (
+    RandomVariable, SEM2Node,
+    NodeExogenous,
+    NodeEndogenous, NodeLinear, NodeNonlinear, NodeMLP,
+)
+from sem2.model import DAG, SEM2, SEMType
 
 #probably should breakdown into smaller test files but for now is fine I guess
 
@@ -115,22 +120,39 @@ class TestMLP:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestNodeExogenous:
+    """Tests for NodeExogenous — the concrete exogenous node.
+    We build instances via the SEM2 model so the distribution is parsed and
+    instantiated through the normal path (DAG -> SEM2._build_and_initialize_nodes).
+    """
 
     def test_normal_shape(self):
-        n = NodeExogenous("e", "Normal(0,1)", out_dim=1)
-        assert n([], batch_size=BS).shape == (BS, 1)
+        m = make_model("e ~ Normal(0,1)")
+        assert m.layer["e"]([], batch_size=BS).shape == (BS, 1)
 
     def test_multidim_shape(self):
-        n = NodeExogenous("e", "Normal(0,1)", out_dim=3)
-        assert n([], batch_size=BS).shape == (BS, 3)
+        m = make_model("e ~ Normal(0,1)", cfgs={"e": 3})
+        assert m.layer["e"]([], batch_size=BS).shape == (BS, 3)
 
     def test_beta_range(self):
-        n = NodeExogenous("b", "Beta(0.5,0.5)", out_dim=1)
-        out = n([], batch_size=100)
+        m = make_model("b ~ Beta(0.5,0.5)")
+        out = m.layer["b"]([], batch_size=100)
         assert out.min() >= 0.0 and out.max() <= 1.0
 
     def test_no_predecessors(self):
-        assert NodeExogenous("e", "Normal(0,1)").predecessors == []
+        m = make_model("e ~ Normal(0,1)")
+        assert m.layer["e"].predecessors == []
+
+    def test_is_node_exogenous(self):
+        """Concrete exogenous node must be NodeExogenous."""
+        m = make_model("e ~ Normal(0,1)")
+        assert isinstance(m.layer["e"], NodeExogenous)
+
+
+
+    def test_dist_attribute_set(self):
+        """NodeExogenous must have a dist attribute after construction."""
+        m = make_model("e ~ Normal(0,1)")
+        assert m.layer["e"].dist is not None
 
 
 class TestNodeLinear:
@@ -438,11 +460,11 @@ class TestSEM2Inheritance:
                        cfgs={"nonexistent": LinearNodeConfig()})
 
     def test_node_exogenous_inherits_sem2node(self):
-        """NodeExogenous must inherit from SEM2Node.
+        """NodeExogenous must inherit from SEM2Node (via NodeExogenous).
         If you add a new node type, add a corresponding test here.
         """
-        n = NodeExogenous("e", "Normal(0,1)")
-        assert isinstance(n, SEM2Node), (
+        m = make_model("e ~ Normal(0,1)")
+        assert isinstance(m.layer["e"], SEM2Node), (
             f"NodeExogenous does not inherit from SEM2Node"
         )
 
@@ -671,7 +693,8 @@ class TestEdgeCases:
         assert run(m)["e"].shape == (BS, 3)
 
     def test_get_set_reset_value(self):
-        n = NodeExogenous("e", "Normal(0,1)")
+        m = make_model("e ~ Normal(0,1)")
+        n = m.layer["e"]
         t = torch.tensor([[1.0]])
         n.set_value(t)
         assert torch.allclose(n.get_value(), t)
@@ -679,10 +702,259 @@ class TestEdgeCases:
         assert n.get_value() is None
 
     def test_repr(self):
-        assert "e" in repr(NodeExogenous("e", "Normal(0,1)"))
+        m = make_model("e ~ Normal(0,1)")
+        assert "e" in repr(m.layer["e"])
 
     def test_mixed_fixed_learned_coefficients(self):
         m = make_model("e1, e2 ~ Normal(0,1); y <- 1*e1 + e2")
         node = m.layer["y"]
         assert node.fix_weights[0, 0].item() is True
         assert node.fix_weights[0, 1].item() is False
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 9. Class hierarchy
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestClassHierarchy:
+    """Verify the RandomVariable -> SEM2Node -> Node* inheritance chain."""
+
+    def test_random_variable_is_abstract(self):
+        """RandomVariable cannot be instantiated directly."""
+        import inspect
+        assert inspect.isabstract(RandomVariable) or hasattr(RandomVariable, '__abstractmethods__')
+
+    def test_sem2node_inherits_random_variable(self):
+        assert issubclass(SEM2Node, RandomVariable)
+
+    def test_node_exogenous_torch_is_concrete(self):
+        """NodeExogenous is the concrete torch implementation."""
+        m = make_model("e ~ Normal(0,1)")
+        node = m.layer["e"]
+        assert type(node) is NodeExogenous
+
+    def test_node_exogenous_torch_inherits_chain(self):
+        m = make_model("e ~ Normal(0,1)")
+        node = m.layer["e"]
+        assert isinstance(node, NodeExogenous)
+        assert isinstance(node, NodeExogenous)
+        assert isinstance(node, SEM2Node)
+        assert isinstance(node, RandomVariable)
+        assert isinstance(node, nn.Module)
+
+    def test_node_linear_inherits_chain(self):
+        m = make_model("e ~ Normal(0,1); y <- e")
+        node = m.layer["y"]
+        assert isinstance(node, NodeLinear)
+        assert isinstance(node, NodeEndogenous)
+        assert isinstance(node, SEM2Node)
+        assert isinstance(node, RandomVariable)
+        assert isinstance(node, nn.Module)
+
+    def test_node_linear_dist_is_none(self):
+        """Endogenous nodes have no distribution — dist stays None."""
+        m = make_model("e ~ Normal(0,1); y <- e")
+        assert m.layer["y"].dist is None
+
+    def test_node_mlp_inherits_chain(self):
+        m = make_model("e ~ Normal(0,1); y <- n(e)")
+        node = m.layer["y"]
+        assert isinstance(node, NodeMLP)
+        assert isinstance(node, NodeNonlinear)
+        assert isinstance(node, NodeEndogenous)
+        assert isinstance(node, SEM2Node)
+        assert isinstance(node, RandomVariable)
+
+    def test_node_nonlinear_is_abstract(self):
+        import inspect
+        assert inspect.isabstract(NodeNonlinear)
+
+    def test_node_endogenous_is_abstract(self):
+        import inspect
+        assert inspect.isabstract(NodeEndogenous)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 10. Formula parsing robustness
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestFormulaParsingRobustness:
+    """Verify that malformed exogenous formulas raise clear, descriptive errors."""
+
+    def test_unknown_distribution_raises(self):
+        """An unrecognised distribution name should raise ValueError, not AttributeError."""
+        with pytest.raises(ValueError, match="Unknown distribution"):
+            DAG("e ~ NotARealDist(0,1)")
+
+    def test_malformed_rhs_no_parens_raises(self):
+        """Missing parentheses should raise ValueError."""
+        with pytest.raises(ValueError, match="Could not parse"):
+            DAG("e ~ Normal")
+
+    def test_non_numeric_param_raises(self):
+        """Non-numeric distribution parameters should raise ValueError."""
+        with pytest.raises(ValueError, match="Non-numeric"):
+            DAG("e ~ Normal(a,b)")
+
+    def test_typo_suggestion_in_error(self):
+        """A near-miss distribution name should suggest the correct one."""
+        try:
+            DAG("e ~ Normla(0,1)")
+            assert False, "Should have raised"
+        except ValueError as exc:
+            # The error should mention the typo'd name
+            assert "Normla" in str(exc)
+
+    def test_valid_distributions_parse(self):
+        """A sample of valid distributions should parse without error."""
+        for formula in [
+            "e ~ Normal(0,1)",
+            "e ~ Beta(0.5,0.5)",
+            "e ~ Bernoulli(0.3)",
+            "e ~ Poisson(2.0)",
+            "e ~ Exponential(1.0)",
+        ]:
+            dag = DAG(formula)
+            ns = dag.node_specs["e"]
+            assert ns.dist_name is not None
+            assert ns.dist_params is not None
+
+    def test_dist_name_stored_on_node_spec(self):
+        dag = DAG("e ~ Normal(0,1)")
+        assert dag.node_specs["e"].dist_name == "Normal"
+
+    def test_dist_params_stored_on_node_spec(self):
+        dag = DAG("e ~ Normal(0,1)")
+        assert dag.node_specs["e"].dist_params == ["0", "1"]
+
+    def test_beta_params_stored(self):
+        dag = DAG("e ~ Beta(0.5,0.5)")
+        assert dag.node_specs["e"].dist_params == ["0.5", "0.5"]
+
+
+class TestSEMTypeDetection:
+    """Verify sem_type is correctly inferred from the formula."""
+
+    def test_linear_gaussian(self):
+        dag = DAG("e ~ Normal(0,1); y <- e")
+        assert dag.sem_type == SEMType.LINEAR_GAUSSIAN
+
+    def test_linear_gaussian_multi_node(self):
+        dag = DAG("e1, e2 ~ Normal(0,1); y <- e1 + e2")
+        assert dag.sem_type == SEMType.LINEAR_GAUSSIAN
+
+    def test_linear_non_gaussian(self):
+        dag = DAG("e ~ Beta(0.5,0.5); y <- e")
+        assert dag.sem_type == SEMType.LINEAR
+
+    def test_nonlinear(self):
+        dag = DAG("e1, e2 ~ Normal(0,1); y <- n(e1,e2)")
+        assert dag.sem_type == SEMType.NONLINEAR
+
+    def test_mixed_functional_form_is_nonlinear(self):
+        """Linear + MLP in same model → nonlinear (MLP supersedes linear)."""
+        dag = DAG("e1, e2, e3 ~ Normal(0,1); y <- n(e1,e2) + e3")
+        assert dag.sem_type == SEMType.NONLINEAR
+
+    def test_discrete(self):
+        dag = DAG("e ~ Bernoulli(0.5); y <- e")
+        assert dag.sem_type == SEMType.LINEAR_DISCRETE
+
+    def test_discrete_poisson(self):
+        dag = DAG("e ~ Poisson(2.0); y <- e")
+        assert dag.sem_type == SEMType.LINEAR_DISCRETE
+
+    def test_mixed_discrete(self):
+        dag = DAG("e ~ Bernoulli(0.5); y <- n(e)")
+        assert dag.sem_type == SEMType.NONLINEAR_DISCRETE
+
+    def test_exogenous_only_gaussian(self):
+        dag = DAG("e1, e2 ~ Normal(0,1)")
+        assert dag.sem_type == SEMType.LINEAR_GAUSSIAN
+
+    def test_sem2_inherits_sem_type(self):
+        """SEM2 exposes the same sem_type as the underlying DAG."""
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            m = make_model("e ~ Normal(0,1); y <- e")
+        assert m.sem_type == SEMType.LINEAR_GAUSSIAN
+
+    def test_sem2_init_emits_warning(self):
+        """SEM2.__init__ should warn the user about the detected sem_type."""
+        with pytest.warns(UserWarning, match="sem_type"):
+            SEM2("e ~ Normal(0,1); y <- e")
+
+
+    def test_nonlinear_discrete(self):
+        dag = DAG("e ~ Bernoulli(0.5); y <- n(e)")
+        assert dag.sem_type == SEMType.NONLINEAR_DISCRETE
+
+    def test_linear_mixed_exog(self):
+        """Some continuous + some discrete exog nodes, linear endogenous."""
+        dag = DAG("e1 ~ Normal(0,1); e2 ~ Bernoulli(0.5); y <- e1 + e2")
+        assert dag.sem_type == SEMType.LINEAR_MIXED_EXOG
+
+    def test_nonlinear_mixed_exog(self):
+        """Some continuous + some discrete exog nodes, MLP endogenous."""
+        dag = DAG("e1 ~ Normal(0,1); e2 ~ Bernoulli(0.5); y <- n(e1, e2)")
+        assert dag.sem_type == SEMType.NONLINEAR_MIXED_EXOG
+
+    def test_exogenous_only_non_gaussian(self):
+        dag = DAG("e1, e2 ~ Beta(0.5,0.5)")
+        assert dag.sem_type == SEMType.LINEAR
+
+    def test_exogenous_only_discrete(self):
+        dag = DAG("e ~ Bernoulli(0.3)")
+        assert dag.sem_type == SEMType.LINEAR_DISCRETE
+
+    def test_nonlinear_continuous(self):
+        """Pure MLP with continuous noise is nonlinear."""
+        dag = DAG("e ~ Normal(0,1); y <- n(e)")
+        assert dag.sem_type == SEMType.NONLINEAR
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 11. register_buffer correctness
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestRegisterBuffer:
+    """Verify that NodeLinear's static tensors are proper buffers."""
+
+    def _make_linear_node(self, coefficients, out_dims=None):
+        n_preds = len(coefficients)
+        out_dims = out_dims or [1] * n_preds
+        predecessors = [f"p{i}" for i in range(n_preds)]
+
+        class FakeNode:
+            def __init__(self, d): self.out_dim = d
+
+        pred_nodes = [FakeNode(d) for d in out_dims]
+        return NodeLinear("y", "+".join(predecessors), predecessors, coefficients, None, pred_nodes)
+
+    def test_fix_weights_is_buffer(self):
+        """fix_weights must be a registered buffer, not a plain attribute."""
+        node = self._make_linear_node([1.0, None])
+        assert "fix_weights" in dict(node.named_buffers())
+
+    def test_fixed_vals_is_buffer(self):
+        node = self._make_linear_node([1.0, None])
+        assert "_fixed_vals" in dict(node.named_buffers())
+
+    def test_ones_is_buffer(self):
+        node = self._make_linear_node([None])
+        assert "_ones" in dict(node.named_buffers())
+
+    def test_buffers_not_parameters(self):
+        """Buffers must not appear in named_parameters (they are not learnable)."""
+        node = self._make_linear_node([1.0, None])
+        param_names = {n for n, _ in node.named_parameters()}
+        assert "fix_weights" not in param_names
+        assert "_fixed_vals" not in param_names
+        assert "_ones" not in param_names
+
+    def test_buffers_move_with_to_cpu(self):
+        """model.to('cpu') must move buffers — smoke test on CPU (always available)."""
+        node = self._make_linear_node([1.0, None])
+        node.to("cpu")
+        for name, buf in node.named_buffers():
+            assert buf.device.type == "cpu", f"Buffer '{name}' not on cpu"

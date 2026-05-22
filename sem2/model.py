@@ -1,4 +1,6 @@
 import re
+import warnings
+from enum import Enum
 from dataclasses import dataclass, field
 from graphlib import TopologicalSorter, CycleError
 import torch
@@ -7,7 +9,47 @@ from torch import nn
 from .nn_models import LinearNodeConfig
 from .nodes import NodeExogenous, NodeLinear, NodeMLP
 
-#things to change in this file : Move main to integration tests. Got 3 examples for now to show the interface
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SEM type
+# ══════════════════════════════════════════════════════════════════════════════
+
+class SEMType(Enum):
+    """Enum representing the inferred type of a SEM.
+
+    Two independent axes:
+      Functional form : LINEAR (all endogenous nodes are linear)
+                        NONLINEAR (any MLP present — supersedes linear)
+      Exogenous noise : continuous, discrete, or mixed
+
+    LINEAR_GAUSSIAN is a special case of LINEAR where all exogenous nodes
+    are Normal or MultivariateNormal (the classical SEM).
+
+    Note: sem_type is descriptive metadata. It does not change core SEM
+    behaviour. Its intended future use is to gate type-specific functionals
+    (e.g. closed-form log-likelihood for LINEAR_GAUSSIAN) and guide the user
+    toward a specialised implementation when one exists.
+    """
+    LINEAR_GAUSSIAN      = "linear_gaussian"
+    LINEAR               = "linear"
+    NONLINEAR            = "nonlinear"
+    LINEAR_DISCRETE      = "linear_discrete"
+    NONLINEAR_DISCRETE   = "nonlinear_discrete"
+    LINEAR_MIXED_EXOG    = "linear_mixed_exog"
+    NONLINEAR_MIXED_EXOG = "nonlinear_mixed_exog"
+
+# Discrete distributions in torch.distributions. This is used for sem_type detection. Probably would be nice to move it elsewhere or compact all the formula parsing.
+_DISCRETE_DIST_NAMES = frozenset({
+    "Bernoulli",
+    "Binomial",
+    "Categorical",
+    "Geometric",
+    "Multinomial",
+    "NegativeBinomial",
+    "OneHotCategorical",
+    "Poisson",
+})
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # DAG
@@ -25,10 +67,12 @@ class DAG:
         formula_list:      Expanded, one-node-per-entry formula list.
         input_node:        Set of node names that appear on any LHS.
         node_specs:        Dict of node_name -> NodeSpec. Single source of
-                           truth for graph structure — built once, read by SEM2.
+                           truth for graph structure : built once, read by SEM2.
         graph:             Dict of node_name -> list of predecessor names.
                            Derived from node_specs for topological sorting.
         topological_order: Node names in topologically sorted order.
+        sem_type:          Inferred SEMType enum member. See SEMType above for
+                           the full taxonomy.
     """
 
     @dataclass
@@ -46,12 +90,17 @@ class DAG:
                             float -> fixed at that value (e.g. 1.0, -0.5)
                             None  -> learned weight
                           Empty list for exogenous and mlp nodes.
+            dist_name:    Distribution name string for exogenous nodes (e.g. "Normal"),
+                          None for endogenous nodes.
+            dist_params:  Raw parameter strings for exogenous nodes, None for endogenous.
         """
         name: str
         rhs: str
         node_type: str
         predecessors: list[str]
         coefficients: list[float | None] = field(default_factory=list)
+        dist_name: str | None = None
+        dist_params: list[str] | None = None
 
     def __init__(self, model_formula: str):
         self.model_formula = model_formula
@@ -62,8 +111,10 @@ class DAG:
         for formula in self.formula_list:
             if "~" in formula:
                 lhs, rhs = formula.split("~")
+                dist_name, dist_params = self._parse_exogenous_rhs(lhs, rhs)
                 self.node_specs[lhs] = DAG.NodeSpec(
                     name=lhs, rhs=rhs, node_type="exogenous", predecessors=[],
+                    dist_name=dist_name, dist_params=dist_params,
                 )
             elif "<-" in formula:
                 lhs, rhs = formula.split("<-")
@@ -97,8 +148,118 @@ class DAG:
                 f"Formula contains a cycle. Please check your formula: {e.args[1]}"
             ) from None
 
+        self.sem_type: SEMType = self._infer_sem_type()
+
     def static_order(self):
         return iter(self.topological_order)
+
+    # ── SEM type inference ────────────────────────────────────────────────────
+
+    def _infer_sem_type(self) -> SEMType:
+        """Infer the SEM type from node_specs.
+
+        Two independent axes determine the type:
+
+        Functional-form axis:
+          - "linear"   : every endogenous node is NodeLinear (none are MLP).
+                         Only a fully-linear SEM can be treated with linear SEM methods.
+          - "nonlinear": at least one endogenous node is an MLP (supersedes linear,
+                         since linear is a special case of nonlinear).
+
+        Exogenous-noise axis:
+          - all continuous : every exog node uses a continuous distribution.
+          - all discrete   : every exog node uses a discrete distribution.
+          - mixed exog     : some exog nodes are continuous, some are discrete.
+
+        Within the all-continuous case, "linear_gaussian" is flagged separately
+        because all exog nodes are Normal or MultivariateNormal : the classical
+        textbook SEM with potential for closed-form solutions.
+
+        Exogenous-only models (no endogenous nodes) follow the same logic on
+        the noise axis and default to the "linear" functional-form label.
+
+        Returns a SEMType enum member.
+        """
+        exog_specs = [ns for ns in self.node_specs.values() if ns.node_type == "exogenous"]
+        endog_specs = [ns for ns in self.node_specs.values() if ns.node_type != "exogenous"]
+
+        # ── Functional-form axis ──────────────────────────────────────────────
+        # Any MLP present -> nonlinear; otherwise linear (including exog-only).
+        has_mlp = any(ns.node_type == "mlp" for ns in endog_specs)
+        func_label = "nonlinear" if has_mlp else "linear"
+
+        # ── Exogenous-noise axis ──────────────────────────────────────────────
+        n_discrete = sum(
+            1 for ns in exog_specs if ns.dist_name in _DISCRETE_DIST_NAMES
+        )
+        n_exog = len(exog_specs)
+
+        if n_discrete == 0:
+            # All exog nodes are continuous
+            _gaussian_names = {"Normal", "MultivariateNormal"}
+            is_all_gaussian = all(
+                ns.dist_name in _gaussian_names for ns in exog_specs if ns.dist_name
+            )
+            if func_label == "linear" and is_all_gaussian:
+                return SEMType.LINEAR_GAUSSIAN
+            return SEMType.LINEAR if func_label == "linear" else SEMType.NONLINEAR
+
+        if n_discrete == n_exog:
+            # All discrete
+            return SEMType.LINEAR_DISCRETE if func_label == "linear" else SEMType.NONLINEAR_DISCRETE
+
+        # Mixed exogenous (some continuous, some discrete)
+        return SEMType.LINEAR_MIXED_EXOG if func_label == "linear" else SEMType.NONLINEAR_MIXED_EXOG
+
+    # ── Exogenous rhs parsing (with error handling) ───────────────────────────
+
+    def _parse_exogenous_rhs(self, node_name: str, rhs: str) -> tuple[str, list[str]]:
+        """Parse and validate a '~' formula RHS into (dist_name, param_strings).
+
+        Raises a descriptive ValueError if the format is unrecognised or the
+        distribution name does not exist in torch.distributions.
+
+        Returns:
+            dist_name:   e.g. "Normal"
+            dist_params: e.g. ["0", "1"]
+        """
+        rhs = rhs.strip()
+        match = re.match(r'^([A-Za-z][A-Za-z0-9]*)\((.*)\)$', rhs, re.DOTALL)
+        if not match:
+            raise ValueError(
+                f"Could not parse exogenous formula for node '{node_name}': '{rhs}'. "
+                f"Expected format: DistributionName(param1, param2, ...) : "
+                f"e.g. Normal(0,1) or Beta(0.5,0.5)."
+            )
+
+        dist_name = match.group(1)
+        param_str = match.group(2).strip()
+
+        if not hasattr(torch.distributions, dist_name):
+            import difflib
+            available = [d for d in dir(torch.distributions) if d[0].isupper()]
+            close = difflib.get_close_matches(dist_name, available, n=3, cutoff=0.6)
+            suggestion = f" Did you mean: {close}?" if close else ""
+            raise ValueError(
+                f"Unknown distribution '{dist_name}' for node '{node_name}'.{suggestion} "
+                f"Must be a class in torch.distributions (e.g. Normal, Beta, Bernoulli)."
+            )
+
+        # Split params by comma, respecting nested parens (for future extensibility)
+        params = [p.strip() for p in param_str.split(",") if p.strip()]
+
+        # Validate each param can be parsed as a float: gives early feedback
+        for p in params:
+            try:
+                float(p)
+            except ValueError:
+                raise ValueError(
+                    f"Non-numeric parameter '{p}' in distribution '{dist_name}' "
+                    f"for node '{node_name}'. "
+                    f"All parameters must be numeric literals (e.g. Normal(0,1))."
+                )
+
+        return dist_name, params
 
     # ── Linear term parsing helper fx ───────────────────────────────────────
 
@@ -222,7 +383,7 @@ class DAG:
 # ══════════════════════════════════════════════════════════════════════════════
 
 class SEM2(DAG, nn.Module):
-    """Structural Equation Model — a DAG whose nodes are PyTorch modules.
+    """Structural Equation Model: a DAG whose nodes are PyTorch modules.
 
     Inherits graph structure and parsing from DAG, and parameter registration
     and training from nn.Module.
@@ -252,6 +413,12 @@ class SEM2(DAG, nn.Module):
         self.layer = nn.ModuleDict(name_to_node)
         self.layer.to(device)
 
+        # Inform the user what type of SEM they have built
+        warnings.warn(
+            f"[SEM2] Model '{model_formula}' detected as sem_type='{self.sem_type.value}'.",
+            stacklevel=2,
+        )
+
     def _build_and_initialize_nodes(self, node_cfgs: dict, device: str) -> dict:
         """Build all SEM2Node objects from DAG.node_specs in topological order.
 
@@ -260,8 +427,12 @@ class SEM2(DAG, nn.Module):
         This means input_dim can be computed immediately and each node is fully
         constructed in a single pass.
 
-        Pops configs from node_cfgs as nodes are built — any remaining keys
+        Pops configs from node_cfgs as nodes are built and any remaining keys
         after this call indicate unused / misspelled configs.
+
+        For exogenous nodes the distribution is instantiated here from the
+        already-validated dist_name and dist_params stored on the NodeSpec,
+        keeping NodeExogenous.__init__ free of parsing logic.
         """
         name_to_node = {}
 
@@ -272,7 +443,14 @@ class SEM2(DAG, nn.Module):
 
             if ns.node_type == "exogenous":
                 out_dim = cfg if isinstance(cfg, int) else 1
-                node = NodeExogenous(node_name, ns.rhs, out_dim=out_dim, device=device)
+                # Instantiate the torch distribution from pre-validated spec fields
+                dist_class = getattr(torch.distributions, ns.dist_name)
+                dist_params = [
+                    torch.tensor(float(p), device=device, dtype=torch.float32)
+                    for p in ns.dist_params
+                ]
+                dist = dist_class(*dist_params)
+                node = NodeExogenous(node_name, ns.rhs, dist, out_dim=out_dim, device=device)
 
             elif ns.node_type == "mlp":
                 # Good to note: rhs guaranteed by _expand_rhs to be flat n(a,b,...) since no nesting

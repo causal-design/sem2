@@ -1,32 +1,17 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-#Things to change in this file : The Public LinearNoddeConfig and the MLPConfig have to be moved to the default configs file once we make it
-
-# ── Linear ────────────────────────────────────────────────────────────────────
-
-@dataclass
-class LinearNodeConfig:
-    """Public Configuration for linear SEM nodes. (to move to our default configs folder once we decide on it)
-    Will have to discuss but my thoughts: 
-    1) input_dim is not exposed —> it is inferred from the graph structure.
-    2) init_weight_val and init_bias_val are not exposed since fixed coefficients are specified inline in the formula syntax (e.g. '1*x', '-0.5*x') 
-        rather than through config, keeping the model formula self-contained and readable.
-    """
-
-    # I want to expose output_dim and not forced to 1 since a linear node may output probabilities over discrete states (e.g. a discrete latent variable). The multi-output linear case
-    # is I think essentially a linear classifier / softmax layer, which is a valid SEM component (e.g. for use in exact marginalisation and other methods over discrete variables).
-    output_dim: int = 1
-
-    # Bias is the intercept term SO without it you force the linear relationship through the origin, which is a strong structural constraint. Default is True to allow learned offsets. 
-    # Set to False only if your model explicitly requires this constraint. (good to expose for some types of assumptions in experiments I think)
-    use_bias: bool = True
+# LinearNodeConfig and MLPConfig are the public user-facing node configs.
+# They live in default_configs and are re-exported here so internal node
+# constructors can import from a single place.
+from .default_configs import LinearNodeConfig, MLPConfig
 
 
+# ── Internal linear config + model ────────────────────────────────────────────
 
 @dataclass
 class _LinearConfig:
@@ -39,7 +24,7 @@ class _LinearConfig:
 
 
 class _LinearModel(nn.Module):
-    """Internal weighted linear layer. No SEM-specific logic. (basically masking is not done here)
+    """Internal weighted linear layer. No SEM-specific logic. (masking is not done here)
     Not part of the public API and used internally by NodeLinear.
     """
 
@@ -79,22 +64,6 @@ class _LinearModel(nn.Module):
 
 # ── MLP ───────────────────────────────────────────────────────────────────────
 
-@dataclass
-class MLPConfig:
-    """Configuration for the MLP model.  (to move to our default configs folder once we decide on it) 
-    Public API for configuring the MLP model.
-    """
-    input_dim: Optional[int] = None                                     # Input dimension
-    hidden_dims: list = field(default_factory=lambda: [128, 128, 128]) # List of hidden layer dimensions
-    output_dim: int = 1                                                  # Output dimension
-    prob_output: bool = False                                           # If True, applies Sigmoid to the output to output within range [0, 1]
-    dropout: float = 0.0                                                # Dropout probability for regularization. 0 means no dropout
-    activation: str = "relu"                                            # Activation function to use.
-
-    def __post_init__(self):
-        self.hidden_dims = list(self.hidden_dims)
-
-
 ACTIVATION_FUNCTIONS = {
     "linear": nn.Identity,
     "relu": nn.ReLU,
@@ -108,10 +77,10 @@ ACTIVATION_FUNCTIONS = {
 
 
 class _MLP(nn.Module):
-    """
+    """Internal MLP implementation. Not part of the public API and used internally by NodeMLP.
+
     Args:
         config (MLPConfig): Configuration object for the MLP. If None, uses default values.
-        Not part of the public API and used internally by NodeMLP.
     """
     def __init__(self, config: MLPConfig = None, device="cpu"):
         super().__init__()
