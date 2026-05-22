@@ -14,10 +14,10 @@ from sem2.nn_models import _LinearConfig, _LinearModel, _MLP
 from sem2.default_configs import LinearNodeConfig, MLPConfig, TrainingConfig
 from sem2.nodes import (
     RandomVariable, SEM2Node,
-    NodeExogenous, NodeExogenousTorchD,
+    NodeExogenous,
     NodeEndogenous, NodeLinear, NodeNonlinear, NodeMLP,
 )
-from sem2.model import DAG, SEM2
+from sem2.model import DAG, SEM2, SEMType
 
 #probably should breakdown into smaller test files but for now is fine I guess
 
@@ -120,7 +120,7 @@ class TestMLP:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestNodeExogenous:
-    """Tests for NodeExogenousTorchD — the concrete torch-backed exogenous node.
+    """Tests for NodeExogenous — the concrete exogenous node.
     We build instances via the SEM2 model so the distribution is parsed and
     instantiated through the normal path (DAG -> SEM2._build_and_initialize_nodes).
     """
@@ -142,18 +142,15 @@ class TestNodeExogenous:
         m = make_model("e ~ Normal(0,1)")
         assert m.layer["e"].predecessors == []
 
-    def test_is_node_exogenous_torch(self):
-        """Concrete exogenous node must be NodeExogenousTorchD."""
-        m = make_model("e ~ Normal(0,1)")
-        assert isinstance(m.layer["e"], NodeExogenousTorchD)
-
-    def test_is_node_exogenous_abstract_base(self):
-        """NodeExogenousTorchD must satisfy the NodeExogenous abstract interface."""
+    def test_is_node_exogenous(self):
+        """Concrete exogenous node must be NodeExogenous."""
         m = make_model("e ~ Normal(0,1)")
         assert isinstance(m.layer["e"], NodeExogenous)
 
+
+
     def test_dist_attribute_set(self):
-        """NodeExogenousTorchD must have a dist attribute after construction."""
+        """NodeExogenous must have a dist attribute after construction."""
         m = make_model("e ~ Normal(0,1)")
         assert m.layer["e"].dist is not None
 
@@ -463,7 +460,7 @@ class TestSEM2Inheritance:
                        cfgs={"nonexistent": LinearNodeConfig()})
 
     def test_node_exogenous_inherits_sem2node(self):
-        """NodeExogenousTorchD must inherit from SEM2Node (via NodeExogenous).
+        """NodeExogenous must inherit from SEM2Node (via NodeExogenous).
         If you add a new node type, add a corresponding test here.
         """
         m = make_model("e ~ Normal(0,1)")
@@ -729,21 +726,16 @@ class TestClassHierarchy:
     def test_sem2node_inherits_random_variable(self):
         assert issubclass(SEM2Node, RandomVariable)
 
-    def test_node_exogenous_is_abstract(self):
-        """NodeExogenous is abstract — should not be directly instantiatable."""
-        import inspect
-        assert inspect.isabstract(NodeExogenous)
-
     def test_node_exogenous_torch_is_concrete(self):
-        """NodeExogenousTorchD is the concrete torch implementation."""
+        """NodeExogenous is the concrete torch implementation."""
         m = make_model("e ~ Normal(0,1)")
         node = m.layer["e"]
-        assert type(node) is NodeExogenousTorchD
+        assert type(node) is NodeExogenous
 
     def test_node_exogenous_torch_inherits_chain(self):
         m = make_model("e ~ Normal(0,1)")
         node = m.layer["e"]
-        assert isinstance(node, NodeExogenousTorchD)
+        assert isinstance(node, NodeExogenous)
         assert isinstance(node, NodeExogenous)
         assert isinstance(node, SEM2Node)
         assert isinstance(node, RandomVariable)
@@ -844,40 +836,40 @@ class TestSEMTypeDetection:
 
     def test_linear_gaussian(self):
         dag = DAG("e ~ Normal(0,1); y <- e")
-        assert dag.sem_type == "linear_gaussian"
+        assert dag.sem_type == SEMType.LINEAR_GAUSSIAN
 
     def test_linear_gaussian_multi_node(self):
         dag = DAG("e1, e2 ~ Normal(0,1); y <- e1 + e2")
-        assert dag.sem_type == "linear_gaussian"
+        assert dag.sem_type == SEMType.LINEAR_GAUSSIAN
 
     def test_linear_non_gaussian(self):
         dag = DAG("e ~ Beta(0.5,0.5); y <- e")
-        assert dag.sem_type == "linear"
+        assert dag.sem_type == SEMType.LINEAR
 
     def test_nonlinear(self):
         dag = DAG("e1, e2 ~ Normal(0,1); y <- n(e1,e2)")
-        assert dag.sem_type == "nonlinear"
+        assert dag.sem_type == SEMType.NONLINEAR
 
     def test_mixed_functional_form_is_nonlinear(self):
         """Linear + MLP in same model → nonlinear (MLP supersedes linear)."""
         dag = DAG("e1, e2, e3 ~ Normal(0,1); y <- n(e1,e2) + e3")
-        assert dag.sem_type == "nonlinear"
+        assert dag.sem_type == SEMType.NONLINEAR
 
     def test_discrete(self):
         dag = DAG("e ~ Bernoulli(0.5); y <- e")
-        assert dag.sem_type == "linear_discrete"
+        assert dag.sem_type == SEMType.LINEAR_DISCRETE
 
     def test_discrete_poisson(self):
         dag = DAG("e ~ Poisson(2.0); y <- e")
-        assert dag.sem_type == "linear_discrete"
+        assert dag.sem_type == SEMType.LINEAR_DISCRETE
 
     def test_mixed_discrete(self):
         dag = DAG("e ~ Bernoulli(0.5); y <- n(e)")
-        assert dag.sem_type == "nonlinear_discrete"
+        assert dag.sem_type == SEMType.NONLINEAR_DISCRETE
 
     def test_exogenous_only_gaussian(self):
         dag = DAG("e1, e2 ~ Normal(0,1)")
-        assert dag.sem_type == "linear_gaussian"
+        assert dag.sem_type == SEMType.LINEAR_GAUSSIAN
 
     def test_sem2_inherits_sem_type(self):
         """SEM2 exposes the same sem_type as the underlying DAG."""
@@ -885,7 +877,7 @@ class TestSEMTypeDetection:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             m = make_model("e ~ Normal(0,1); y <- e")
-        assert m.sem_type == "linear_gaussian"
+        assert m.sem_type == SEMType.LINEAR_GAUSSIAN
 
     def test_sem2_init_emits_warning(self):
         """SEM2.__init__ should warn the user about the detected sem_type."""
@@ -895,30 +887,30 @@ class TestSEMTypeDetection:
 
     def test_nonlinear_discrete(self):
         dag = DAG("e ~ Bernoulli(0.5); y <- n(e)")
-        assert dag.sem_type == "nonlinear_discrete"
+        assert dag.sem_type == SEMType.NONLINEAR_DISCRETE
 
     def test_linear_mixed_exog(self):
         """Some continuous + some discrete exog nodes, linear endogenous."""
         dag = DAG("e1 ~ Normal(0,1); e2 ~ Bernoulli(0.5); y <- e1 + e2")
-        assert dag.sem_type == "linear_mixed_exog"
+        assert dag.sem_type == SEMType.LINEAR_MIXED_EXOG
 
     def test_nonlinear_mixed_exog(self):
         """Some continuous + some discrete exog nodes, MLP endogenous."""
         dag = DAG("e1 ~ Normal(0,1); e2 ~ Bernoulli(0.5); y <- n(e1, e2)")
-        assert dag.sem_type == "nonlinear_mixed_exog"
+        assert dag.sem_type == SEMType.NONLINEAR_MIXED_EXOG
 
     def test_exogenous_only_non_gaussian(self):
         dag = DAG("e1, e2 ~ Beta(0.5,0.5)")
-        assert dag.sem_type == "linear"
+        assert dag.sem_type == SEMType.LINEAR
 
     def test_exogenous_only_discrete(self):
         dag = DAG("e ~ Bernoulli(0.3)")
-        assert dag.sem_type == "linear_discrete"
+        assert dag.sem_type == SEMType.LINEAR_DISCRETE
 
     def test_nonlinear_continuous(self):
         """Pure MLP with continuous noise is nonlinear."""
         dag = DAG("e ~ Normal(0,1); y <- n(e)")
-        assert dag.sem_type == "nonlinear"
+        assert dag.sem_type == SEMType.NONLINEAR
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
