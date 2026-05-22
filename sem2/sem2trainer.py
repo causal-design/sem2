@@ -5,7 +5,7 @@ import time
 import logging
 
 from .model import SEM2
-from .sem2functionals import SEM2Loss
+from functionals.scalar_functionals import SEM2Loss
 from .default_configs import TrainingConfig
 
 logger = logging.getLogger(__name__)
@@ -81,6 +81,7 @@ class SEM2Trainer:
 
 
 def main():
+    torch.manual_seed(0)
     logging.basicConfig(level=logging.INFO)
     cfg = TrainingConfig()
 

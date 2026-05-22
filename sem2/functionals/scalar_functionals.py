@@ -1,27 +1,14 @@
 from typing import TYPE_CHECKING
 import torch
-from abc import ABC, abstractmethod
+from sem2.functionals.functional_base import SEM2ScalarFunctional, SEM2SelfFunctional, SEM2DataFunctional
+from sem2.functionals.vector_functionals import SampleContinuous, PotentialOutcome
 
 if TYPE_CHECKING:
-    from .model import SEM2
-    from .default_configs import TrainingConfig
+    from model import SEM2
+    from default_configs import TrainingConfig
 
 
-class SEM2EvaluationFunctional(ABC):
-    """ An evaluation functional takes in the SEM2 model, data and returns a scalar metric.
-            phi : F X V -> R
-            for SEM2 function F, vector (or similar object) V and R output scalar.
-        The input vector may not necessarily be used. An additional dictionary is returned that contains useful debug / tracking information.
-        Must always return a scalar value.
-    """
-    model: SEM2
-
-    @abstractmethod
-    def evaluate(self, *args, **kwargs) -> tuple[torch.Tensor, dict]:
-        pass
-
-
-class EnergyScore(SEM2EvaluationFunctional):
+class EnergyScore(SEM2SelfFunctional, SEM2ScalarFunctional):
     def __init__(self, cfg: TrainingConfig, model: SEM2):
         """" Energy score loss function. Sample from our model and compute energy score between our sample and the true sample.
         """
@@ -29,9 +16,12 @@ class EnergyScore(SEM2EvaluationFunctional):
         self.bs = cfg.bs
         self.beta = cfg.energy_score_beta
 
+        self.continuous_sampler = SampleContinuous(model)
+
     def evaluate(self, observations, **kwargs) -> tuple[torch.Tensor, dict]:
         # Draw sample from the model
-        all_preds = self.model.forward(batch_size=self.bs, return_dict=True)
+        all_preds, _ = self.continuous_sampler.evaluate(batch_size=self.bs)
+
         # Filter out nodes for energy score
         # TODO: once graph is specified, dynamically set observed nodes here.
         preds = torch.cat([all_preds[node_name] for node_name in ["Z", "D", "Y"]], dim=-1)  # shape = [BS, n_nodes]
@@ -57,16 +47,16 @@ class EnergyScore(SEM2EvaluationFunctional):
         return energy_score, {"energy_score": energy_score, "estimated-true distance": s1.mean(), "estimated-estimated distance": s2.mean()}
 
 
-class MeanPotentialOutcome(SEM2EvaluationFunctional):
+class MeanPotentialOutcome(SEM2DataFunctional, SEM2ScalarFunctional):
     """ Expected potential outcome:
             E[target_node | do(intervene_node = set_value)]
     """
 
     def __init__(self, target_node: str, intervene_node: str, cfg: TrainingConfig, model: SEM2):
-        self.model = model
         self.device = cfg.device
         self.intervene_node = intervene_node
-        self.target_node = target_node
+
+        self.continuous_sampler = PotentialOutcome(model, target_node)
 
     def evaluate(self, set_value: torch.Tensor, **kwargs) -> tuple[torch.Tensor, dict]:
         """ Get potential outcome, setting 'set_node' equal to 'set_value'.
@@ -76,25 +66,22 @@ class MeanPotentialOutcome(SEM2EvaluationFunctional):
                 set_value: the value to set the node to. Shape = [BS, 1]
         """
         bs = set_value.shape[0]
-        # I think we will eventually modify this class to use a full 'PotentialOutcome'.
         set_nodes = {self.intervene_node: set_value}
-        potential_outcome = self.model.forward(batch_size=bs, set_nodes=set_nodes, return_dict=True)   # shape = [BS, 1]
-        target_outcome = potential_outcome[self.target_node]
+        target_outcome, _ = self.continuous_sampler.evaluate(batch_size=bs, set_nodes=set_nodes)
         mean_target_outcome = target_outcome.mean()
         return mean_target_outcome, {}
 
 
-class ATE(SEM2EvaluationFunctional):
+class ATE(SEM2SelfFunctional, SEM2ScalarFunctional):
     """ Compute ATE from the model. """
     def __init__(self, cfg: TrainingConfig, model: SEM2):
         """
         Compute the average treatment effect from the model. Treatment and Target nodes are selected from the config.
-            ATE = E[Y | do(T=0)] - E[Y | do(T=1)]
+            ATE = E[Y | do(T=1)] - E[Y | do(T=0)]
         Args:
             cfg: TrainingConfig.
             model: The SEM2 model to evaluate ATE on. Must have methods to generate eps_y and eps_u, and a forward() method that can take set_nodes.
         """
-        self.model = model
         self.device = cfg.device
         self.bs = cfg.bs
         # Set up potential outcome
@@ -117,13 +104,13 @@ class ATE(SEM2EvaluationFunctional):
         return ATE, {}
 
 
-class SEM2Loss(SEM2EvaluationFunctional):
+class SEM2Loss(SEM2ScalarFunctional):
     """ Computes the loss from overall loss from observations, with the ability to combine multiple losses together.
         The Overall loss is:
             L = sum_i(weight_i * loss_componenet_i)
         Loss components call the model to get predictions and compute the loss.
     """
-    loss_components: list[tuple[SEM2EvaluationFunctional, float]]
+    loss_components: list[tuple[SEM2ScalarFunctional, float]]
 
     def __init__(self, cfg: TrainingConfig, model: SEM2):
         self.device = cfg.device
