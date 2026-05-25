@@ -5,7 +5,7 @@ import time
 import logging
 
 from .model import SEM2
-from operators.scalar_operators import SEM2Loss
+from .operators.scalar_operators import SEM2Loss
 from .default_configs import TrainingConfig
 
 logger = logging.getLogger(__name__)

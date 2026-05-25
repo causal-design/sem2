@@ -38,6 +38,24 @@ class SEMType(Enum):
     LINEAR_MIXED_EXOG    = "linear_mixed_exog"
     NONLINEAR_MIXED_EXOG = "nonlinear_mixed_exog"
 
+    @staticmethod
+    def is_continuous(sem_type: SEMType):
+        """ If SEM is purely continuous"""
+        return sem_type in {
+            SEMType.LINEAR_GAUSSIAN,
+            SEMType.LINEAR,
+            SEMType.NONLINEAR,
+        }
+
+    @staticmethod
+    def is_discrete(sem_type: SEMType):
+        """ If SEM is purely discrete"""
+        return sem_type in {
+            SEMType.LINEAR_DISCRETE,
+            SEMType.NONLINEAR_DISCRETE,
+        }
+
+
 # Discrete distributions in torch.distributions. This is used for sem_type detection. Probably would be nice to move it elsewhere or compact all the formula parsing.
 _DISCRETE_DIST_NAMES = frozenset({
     "Bernoulli",
