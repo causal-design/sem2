@@ -1,14 +1,14 @@
 from typing import TYPE_CHECKING
 import torch
-from sem2.functionals.functional_base import SEM2ScalarFunctional, SEM2SelfFunctional, SEM2DataFunctional
-from sem2.functionals.vector_functionals import SampleContinuous, PotentialOutcome
+from sem2.operators.operators_base import SEM2ScalarOperator, SEM2SelfOperator, SEM2DataOperator
+from sem2.operators.vector_operators import SampleContinuous, PotentialOutcome
 
 if TYPE_CHECKING:
     from model import SEM2
     from default_configs import TrainingConfig
 
 
-class EnergyScore(SEM2SelfFunctional, SEM2ScalarFunctional):
+class EnergyScore(SEM2SelfOperator, SEM2ScalarOperator):
     def __init__(self, cfg: TrainingConfig, model: SEM2):
         """" Energy score loss function. Sample from our model and compute energy score between our sample and the true sample.
         """
@@ -47,7 +47,7 @@ class EnergyScore(SEM2SelfFunctional, SEM2ScalarFunctional):
         return energy_score, {"energy_score": energy_score, "estimated-true distance": s1.mean(), "estimated-estimated distance": s2.mean()}
 
 
-class MeanPotentialOutcome(SEM2DataFunctional, SEM2ScalarFunctional):
+class MeanPotentialOutcome(SEM2DataOperator, SEM2ScalarOperator):
     """ Expected potential outcome:
             E[target_node | do(intervene_node = set_value)]
     """
@@ -72,7 +72,7 @@ class MeanPotentialOutcome(SEM2DataFunctional, SEM2ScalarFunctional):
         return mean_target_outcome, {}
 
 
-class ATE(SEM2SelfFunctional, SEM2ScalarFunctional):
+class ATE(SEM2SelfOperator, SEM2ScalarOperator):
     """ Compute ATE from the model. """
     def __init__(self, cfg: TrainingConfig, model: SEM2):
         """
@@ -104,13 +104,13 @@ class ATE(SEM2SelfFunctional, SEM2ScalarFunctional):
         return ATE, {}
 
 
-class SEM2Loss(SEM2ScalarFunctional):
+class SEM2Loss(SEM2ScalarOperator):
     """ Computes the loss from overall loss from observations, with the ability to combine multiple losses together.
         The Overall loss is:
             L = sum_i(weight_i * loss_componenet_i)
         Loss components call the model to get predictions and compute the loss.
     """
-    loss_components: list[tuple[SEM2ScalarFunctional, float]]
+    loss_components: list[tuple[SEM2ScalarOperator, float]]
 
     def __init__(self, cfg: TrainingConfig, model: SEM2):
         self.device = cfg.device
