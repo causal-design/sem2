@@ -1,11 +1,12 @@
 from typing import TYPE_CHECKING
 import torch
-from sem2.operators.operators_base import SEM2ScalarOperator, SEM2SelfOperator, SEM2DataOperator
-from sem2.operators.vector_operators import SampleContinuous, PotentialOutcome
+from .operators_base import SEM2ScalarOperator, SEM2SelfOperator, SEM2DataOperator
+from .vector_operators import Sample, PotentialOutcome
+from ..model import SEMType
 
 if TYPE_CHECKING:
-    from model import SEM2
-    from default_configs import TrainingConfig
+    from ..model import SEM2
+    from ..default_configs import TrainingConfig
 
 
 class EnergyScore(SEM2SelfOperator, SEM2ScalarOperator):
@@ -16,9 +17,16 @@ class EnergyScore(SEM2SelfOperator, SEM2ScalarOperator):
         self.bs = cfg.bs
         self.beta = cfg.energy_score_beta
 
-        self.continuous_sampler = SampleContinuous(model)
+        self.continuous_sampler = Sample(model)
 
-    def evaluate(self, observations, **kwargs) -> tuple[torch.Tensor, dict]:
+        # Select the correct forward method based on the SEM type
+        sem_type = self.model.sem_type
+        if SEMType.is_continuous(sem_type):
+            self.evaluate = self._evaluate_continuous
+        else:
+            raise NotImplementedError(f"Energy score is not implemented for this SEM type: {sem_type}")
+
+    def _evaluate_continuous(self, observations, **kwargs) -> tuple[torch.Tensor, dict]:
         # Draw sample from the model
         all_preds, _ = self.continuous_sampler.evaluate(batch_size=self.bs)
 
@@ -28,6 +36,10 @@ class EnergyScore(SEM2SelfOperator, SEM2ScalarOperator):
 
         # Compute energy score between predictions and sample.
         return self._energy_score(observations, preds, **kwargs)
+
+    def evaluate(self, observations, **kwargs) -> tuple[torch.Tensor, dict]:
+        """ This is a placeholder that gets replaced by the appropriate method in __init__ based on the SEM type. """
+        raise NotImplementedError("Energy score is not implemented for this SEM type.")
 
     def _energy_score(self, targets, preds, **kwargs) -> tuple[torch.Tensor, dict]:
         """Loss function based on the energy score.
@@ -55,11 +67,19 @@ class MeanPotentialOutcome(SEM2DataOperator, SEM2ScalarOperator):
     def __init__(self, target_node: str, intervene_node: str, cfg: TrainingConfig, model: SEM2):
         self.device = cfg.device
         self.intervene_node = intervene_node
+        self.model = model
 
         self.continuous_sampler = PotentialOutcome(model, target_node)
 
-    def evaluate(self, set_value: torch.Tensor, **kwargs) -> tuple[torch.Tensor, dict]:
-        """ Get potential outcome, setting 'set_node' equal to 'set_value'.
+        # Select the correct forward method based on the SEM type
+        sem_type = self.model.sem_type
+        if SEMType.is_continuous(sem_type):
+            self.evaluate = self._evaluate_continuous
+        else:
+            raise NotImplementedError(f"Mean Potential Outcome is not implemented for this SEM type: {sem_type}")
+
+    def _evaluate_continuous(self, set_value: torch.Tensor, **kwargs) -> tuple[torch.Tensor, dict]:
+        """ Get the potential outcome, setting 'set_node' equal to 'set_value'.
                 E[target_node | do(intervene_node = set_value)]
 
             Args:
@@ -70,6 +90,10 @@ class MeanPotentialOutcome(SEM2DataOperator, SEM2ScalarOperator):
         target_outcome, _ = self.continuous_sampler.evaluate(batch_size=bs, set_nodes=set_nodes)
         mean_target_outcome = target_outcome.mean()
         return mean_target_outcome, {}
+
+    def evaluate(self, set_value: torch.Tensor, **kwargs) -> tuple[torch.Tensor, dict]:
+        """ This is a placeholder that gets replaced by the appropriate method in __init__ based on the SEM type. """
+        raise NotImplementedError("Mean Potential Outcome is not implemented for this SEM type.")
 
 
 class ATE(SEM2SelfOperator, SEM2ScalarOperator):
@@ -84,12 +108,20 @@ class ATE(SEM2SelfOperator, SEM2ScalarOperator):
         """
         self.device = cfg.device
         self.bs = cfg.bs
+        self.model = model
         # Set up potential outcome
         T_node, Y_node = cfg.T_node, cfg.Y_node       # This might be changed when graph setup is finalized.
         self.treat_pot_out = MeanPotentialOutcome(Y_node, T_node, cfg, model)
 
-    def evaluate(self, *args, **kwargs) -> tuple[torch.Tensor, dict]:
-        """ Evaluate ATE by intervening on treatment node in the model."""
+        # Select the correct forward method based on the SEM type
+        sem_type = self.model.sem_type
+        if SEMType.is_continuous(sem_type):
+            self.evaluate = self._evaluate_continuous
+        else:
+            raise NotImplementedError(f"ATE is not implemented for this SEM type: {sem_type}")
+
+    def _evaluate_continuous(self, *args, **kwargs) -> tuple[torch.Tensor, dict]:
+        """ Evaluate ATE by intervening on the treatment node in the model."""
 
         t0 = torch.zeros([self.bs, 1], device=self.device, dtype=torch.long)
         t1 = torch.ones([self.bs, 1], device=self.device, dtype=torch.long)
@@ -102,6 +134,10 @@ class ATE(SEM2SelfOperator, SEM2ScalarOperator):
         # ATE = E[Y | T=1] - E[Y | T=0]
         ATE = pot_out_t1 - pot_out_t0
         return ATE, {}
+
+    def evaluate(self, *args, **kwargs) -> tuple[torch.Tensor, dict]:
+        """ This is a placeholder that gets replaced by the appropriate method in __init__ based on the SEM type. """
+        raise NotImplementedError("ATE is not implemented for this SEM type.")
 
 
 class SEM2Loss(SEM2ScalarOperator):

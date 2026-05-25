@@ -1,25 +1,30 @@
 from typing import TYPE_CHECKING
 import torch
-from sem2.operators.operators_base import SEM2VectorOperator, SEM2SelfOperator, SEM2DataOperator
+from .operators_base import SEM2VectorOperator, SEM2SelfOperator, SEM2DataOperator
+from ..model import SEMType
 
 if TYPE_CHECKING:
-    from model import SEM2
     from torch import Tensor
+    from ..model import SEM2
 
 
-class SampleContinuous(SEM2DataOperator, SEM2VectorOperator):
+class Sample(SEM2DataOperator, SEM2VectorOperator):
     """ Sample from the SEM2 model by drawing samples from each node.
         This class allows specifying interventional / fixed nodes.
     """
     def __init__(self, model: SEM2):
         self.model = model
 
-    def evaluate(
-        self,
-        batch_size: int = 1,
-        set_nodes: dict[str, Tensor]|None = None,
-    ) -> tuple[dict[str, Tensor], dict]:
-        """Run a forward pass through the SEM.
+        # Select the correct forward method based on the SEM type
+        sem_type = self.model.sem_type
+        if SEMType.is_continuous(sem_type):
+            # Continuous node
+            self.evaluate = self._evaluate_continuous
+        else:
+            raise NotImplementedError(f"Sampling is not implemented for this SEM type: {sem_type}")
+
+    def _evaluate_continuous(self, batch_size: int = 1, set_nodes: dict[str, Tensor]|None = None) -> tuple[dict[str, Tensor], dict]:
+        """ Forward pass of a continuous SEM2 model. Nodes are sampled from their respective distributions.
 
         Args:
             batch_size: Number of samples to draw.
@@ -46,6 +51,11 @@ class SampleContinuous(SEM2DataOperator, SEM2VectorOperator):
 
         return {name: layer[name].get_value() for name in topological_order}, {}
 
+    def evaluate(self, batch_size: int = 1, set_nodes: dict[str, Tensor]|None = None) -> tuple[dict[str, Tensor], dict]:
+        """ Run a forward pass through the SEM.
+            This is a placeholder that gets replaced by the appropriate method in __init__ based on the SEM type."""
+        raise NotImplementedError("Sampling is not implemented for this SEM type.")
+
 
 class PotentialOutcome(SEM2DataOperator, SEM2VectorOperator):
     """ Get the potential outcome of a single node in the SEM2 model.
@@ -55,12 +65,16 @@ class PotentialOutcome(SEM2DataOperator, SEM2VectorOperator):
         self.model = model
         self.target_node = target_node
 
-    def evaluate(
-        self,
-        batch_size: int = 1,
-        set_nodes: dict[str, Tensor]|None = None,
-    ) -> tuple[Tensor, dict]:
-        """ Run a forward pass through the SEM until target_node is computed, then exit early.
+        # Select the correct forward method based on the SEM type
+        sem_type = self.model.sem_type
+        if SEMType.is_continuous(sem_type):
+            # Continuous node
+            self.evaluate = self._evaluate_continuous
+        else:
+            raise NotImplementedError(f"Potential Outcome sampling is not implemented for this SEM type: {sem_type}")
+
+    def _evaluate_continuous(self, batch_size: int = 1, set_nodes: dict[str, Tensor]|None = None) -> tuple[Tensor, dict]:
+        """ Run a forward pass through a continuous SEM2 model, stopping at the target node.
             Supports interventions.
 
         Args:
@@ -92,3 +106,8 @@ class PotentialOutcome(SEM2DataOperator, SEM2VectorOperator):
                 return layer[node_name].get_value(), {}
 
         raise ValueError(f'Target node {self.target_node} was not encountered during sampling. This should not happen. ')
+
+    def evaluate(self, batch_size: int = 1, set_nodes: dict[str, Tensor]|None = None) -> tuple[dict[str, Tensor], dict]:
+        """ Run a forward pass through the SEM, stopping at the target node.
+            This is a placeholder that gets replaced by the appropriate method in __init__ based on the SEM type."""
+        raise NotImplementedError("Sampling is not implemented for this SEM type.")
