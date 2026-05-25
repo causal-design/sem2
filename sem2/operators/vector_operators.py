@@ -1,13 +1,13 @@
 from typing import TYPE_CHECKING
 import torch
-from sem2.functionals.functional_base import SEM2VectorFunctional, SEM2SelfFunctional, SEM2DataFunctional
+from sem2.operators.operators_base import SEM2VectorOperator, SEM2SelfOperator, SEM2DataOperator
 
 if TYPE_CHECKING:
     from model import SEM2
     from torch import Tensor
 
 
-class SampleContinuous(SEM2DataFunctional, SEM2VectorFunctional):
+class SampleContinuous(SEM2DataOperator, SEM2VectorOperator):
     """ Sample from the SEM2 model by drawing samples from each node.
         This class allows specifying interventional / fixed nodes.
     """
@@ -47,7 +47,7 @@ class SampleContinuous(SEM2DataFunctional, SEM2VectorFunctional):
         return {name: layer[name].get_value() for name in topological_order}, {}
 
 
-class PotentialOutcome(SEM2DataFunctional, SEM2VectorFunctional):
+class PotentialOutcome(SEM2DataOperator, SEM2VectorOperator):
     """ Get the potential outcome of a single node in the SEM2 model.
         This exits early as soon as the target node is computed.
     """
