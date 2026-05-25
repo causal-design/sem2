@@ -70,26 +70,12 @@ class SEM2Node(RandomVariable, ABC, nn.Module):
         pass
 
 
-# ── Exogenous (abstract) ──────────────────────────────────────────────────────
+# ── Exogenous ─────────────────────────────────────────────────────────────────
 
-class NodeExogenous(SEM2Node, ABC):
-    """Abstract base for exogenous nodes.
-    An exogenous node has no parents. Concrete subclasses decide how the
-    distribution is represented (e.g. a torch.distributions.Distribution,
-    a custom sampler, etc.).
-    """
-
-    def __init__(self, name: str, rhs: str, out_dim: int = 1, device="cpu"):
-        super().__init__(name, rhs, predecessors=[], device=device)
-        self.out_dim = out_dim
-
-
-# ── Exogenous — torch.distributions implementation ────────────────────────────
-
-class NodeExogenousTorchD(NodeExogenous):
-    """Exogenous node backed by a torch.distributions.Distribution.
-    The distribution name and parameters are parsed upstream in DAG and
-    handed in as already-validated objects so this constructor stays simple.
+class NodeExogenous(SEM2Node):
+    """Exogenous node with a known distribution.
+    An exogenous node has no parents. The distribution is instantiated upstream
+    in SEM2._build_and_initialize_nodes and passed in here directly.
 
     Attributes:
         dist: the instantiated torch Distribution object.
@@ -103,7 +89,8 @@ class NodeExogenousTorchD(NodeExogenous):
         out_dim: int = 1,
         device="cpu",
     ):
-        super().__init__(name, rhs, out_dim=out_dim, device=device)
+        super().__init__(name, rhs, predecessors=[], device=device)
+        self.out_dim = out_dim
         self.dist = dist
 
     def _forward_inner(self, x: list[torch.Tensor], batch_size: int = 1) -> torch.Tensor:
