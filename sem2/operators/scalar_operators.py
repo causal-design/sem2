@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 
 class EnergyScore(SEM2SelfOperator, SEM2ScalarOperator):
     def __init__(self, cfg: TrainingConfig, model: SEM2):
-        """" Energy score loss function. Sample from our model and compute energy score between our sample and the true sample.
+        """" Energy score loss function. Sample from our model and compute the energy score between our sample and the true sample.
         """
         self.model = model
         self.bs = cfg.bs
