@@ -17,11 +17,10 @@ class EnergyScore(SEM2SelfOperator, SEM2ScalarOperator):
         self.bs = cfg.bs
         self.beta = cfg.energy_score_beta
 
-        self.continuous_sampler = Sample(model)
-
         # Select the correct forward method based on the SEM type
         sem_type = self.model.sem_type
         if SEMType.is_continuous(sem_type):
+            self.continuous_sampler = Sample(model)
             self.evaluate = self._evaluate_continuous
         else:
             raise NotImplementedError(f"Energy score is not implemented for this SEM type: {sem_type}")
