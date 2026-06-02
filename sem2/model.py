@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from graphlib import TopologicalSorter, CycleError
 import torch
 from torch import nn
+from torch import Tensor
 
 from .nn_models import LinearNodeConfig
 from .nodes import NodeExogenous, NodeLinear, NodeMLP
@@ -482,6 +483,37 @@ class SEM2(DAG, nn.Module):
             name_to_node[node_name] = node
 
         return name_to_node
+
+    def sample(self, batch_size: int = 1, set_nodes: dict[str, Tensor]|None = None) -> tuple[dict[str, Tensor], dict]:
+        """ Forward pass of a continuous SEM2 model. Nodes are sampled from their respective distributions.
+
+        Args:
+            batch_size: Number of samples to draw.
+            set_nodes: Optional dict of node name -> tensor to pin specific node
+                       values (e.g. for interventions). Shape: [batch_size, out_dim].
+        Return:
+            {node_name: tensor}.
+            {} Dummy dict, no metrics are generated.
+        """
+        layer = self.layer
+        topological_order = self.topological_order
+
+        set_nodes = set_nodes if set_nodes is not None else {}
+        assert set(set_nodes.keys()).issubset(layer.keys()), \
+            f"set_nodes contains unknown nodes: {set(set_nodes.keys()) - set(layer.keys())}"
+
+        for node_name in topological_order:
+            v = layer[node_name]
+            if node_name in set_nodes:
+                v.set_value(set_nodes[node_name])
+            else:
+                pred_values = [layer[p].get_value() for p in v.predecessors]
+                v(pred_values, batch_size)
+
+        return {name: layer[name].get_value() for name in topological_order}, {}
+
+    def likelihood(self, *args, **kwargs):
+        raise NotImplementedError(f"likelihood not implemented for this type of SEM2 model: {self.sem_type.value}")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TO be moved to integration tests later I think
