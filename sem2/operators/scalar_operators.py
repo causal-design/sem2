@@ -1,7 +1,7 @@
 from typing import TYPE_CHECKING
 import torch
 from .operators_base import SEM2ScalarOperator, SEM2SelfOperator, SEM2DataOperator
-from .vector_operators import Sample, PotentialOutcome
+from .vector_operators import PotentialOutcome
 from ..model import SEMType
 
 if TYPE_CHECKING:
@@ -20,14 +20,13 @@ class EnergyScore(SEM2SelfOperator, SEM2ScalarOperator):
         # Select the correct forward method based on the SEM type
         sem_type = self.model.sem_type
         if SEMType.is_continuous(sem_type):
-            self.continuous_sampler = Sample(model)
             self.evaluate = self._evaluate_continuous
         else:
             raise NotImplementedError(f"Energy score is not implemented for this SEM type: {sem_type}")
 
     def _evaluate_continuous(self, observations, **kwargs) -> tuple[torch.Tensor, dict]:
         # Draw sample from the model
-        all_preds, _ = self.continuous_sampler.evaluate(batch_size=self.bs)
+        all_preds, _ = self.model.sample(batch_size=self.bs)
 
         # Filter out nodes for energy score
         # TODO: once graph is specified, dynamically set observed nodes here.

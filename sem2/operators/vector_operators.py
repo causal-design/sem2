@@ -8,55 +8,6 @@ if TYPE_CHECKING:
     from ..model import SEM2
 
 
-class Sample(SEM2DataOperator, SEM2VectorOperator):
-    """ Sample from the SEM2 model by drawing samples from each node.
-        This class allows specifying interventional / fixed nodes.
-    """
-    def __init__(self, model: SEM2):
-        self.model = model
-
-        # Select the correct forward method based on the SEM type
-        sem_type = self.model.sem_type
-        if SEMType.is_continuous(sem_type):
-            # Continuous node
-            self.evaluate = self._evaluate_continuous
-        else:
-            raise NotImplementedError(f"Sampling is not implemented for this SEM type: {sem_type}")
-
-    def _evaluate_continuous(self, batch_size: int = 1, set_nodes: dict[str, Tensor]|None = None) -> tuple[dict[str, Tensor], dict]:
-        """ Forward pass of a continuous SEM2 model. Nodes are sampled from their respective distributions.
-
-        Args:
-            batch_size: Number of samples to draw.
-            set_nodes: Optional dict of node name -> tensor to pin specific node
-                       values (e.g. for interventions). Shape: [batch_size, out_dim].
-        Return:
-            {node_name: tensor}.
-            {} Dummy dict, no metrics are generated.
-        """
-        layer = self.model.layer
-        topological_order = self.model.topological_order
-
-        set_nodes = set_nodes if set_nodes is not None else {}
-        assert set(set_nodes.keys()).issubset(layer.keys()), \
-            f"set_nodes contains unknown nodes: {set(set_nodes.keys()) - set(layer.keys())}"
-
-        for node_name in topological_order:
-            v = layer[node_name]
-            if node_name in set_nodes:
-                v.set_value(set_nodes[node_name])
-            else:
-                pred_values = [layer[p].get_value() for p in v.predecessors]
-                v(pred_values, batch_size)
-
-        return {name: layer[name].get_value() for name in topological_order}, {}
-
-    def evaluate(self, batch_size: int = 1, set_nodes: dict[str, Tensor]|None = None) -> tuple[dict[str, Tensor], dict]:
-        """ Run a forward pass through the SEM.
-            This is a placeholder that gets replaced by the appropriate method in __init__ based on the SEM type."""
-        raise NotImplementedError("Sampling is not implemented for this SEM type.")
-
-
 class PotentialOutcome(SEM2DataOperator, SEM2VectorOperator):
     """ Get the potential outcome of a single node in the SEM2 model.
         This exits early as soon as the target node is computed.
