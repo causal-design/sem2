@@ -1,6 +1,6 @@
 from typing import TYPE_CHECKING
 import torch
-from .operators_base import SEM2VectorOperator, SEM2SelfOperator, SEM2DataOperator
+from .operators_base import SEM2Operator, OperatorInput, OperatorOutput
 from ..model import SEMType
 
 if TYPE_CHECKING:
@@ -8,10 +8,13 @@ if TYPE_CHECKING:
     from ..model import SEM2
 
 
-class PotentialOutcome(SEM2DataOperator, SEM2VectorOperator):
+class PotentialOutcome(SEM2Operator):
     """ Get the potential outcome of a single node in the SEM2 model.
         This exits early as soon as the target node is computed.
     """
+    input_type = OperatorInput.DATA
+    output_type = OperatorOutput.VECTOR
+
     def __init__(self, model: SEM2, target_node: str):
         self.model = model
         self.target_node = target_node
