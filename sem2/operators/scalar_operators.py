@@ -1,6 +1,6 @@
 from typing import TYPE_CHECKING
 import torch
-from .operators_base import SEM2ScalarOperator, SEM2SelfOperator, SEM2DataOperator
+from .operators_base import OperatorInput, OperatorOutput, SEM2Operator
 from .vector_operators import PotentialOutcome
 from ..model import SEMType
 
@@ -9,10 +9,15 @@ if TYPE_CHECKING:
     from ..default_configs import TrainingConfig
 
 
-class EnergyScore(SEM2SelfOperator, SEM2ScalarOperator):
+class EnergyScore(SEM2Operator):
+    """" Energy score loss function. Sample from our model and compute the energy score between our sample and the true sample.
+    """
+
+    input_type = OperatorInput.SELF
+    output_type = OperatorOutput.SCALAR
+
     def __init__(self, cfg: TrainingConfig, model: SEM2):
-        """" Energy score loss function. Sample from our model and compute the energy score between our sample and the true sample.
-        """
+
         self.model = model
         self.bs = cfg.bs
         self.beta = cfg.energy_score_beta
@@ -57,10 +62,12 @@ class EnergyScore(SEM2SelfOperator, SEM2ScalarOperator):
         return energy_score, {"energy_score": energy_score, "estimated-true distance": s1.mean(), "estimated-estimated distance": s2.mean()}
 
 
-class MeanPotentialOutcome(SEM2DataOperator, SEM2ScalarOperator):
+class MeanPotentialOutcome(SEM2Operator):
     """ Expected potential outcome:
             E[target_node | do(intervene_node = set_value)]
     """
+    input_type = OperatorInput.DATA
+    output_type = OperatorOutput.SCALAR
 
     def __init__(self, target_node: str, intervene_node: str, cfg: TrainingConfig, model: SEM2):
         self.device = cfg.device
@@ -94,8 +101,11 @@ class MeanPotentialOutcome(SEM2DataOperator, SEM2ScalarOperator):
         raise NotImplementedError("Mean Potential Outcome is not implemented for this SEM type.")
 
 
-class ATE(SEM2SelfOperator, SEM2ScalarOperator):
+class ATE(SEM2Operator):
     """ Compute ATE from the model. """
+    input_type = OperatorInput.SELF
+    output_type = OperatorOutput.SCALAR
+
     def __init__(self, cfg: TrainingConfig, model: SEM2):
         """
         Compute the average treatment effect from the model. Treatment and Target nodes are selected from the config.
@@ -138,13 +148,16 @@ class ATE(SEM2SelfOperator, SEM2ScalarOperator):
         raise NotImplementedError("ATE is not implemented for this SEM type.")
 
 
-class SEM2Loss(SEM2ScalarOperator):
+class SEM2Loss(SEM2Operator):
     """ Computes the loss from overall loss from observations, with the ability to combine multiple losses together.
         The Overall loss is:
             L = sum_i(weight_i * loss_componenet_i)
         Loss components call the model to get predictions and compute the loss.
     """
-    loss_components: list[tuple[SEM2ScalarOperator, float]]
+    input_type = OperatorInput.DATA
+    output_type = OperatorOutput.SCALAR
+
+    loss_components: list[tuple[SEM2Operator, float]]
 
     def __init__(self, cfg: TrainingConfig, model: SEM2):
         self.device = cfg.device
@@ -156,6 +169,9 @@ class SEM2Loss(SEM2ScalarOperator):
         if cfg.use_mmd:
             raise NotImplementedError("MMD loss not implemented yet.")
 
+        # Check components are all scalar
+        for loss_comp, weight in loss_components:
+            assert loss_comp.output_type == OperatorOutput.SCALAR, "Loss components must be scalar."
         self.loss_components = loss_components
 
     def evaluate(self, observations, **kwargs) -> tuple[torch.Tensor, dict]:
