@@ -32,8 +32,11 @@ def make_model(formula, cfgs=None, device="cpu"):
     return SEM2(formula, node_cfgs=cfgs, device=device)
 
 
-def run(model, bs=BS, set_nodes=None):
-    return model(batch_size=bs, set_nodes=set_nodes, return_dict=True)
+def run(model, bs=BS, set_nodes=None, return_dict=True):
+    res, _ = model.sample(batch_size=bs, set_nodes=set_nodes)
+    if return_dict:
+        return res
+    return torch.cat([res[k] for k in model.topological_order], dim=-1)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -572,7 +575,7 @@ class TestSEM2Forward:
 
     def test_return_tensor_shape(self):
         m = make_model("e ~ Normal(0,1); y <- e")
-        assert m(batch_size=BS, return_dict=False).shape == (BS, 2)
+        assert run(m, bs=BS, return_dict=False).shape == (BS, 2)
 
     def test_batch_size_respected(self):
         m = make_model("e ~ Normal(0,1); y <- e")
