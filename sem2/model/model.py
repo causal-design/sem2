@@ -139,10 +139,16 @@ class SEM2(DAG, nn.Module):
         raise NotImplementedError(f"likelihood not implemented for this type of SEM2 model: {self.sem_type.value}")
 
 
+class SEM2Discrete(SEM2):
+    """Discrete SEM2."""
+    def __init__(self, model_formula: str, node_cfgs: dict = None, device="cpu"):
+        super().__init__(model_formula, node_cfgs, device=device)
+        self.device = device
+
 # ══════════════════════════════════════════════════════════════════════════════
 # TO be moved to integration tests later I think
 def main():
-    from .nn_models import MLPConfig
+    from ..default_configs import MLPConfig
 
     # ── Example 1: Linear SEM ─────────────────────────────────────────────────
 
@@ -196,6 +202,7 @@ def main():
     print("\n=== Discrete SEM, with sampling over discrete nodes ===")
 
     print(f'{all_states = }')
+
 
 if __name__ == "__main__":
     main()

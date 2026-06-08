@@ -10,14 +10,15 @@ import pytest
 import torch
 import torch.nn as nn
 
-from model.nn_models import _LinearConfig, _LinearModel, _MLP
+from sem2.model.nn_models import _LinearConfig, _LinearModel, _MLP
 from sem2.default_configs import LinearNodeConfig, MLPConfig
-from model.nodes import (
+from sem2.model.nodes import (
     RandomVariable, SEM2Node,
     NodeExogenous,
     NodeEndogenous, NodeLinear, NodeNonlinear, NodeMLP,
 )
-from model.model import DAG, SEM2, SEMType
+from sem2.model.model import DAG, SEM2
+from sem2.model.sem_parsing import SEMType
 
 #probably should breakdown into smaller test files but for now is fine I guess
 

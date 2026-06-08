@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 # LinearNodeConfig and MLPConfig are the public user-facing node configs.
 # They live in default_configs and are re-exported here so internal node
 # constructors can import from a single place.
-from default_configs import LinearNodeConfig, MLPConfig
+from ..default_configs import LinearNodeConfig, MLPConfig
 
 
 # ── Internal linear config + model ────────────────────────────────────────────
@@ -24,8 +24,8 @@ class _LinearConfig:
     input_dim: int = None
     output_dim: int = 1
     use_bias: bool = True
-    init_weight_val: Optional[torch.Tensor] = None
-    init_bias_val: Optional[torch.Tensor] = None
+    init_weight_val: Optional[Tensor] = None
+    init_bias_val: Optional[Tensor] = None
 
 
 class _LinearModel(nn.Module):
@@ -63,7 +63,7 @@ class _LinearModel(nn.Module):
 
         self.to(device)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: Tensor) -> Tensor:
         return F.linear(x, self.weight, self.bias)
 
 
@@ -110,7 +110,7 @@ class _MLP(nn.Module):
         self.cfg = config
         self.to(device)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: Tensor) -> Tensor:
         return self.net(x)
 
 
@@ -223,7 +223,7 @@ class _MLPDiscrete(nn.Module):
         else:
             raise NotImplementedError(f"Discretisation mode {mode} not implemented yet.")
         
-    def forward(self, x: torch.Tensor, mode=DiscreteModes.SAMPLE) -> torch.Tensor:
+    def forward(self, x: Tensor, mode=DiscreteModes.SAMPLE) -> Tensor:
         """ x.shape = [..., n_predecessors]
             mode: How to process the discrete node.
 
@@ -241,4 +241,3 @@ class _MLPDiscrete(nn.Module):
         x = self.out_layer(x)
         x = self._discretize(x, mode)
         return x
-

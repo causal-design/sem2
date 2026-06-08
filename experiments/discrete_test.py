@@ -1,4 +1,4 @@
-from model.model import SEM2
+from sem2.model.model import SEM2, SEM2Discrete
 from sem2.default_configs import MLPConfig
 
 formula1 = "U ~ Normal(0,1); eps_d ~ Uniform(0,1); eps_y ~ Uniform(0,1); Z ~ Categorical(probs=[1, 1, 1]);"
@@ -20,4 +20,3 @@ all_states, _ = model.sample(batch_size=2)
 
 print("===== Test SEM2 =====")
 print(f'{all_states = }')
-
