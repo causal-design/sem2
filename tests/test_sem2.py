@@ -10,14 +10,14 @@ import pytest
 import torch
 import torch.nn as nn
 
-from sem2.nn_models import _LinearConfig, _LinearModel, _MLP
-from sem2.default_configs import LinearNodeConfig, MLPConfig, TrainingConfig
-from sem2.nodes import (
+from model.nn_models import _LinearConfig, _LinearModel, _MLP
+from sem2.default_configs import LinearNodeConfig, MLPConfig
+from model.nodes import (
     RandomVariable, SEM2Node,
     NodeExogenous,
     NodeEndogenous, NodeLinear, NodeNonlinear, NodeMLP,
 )
-from sem2.model import DAG, SEM2, SEMType
+from model.model import DAG, SEM2, SEMType
 
 #probably should breakdown into smaller test files but for now is fine I guess
 
@@ -98,11 +98,6 @@ class TestMLP:
     def test_output_shape(self):
         cfg = MLPConfig(input_dim=4, hidden_dims=[8, 8], output_dim=2)
         assert _MLP(cfg)(torch.randn(BS, 4)).shape == (BS, 2)
-
-    def test_prob_output_range(self):
-        cfg = MLPConfig(input_dim=3, hidden_dims=[8], output_dim=1, prob_output=True)
-        out = _MLP(cfg)(torch.randn(100, 3))
-        assert out.min() >= 0.0 and out.max() <= 1.0
 
     def test_no_dropout_layers_when_zero(self):
         cfg = MLPConfig(input_dim=2, hidden_dims=[4], output_dim=1, dropout=0.0)

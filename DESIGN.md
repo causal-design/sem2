@@ -106,7 +106,8 @@ model = SEM2(formula)
 samples = model(100)  # shape: [100, 3]
 
 # Or with custom MLP config
-from nn_models import MLPConfig
+from model.nn_models import MLPConfig
+
 config = MLPConfig(input_dim=2, hidden_dims=[64, 64], output_dim=1)
 model = SEM2(formula, node_cfgs={'y': config})
 

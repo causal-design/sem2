@@ -2,10 +2,10 @@ from typing import TYPE_CHECKING
 import torch
 from .operators_base import OperatorInput, OperatorOutput, SEM2Operator
 from .vector_operators import PotentialOutcome
-from ..model import SEMType
+from model.model import SEMType
 
 if TYPE_CHECKING:
-    from ..model import SEM2
+    from model.model import SEM2
     from ..default_configs import TrainingConfig
 
 

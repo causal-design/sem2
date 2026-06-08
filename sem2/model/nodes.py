@@ -1,4 +1,3 @@
-import re
 from abc import ABC, abstractmethod
 from typing import Optional
 import torch
@@ -227,31 +226,31 @@ class NodeMLP(NodeNonlinear):
         return self.mlp(self._collate_fn(x))
 
 
-# # ── Discrete Node ───────────────────────────────────────────────────────────────────
-#
-# class NodeMLPDiscrete(SEM2Node):
-#     """ Discrete NN node. """
-#     dist: torch.distributions.Distribution
-#     id: int = 0
-#
-#     def __init__(self, name: str, rhs: str, cfg: MLPConfig|None, predecessor_nodes: list[SEM2Node], mode=None, device="cpu"):
-#         super().__init__(name, rhs, predecessor_nodes, device=device)
-#         if cfg is None:
-#             cfg = MLPConfig()
-#         if isinstance(cfg, MLPConfig):
-#             self.nn_module = _MLPDiscrete(cfg, mode=mode, device=device)
-#         else:
-#             print(cfg)
-#             raise ValueError(f"Invalid MLP configuration: {cfg}. Must be MLPConfig object, or None if default config is needed.")
-#
-#         self.type = "NN_dist"
-#
-#     def _forward_inner(self, x: list[torch.Tensor], batch_size=1):
-#         """ x: List[Tensor], shape = [n_predecessors][bs, output_dim] """
-#         x = self._collate_fn(x)
-#         out = self.nn_module(x)
-#         return out
-#
-#     @property
-#     def output_dim(self):
-#         return self.nn_module.output_dim
+# ── Discrete Node ───────────────────────────────────────────────────────────────────
+
+class NodeMLPDiscrete(SEM2Node):
+    """ Discrete NN node. """
+    dist: torch.distributions.Distribution
+    id: int = 0
+
+    def __init__(self, name: str, rhs: str, cfg: MLPConfig|None, predecessor_nodes: list[SEM2Node], mode=None, device="cpu"):
+        super().__init__(name, rhs, predecessor_nodes, device=device)
+        if cfg is None:
+            cfg = MLPConfig()
+        if isinstance(cfg, MLPConfig):
+            self.nn_module = _MLPDiscrete(cfg, mode=mode, device=device)
+        else:
+            print(cfg)
+            raise ValueError(f"Invalid MLP configuration: {cfg}. Must be MLPConfig object, or None if default config is needed.")
+
+        self.type = "NN_dist"
+
+    def _forward_inner(self, x: list[torch.Tensor], batch_size=1):
+        """ x: List[Tensor], shape = [n_predecessors][bs, output_dim] """
+        x = self._collate_fn(x)
+        out = self.nn_module(x)
+        return out
+
+    @property
+    def output_dim(self):
+        return self.nn_module.output_dim

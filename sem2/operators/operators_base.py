@@ -9,7 +9,7 @@ import torch
 from enum import StrEnum
 
 if TYPE_CHECKING:
-    from sem2.model import SEM2
+    from model.model import SEM2
 
 
 class OperatorInput(StrEnum):

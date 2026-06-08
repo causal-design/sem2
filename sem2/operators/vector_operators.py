@@ -1,11 +1,10 @@
 from typing import TYPE_CHECKING
-import torch
 from .operators_base import SEM2Operator, OperatorInput, OperatorOutput
-from ..model import SEMType
+from model.model import SEMType
 
 if TYPE_CHECKING:
     from torch import Tensor
-    from ..model import SEM2
+    from model.model import SEM2
 
 
 class PotentialOutcome(SEM2Operator):
