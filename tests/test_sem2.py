@@ -126,32 +126,32 @@ class TestNodeExogenous:
 
     def test_normal_shape(self):
         m = make_model("e ~ Normal(0,1)")
-        assert m.layer["e"]([], batch_size=BS).shape == (BS, 1)
+        assert m.node_dict["e"]([], batch_size=BS).shape == (BS, 1)
 
     def test_multidim_shape(self):
         m = make_model("e ~ Normal(0,1)", cfgs={"e": 3})
-        assert m.layer["e"]([], batch_size=BS).shape == (BS, 3)
+        assert m.node_dict["e"]([], batch_size=BS).shape == (BS, 3)
 
     def test_beta_range(self):
         m = make_model("b ~ Beta(0.5,0.5)")
-        out = m.layer["b"]([], batch_size=100)
+        out = m.node_dict["b"]([], batch_size=100)
         assert out.min() >= 0.0 and out.max() <= 1.0
 
     def test_no_predecessors(self):
         m = make_model("e ~ Normal(0,1)")
-        assert m.layer["e"].predecessors == []
+        assert m.node_dict["e"].predecessors == []
 
     def test_is_node_exogenous(self):
         """Concrete exogenous node must be NodeExogenous."""
         m = make_model("e ~ Normal(0,1)")
-        assert isinstance(m.layer["e"], NodeExogenous)
+        assert isinstance(m.node_dict["e"], NodeExogenous)
 
 
 
     def test_dist_attribute_set(self):
         """NodeExogenous must have a dist attribute after construction."""
         m = make_model("e ~ Normal(0,1)")
-        assert m.layer["e"].dist is not None
+        assert m.node_dict["e"].dist is not None
 
 
 class TestNodeLinear:
@@ -441,7 +441,7 @@ class TestSEM2Inheritance:
 
     def test_dag_graph_matches_layers(self):
         m = make_model("e1, e2 ~ Normal(0,1); y <- e1 + e2")
-        assert set(m.graph.keys()) == set(m.layer.keys())
+        assert set(m.graph.keys()) == set(m.node_dict.keys())
 
     def test_dag_topological_order_matches_static_order(self):
         m = make_model("e1, e2 ~ Normal(0,1); x <- e1; y <- x + e2")
@@ -449,7 +449,7 @@ class TestSEM2Inheritance:
 
     def test_dag_predecessors_match_node_predecessors(self):
         m = make_model("e1, e2 ~ Normal(0,1); y <- e1 + e2")
-        for name, node in m.layer.items():
+        for name, node in m.node_dict.items():
             assert m.graph[name] == node.predecessors
 
     def test_parameters_registered(self):
@@ -466,7 +466,7 @@ class TestSEM2Inheritance:
         If you add a new node type, add a corresponding test here.
         """
         m = make_model("e ~ Normal(0,1)")
-        assert isinstance(m.layer["e"], SEM2Node), (
+        assert isinstance(m.node_dict["e"], SEM2Node), (
             f"NodeExogenous does not inherit from SEM2Node"
         )
 
@@ -475,7 +475,7 @@ class TestSEM2Inheritance:
         If you add a new node type, add a corresponding test here.
         """
         m = make_model("e ~ Normal(0,1); y <- e")
-        node = m.layer["y"]
+        node = m.node_dict["y"]
         assert isinstance(node, SEM2Node), (
             f"NodeLinear does not inherit from SEM2Node"
         )
@@ -485,7 +485,7 @@ class TestSEM2Inheritance:
         If you add a new node type, add a corresponding test here.
         """
         m = make_model("e ~ Normal(0,1); y <- n(e)")
-        node = m.layer["y"]
+        node = m.node_dict["y"]
         assert isinstance(node, SEM2Node), (
             f"NodeMLP does not inherit from SEM2Node"
         )
@@ -499,56 +499,56 @@ class TestFormulaParser:
 
     def test_simple_linear(self):
         m = make_model("e ~ Normal(0,1); x <- e")
-        assert "e" in m.layer and "x" in m.layer
+        assert "e" in m.node_dict and "x" in m.node_dict
 
     def test_multi_lhs_expansion(self):
         m = make_model("e1, e2, e3 ~ Normal(0,1)")
-        assert {"e1", "e2", "e3"} == set(m.layer.keys())
+        assert {"e1", "e2", "e3"} == set(m.node_dict.keys())
 
     def test_linear_node_type(self):
         m = make_model("e1, e2 ~ Normal(0,1); y <- e1 + e2")
-        assert isinstance(m.layer["y"], NodeLinear)
+        assert isinstance(m.node_dict["y"], NodeLinear)
 
     def test_fixed_coeff_one_parsed(self):
         m = make_model("e ~ Normal(0,1); y <- 1*e")
-        assert m.layer["y"].fix_weights[0, 0].item() is True
+        assert m.node_dict["y"].fix_weights[0, 0].item() is True
 
     def test_fixed_coeff_negative_parsed(self):
         m = make_model("e ~ Normal(0,1); y <- -1*e")
-        assert m.layer["y"].fix_weights[0, 0].item() is True
-        assert m.layer["y"]._fixed_vals[0, 0].item() == -1.0
+        assert m.node_dict["y"].fix_weights[0, 0].item() is True
+        assert m.node_dict["y"]._fixed_vals[0, 0].item() == -1.0
 
     def test_fixed_coeff_fractional_parsed(self):
         m = make_model("e ~ Normal(0,1); y <- 0.5*e")
-        assert m.layer["y"]._fixed_vals[0, 0].item() == pytest.approx(0.5)
+        assert m.node_dict["y"]._fixed_vals[0, 0].item() == pytest.approx(0.5)
 
     def test_no_coeff_is_learned(self):
         m = make_model("e ~ Normal(0,1); y <- e")
-        assert m.layer["y"].fix_weights[0, 0].item() is False
+        assert m.node_dict["y"].fix_weights[0, 0].item() is False
 
     def test_mlp_node_type(self):
         m = make_model("e1, e2 ~ Normal(0,1); y <- n(e1,e2)")
-        assert isinstance(m.layer["y"], NodeMLP)
+        assert isinstance(m.node_dict["y"], NodeMLP)
 
     def test_mixed_linear_mlp(self):
         m = make_model("e1, e2, e3 ~ Normal(0,1); y <- n(e1,e2) + e3")
-        assert isinstance(m.layer["y"], NodeLinear)
-        mlp_nodes = [k for k in m.layer if k.startswith("y:")]
+        assert isinstance(m.node_dict["y"], NodeLinear)
+        mlp_nodes = [k for k in m.node_dict if k.startswith("y:")]
         assert len(mlp_nodes) == 1
-        assert isinstance(m.layer[mlp_nodes[0]], NodeMLP)
+        assert isinstance(m.node_dict[mlp_nodes[0]], NodeMLP)
 
     def test_nested_mlp(self):
         m = make_model("e1, e2, e3 ~ Normal(0,1); y <- n(e1, n(e2,e3))")
-        assert len([k for k in m.layer if k.startswith("y:")]) >= 1
+        assert len([k for k in m.node_dict if k.startswith("y:")]) >= 1
 
     def test_deeply_nested_mlp(self):
         m = make_model("e1,e2,e3,e4 ~ Normal(0,1); y <- n(e1, n(e2, n(e3,e4)))")
-        assert "y" in m.layer
+        assert "y" in m.node_dict
 
     def test_whitespace_ignored(self):
         m1 = make_model("e ~ Normal(0,1); y <- e")
         m2 = make_model("e ~ Normal( 0 , 1 ) ; y <- e")
-        assert set(m1.layer.keys()) == set(m2.layer.keys())
+        assert set(m1.node_dict.keys()) == set(m2.node_dict.keys())
 
     def test_unknown_cfg_raises(self):
         with pytest.raises(AssertionError):
@@ -642,7 +642,7 @@ class TestSEM2Forward:
         m = make_model("e ~ Normal(0,1); x <- e; y <- 1*x",
                        cfgs={"x": LinearNodeConfig(output_dim=2),
                               "y": LinearNodeConfig(use_bias=False)})
-        node_y = m.layer["y"]
+        node_y = m.node_dict["y"]
         with torch.no_grad():
             node_y.linear.weight.fill_(99.0)
         out = node_y([torch.ones(1, 2)], batch_size=1)
@@ -696,7 +696,7 @@ class TestEdgeCases:
 
     def test_get_set_reset_value(self):
         m = make_model("e ~ Normal(0,1)")
-        n = m.layer["e"]
+        n = m.node_dict["e"]
         t = torch.tensor([[1.0]])
         n.set_value(t)
         assert torch.allclose(n.get_value(), t)
@@ -705,11 +705,11 @@ class TestEdgeCases:
 
     def test_repr(self):
         m = make_model("e ~ Normal(0,1)")
-        assert "e" in repr(m.layer["e"])
+        assert "e" in repr(m.node_dict["e"])
 
     def test_mixed_fixed_learned_coefficients(self):
         m = make_model("e1, e2 ~ Normal(0,1); y <- 1*e1 + e2")
-        node = m.layer["y"]
+        node = m.node_dict["y"]
         assert node.fix_weights[0, 0].item() is True
         assert node.fix_weights[0, 1].item() is False
 
@@ -731,12 +731,12 @@ class TestClassHierarchy:
     def test_node_exogenous_torch_is_concrete(self):
         """NodeExogenous is the concrete torch implementation."""
         m = make_model("e ~ Normal(0,1)")
-        node = m.layer["e"]
+        node = m.node_dict["e"]
         assert type(node) is NodeExogenous
 
     def test_node_exogenous_torch_inherits_chain(self):
         m = make_model("e ~ Normal(0,1)")
-        node = m.layer["e"]
+        node = m.node_dict["e"]
         assert isinstance(node, NodeExogenous)
         assert isinstance(node, NodeExogenous)
         assert isinstance(node, SEM2Node)
@@ -745,7 +745,7 @@ class TestClassHierarchy:
 
     def test_node_linear_inherits_chain(self):
         m = make_model("e ~ Normal(0,1); y <- e")
-        node = m.layer["y"]
+        node = m.node_dict["y"]
         assert isinstance(node, NodeLinear)
         assert isinstance(node, NodeEndogenous)
         assert isinstance(node, SEM2Node)
@@ -755,11 +755,11 @@ class TestClassHierarchy:
     def test_node_linear_dist_is_none(self):
         """Endogenous nodes have no distribution — dist stays None."""
         m = make_model("e ~ Normal(0,1); y <- e")
-        assert m.layer["y"].dist is None
+        assert m.node_dict["y"].dist is None
 
     def test_node_mlp_inherits_chain(self):
         m = make_model("e ~ Normal(0,1); y <- n(e)")
-        node = m.layer["y"]
+        node = m.node_dict["y"]
         assert isinstance(node, NodeMLP)
         assert isinstance(node, NodeNonlinear)
         assert isinstance(node, NodeEndogenous)

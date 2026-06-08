@@ -9,7 +9,7 @@ import torch
 from enum import StrEnum
 
 if TYPE_CHECKING:
-    from model.model import SEM2
+    from sem2.model.model import SEM2
 
 
 class OperatorInput(StrEnum):
@@ -35,4 +35,3 @@ class SEM2Operator(ABC):
         """ Evaluates the operator. Returns a tuple of (output, metrics_dict). The output is the value of the operator,
         and the metrics_dict contains useful debug / tracking information.
         """
-

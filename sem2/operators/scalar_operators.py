@@ -2,10 +2,10 @@ from typing import TYPE_CHECKING
 import torch
 from .operators_base import OperatorInput, OperatorOutput, SEM2Operator
 from .vector_operators import PotentialOutcome
-from model.model import SEMType
+from ..model.model import SEMType
 
 if TYPE_CHECKING:
-    from model.model import SEM2
+    from ..model.model import SEM2
     from ..default_configs import TrainingConfig
 
 
@@ -184,4 +184,3 @@ class SEM2Loss(SEM2Operator):
             total_loss += weight * loss_comp_value
             metrics.update(sub_metrics)         # Potential collisions here.
         return total_loss, metrics
-
