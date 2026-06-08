@@ -4,8 +4,8 @@ import torch
 from torch import nn
 from torch.distributions import Distribution
 
-from .nn_models import _LinearConfig, _LinearModel, LinearNodeConfig, MLPConfig, _MLP, _MLPDiscrete
-
+from .nn_models import _LinearConfig, _LinearModel, _MLP, _MLPDiscrete
+from ..default_configs import LinearNodeConfig, MLPConfig
 
 # ── RandomVariable ────────────────────────────────────────────────────────────
 
@@ -241,6 +241,14 @@ class NodeMLPDiscrete(SEM2Node):
             self.nn_module = _MLPDiscrete(cfg, mode=mode, device=device)
         else:
             print(cfg)
+            print("cfg:", cfg)
+            print("type(cfg):", type(cfg))
+            print("expected:", MLPConfig)
+            print("same class:", type(cfg) is MLPConfig)
+            print("cfg module:", type(cfg).__module__)
+            print("expected module:", MLPConfig.__module__)
+            print("isinstance:", isinstance(cfg, MLPConfig))
+
             raise ValueError(f"Invalid MLP configuration: {cfg}. Must be MLPConfig object, or None if default config is needed.")
 
         self.type = "NN_dist"
