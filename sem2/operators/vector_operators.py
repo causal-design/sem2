@@ -1,10 +1,10 @@
 from typing import TYPE_CHECKING
 from .operators_base import SEM2Operator, OperatorInput, OperatorOutput
-from model.model import SEMType
+from ..model.sem_parsing import SEMType
 
 if TYPE_CHECKING:
     from torch import Tensor
-    from model.model import SEM2
+    from ..model.model import SEM2
 
 
 class PotentialOutcome(SEM2Operator):
@@ -38,7 +38,7 @@ class PotentialOutcome(SEM2Operator):
             The computed tensor for the target node.
             {} Dummy dict, no metrics are generated.
         """
-        layer = self.model.layer
+        layer = self.model.node_dict
         topological_order = self.model.topological_order
 
         assert self.target_node in layer, f"target_node {self.target_node} not found in model"

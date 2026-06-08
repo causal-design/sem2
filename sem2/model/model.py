@@ -5,7 +5,7 @@ from torch import nn
 from torch import Tensor
 
 from .nn_models import LinearNodeConfig, DiscreteModes
-from .nodes import NodeExogenous, NodeLinear, NodeMLP, NodeMLPDiscrete
+from .nodes import NodeExogenous, NodeLinear, NodeMLP, NodeMLPDiscrete, SEM2Node
 from .sem_parsing import DAG, SEMType
 
 
@@ -19,6 +19,7 @@ class SEM2(DAG, nn.Module):
     Inherits graph structure and parsing from DAG, and parameter registration
     and training from nn.Module.
     """
+    node_dict: nn.ModuleDict[str, SEM2Node]  # Maps node name to its SEM2Node object, registered as submodule for PyTorch tracking
 
     def __init__(self, model_formula: str, node_cfgs: dict = None, device="cpu"):
         """
@@ -41,10 +42,11 @@ class SEM2(DAG, nn.Module):
             f"The following nodes were given but not found in formula: {list(node_cfgs.keys())}"
 
         # Register all nodes as submodules so PyTorch tracks parameters
-        self.layer = nn.ModuleDict(name_to_node)
-        self.layer.to(device)
+        self.node_dict = nn.ModuleDict(name_to_node)
+        self.node_dict.to(device)
 
-        # Inform the user what type of SEM they have built
+        # Inform the user what type of SEM they have built. If it could be different inform the user.
+        # The current type is SEMType.NONLINEAR. This is the most general class.
         if self.sem_type == SEMType.NONLINEAR:
             logging.info(f"Building a nonlinear SEM2 model.")
         else:
@@ -53,8 +55,10 @@ class SEM2(DAG, nn.Module):
                 f"To use additional functionality, consider using a different SEM2 implementation.",
                 stacklevel=2,
             )
+        # Set SEM type to nonlinear for this type of SEM.
+        self.sem_type = SEMType.NONLINEAR
 
-    def _build_and_initialize_nodes(self, node_cfgs: dict, device: str) -> dict:
+    def _build_and_initialize_nodes(self, node_cfgs: dict, device: str) -> dict[str, SEM2Node]:
         """Build all SEM2Node objects from DAG.node_specs in topological order.
 
         Because we iterate in topological order, every node's predecessors are
@@ -119,7 +123,7 @@ class SEM2(DAG, nn.Module):
             {node_name: tensor}.
             {} Dummy dict, no metrics are generated.
         """
-        layer = self.layer
+        layer = self.node_dict
         topological_order = self.topological_order
 
         set_nodes = set_nodes if set_nodes is not None else {}
@@ -145,6 +149,8 @@ class SEM2(DAG, nn.Module):
 
 class SEM2Discrete(SEM2):
     """Discrete SEM2."""
+    node_dict: nn.ModuleDict[str, SEM2Node]  # Maps node name to its SEM2Node object, registered as submodule for PyTorch tracking
+
     def __init__(self, model_formula: str, node_cfgs: dict = None, device="cpu"):
         super().__init__(model_formula, node_cfgs, device=device)
         self.device = device
@@ -160,7 +166,7 @@ class SEM2Discrete(SEM2):
         N_nn_nodes = 0
         n_classes = []  # List of output dimensions for each NN_dist node
         node_names = []   # List of node names corresponding to each column in all_states
-        for node_name, node in self.layer.items():
+        for node_name, node in self.node_dict.items():
             if isinstance(node, NodeMLPDiscrete):
                 node.id = N_nn_nodes
                 N_nn_nodes += 1
@@ -194,7 +200,7 @@ class SEM2Discrete(SEM2):
         """
 
         set_nodes = set_nodes if set_nodes is not None else {}
-        assert set(set_nodes.keys()).issubset(self.layer.keys()), f"Invalid nodes given: {set_nodes.keys()}"
+        assert set(set_nodes.keys()).issubset(self.node_dict.keys()), f"Invalid nodes given: {set_nodes.keys()}"
 
         device = self.device
         all_states = self.all_states  # [N_conf, N_discrete_nodes]
@@ -205,7 +211,7 @@ class SEM2Discrete(SEM2):
         neg_inf = torch.tensor(-torch.inf, dtype=log_probs.dtype, device=device)
 
         for node_name in self.topological_order:
-            node = self.layer[node_name]
+            node = self.node_dict[node_name]
             is_discrete = isinstance(node, NodeMLPDiscrete)
             # ---- Intervention handling ----
             if node_name in set_nodes:
@@ -224,7 +230,7 @@ class SEM2Discrete(SEM2):
             if not is_discrete:
                 # Non-discrete nodes are sampled like normal
                 parent_names = list(node.predecessors)
-                parent_values = [self.layer[p].get_value() for p in parent_names]
+                parent_values = [self.node_dict[p].get_value() for p in parent_names]
                 node(parent_values, batch_size)
                 continue
 
@@ -232,8 +238,8 @@ class SEM2Discrete(SEM2):
             disc_parents = []
             cont_parents = []
             for p in node.predecessors:
-                pn = self.layer[p]
-                if isinstance(pn, NodeMLPDiscrete):#pn.type == "NN_dist":
+                pn = self.node_dict[p]
+                if isinstance(pn, NodeMLPDiscrete):
                     disc_parents.append(pn)
                 else:
                     cont_parents.append(pn)
@@ -292,7 +298,7 @@ class SEM2Discrete(SEM2):
 
         # Return extra info
         extra_dict = {"states": all_states}
-        extra_dict["full_state"] = {node: self.layer[node].get_value() for node in self.topological_order}
+        extra_dict["full_state"] = {node: self.node_dict[node].get_value() for node in self.topological_order}
         return probs, extra_dict
 
 # ══════════════════════════════════════════════════════════════════════════════
