@@ -8,7 +8,7 @@ from torch import nn
 from torch import Tensor
 
 from .nn_models import LinearNodeConfig
-from .nodes import NodeExogenous, NodeLinear, NodeMLP
+from .nodes import NodeExogenous, NodeLinear, NodeMLP# , NodeMLPDiscrete
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -138,11 +138,18 @@ class DAG:
             elif "<-" in formula:
                 lhs, rhs = formula.split("<-")
                 if rhs.startswith("n("):
+                    # Continuous neural network node
                     predecessors = rhs[2:-1].split(",")
                     self.node_specs[lhs] = DAG.NodeSpec(
                         name=lhs, rhs=rhs, node_type="mlp", predecessors=predecessors,
                     )
+                elif rhs.startswith("d("):
+                    predecessors = rhs[2:-1].split(",")
+                    self.node_specs[lhs] = DAG.NodeSpec(
+                        name=lhs, rhs=rhs, node_type="discrete", predecessors=predecessors,
+                    )
                 else:
+                    # Linear node: parse coefficients and predecessors
                     terms = rhs.split("+")
                     parsed_terms = [self._parse_linear_term(t) for t in terms]
                     self.node_specs[lhs] = DAG.NodeSpec(
@@ -473,11 +480,14 @@ class SEM2(DAG, nn.Module):
 
             elif ns.node_type == "mlp":
                 # Good to note: rhs guaranteed by _expand_rhs to be flat n(a,b,...) since no nesting
-                node = NodeMLP(node_name, ns.rhs, ns.predecessors, cfg, predecessor_nodes, device=device)
+                node = NodeMLP(node_name, ns.rhs, cfg, predecessor_nodes, device=device)
+            #
+            # elif ns.node_type == "discrete":
+            #     node = NodeMLPDiscrete(node_name, ns.rhs, cfg, predecessor_nodes, mode="None", device=device)
 
             elif ns.node_type == "linear":
                 node = NodeLinear(
-                    node_name, ns.rhs, ns.predecessors, ns.coefficients, cfg, predecessor_nodes, device=device
+                    node_name, ns.rhs, ns.coefficients, cfg, predecessor_nodes, device=device
                 )
 
             name_to_node[node_name] = node
@@ -512,8 +522,12 @@ class SEM2(DAG, nn.Module):
 
         return {name: layer[name].get_value() for name in topological_order}, {}
 
+    def forward(self, *args, **kwargs):
+        raise NotImplementedError(f"call the sample() method instead of forward() or calling the model directly.")
+
     def likelihood(self, *args, **kwargs):
         raise NotImplementedError(f"likelihood not implemented for this type of SEM2 model: {self.sem_type.value}")
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TO be moved to integration tests later I think
@@ -530,7 +544,7 @@ def main():
         "x1, x2, noise ~ Normal(0,1); y <- 0.5*x1 + -1*x2 + noise",
         node_cfgs={"y": LinearNodeConfig(use_bias=False)},
     )
-    print(linear_model(batch_size=3, return_dict=True))
+    print(linear_model.sample(batch_size=3))
 
     # ── Example 2: Pure MLP SEM ───────────────────────────────────────────────
     
@@ -540,7 +554,7 @@ def main():
         "x1, x2, noise ~ Normal(0,1); y <- n(x1, x2, noise)",
         node_cfgs={"y": MLPConfig(hidden_dims=[16, 16], output_dim=1)},
     )
-    print(mlp_model(batch_size=3, return_dict=True))
+    print(mlp_model.sample(batch_size=3))
 
     # ── Example 3: Mixed linear + MLP SEM (implicit intermediate node) ────────
 
@@ -557,7 +571,7 @@ def main():
     mixed_model = SEM2(
         "x1, x2, noise ~ Normal(0,1); y <- n(x1, x2) + 1*noise",
     )
-    print(mixed_model(batch_size=3, return_dict=True))
+    print(mixed_model.sample(batch_size=3))
 
 
 if __name__ == "__main__":
