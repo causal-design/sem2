@@ -13,26 +13,23 @@ import ast
 class SEMType(Enum):
     """Enum representing the inferred type of a SEM.
 
-    Two independent axes:
-      Functional form : LINEAR (all endogenous nodes are linear)
-                        NONLINEAR (any MLP present — supersedes linear)
-      Exogenous noise : continuous, discrete, or mixed
-
-    LINEAR_GAUSSIAN is a special case of LINEAR where all exogenous nodes
-    are Normal or MultivariateNormal (the classical SEM).
+    Types:
+        - LINEAR_GAUSSIAN: all linear endogenous nodes, all exogenous nodes are Normal/MultivariateNormal.
+        - LINEAR: all linear endogenous nodes, with non-Gaussian exogenous nodes.
+        - NONLINEAR: all endogenous nodes are MLPs.
+        - DISCRETE: all endogenous nodes are discrete.
+        - MIXED: some endogenous nodes are continuous, some are discrete.
 
     Note: sem_type is descriptive metadata. It does not change core SEM
     behaviour. Its intended future use is to gate type-specific functionals
     (e.g. closed-form log-likelihood for LINEAR_GAUSSIAN) and guide the user
     toward a specialised implementation when one exists.
     """
-    LINEAR_GAUSSIAN      = "linear_gaussian"
-    LINEAR               = "linear"
-    NONLINEAR            = "nonlinear"
-    LINEAR_DISCRETE      = "linear_discrete"
-    NONLINEAR_DISCRETE   = "nonlinear_discrete"
-    LINEAR_MIXED_EXOG    = "linear_mixed_exog"
-    NONLINEAR_MIXED_EXOG = "nonlinear_mixed_exog"
+    LINEAR_GAUSSIAN     = "linear_gaussian"
+    LINEAR              = "linear"
+    NONLINEAR           = "nonlinear"
+    DISCRETE            = "discrete"
+    MIXED               = "mixed"
 
     @staticmethod
     def is_continuous(sem_type: SEMType):
@@ -47,8 +44,7 @@ class SEMType(Enum):
     def is_discrete(sem_type: SEMType):
         """ If SEM is purely discrete"""
         return sem_type in {
-            SEMType.LINEAR_DISCRETE,
-            SEMType.NONLINEAR_DISCRETE,
+            SEMType.DISCRETE
         }
 
 # Discrete distributions in torch.distributions. This is used for sem_type detection. Probably would be nice to move it elsewhere or compact all the formula parsing.
@@ -203,58 +199,39 @@ class DAG:
     def _infer_sem_type(self) -> SEMType:
         """Infer the SEM type from node_specs.
 
-        Two independent axes determine the type:
+        Automatically infer the type of SEM:
 
-        Functional-form axis:
-          - "linear"   : every endogenous node is NodeLinear (none are MLP).
-                         Only a fully-linear SEM can be treated with linear SEM methods.
-          - "nonlinear": at least one endogenous node is an MLP (supersedes linear,
-                         since linear is a special case of nonlinear).
-
-        Exogenous-noise axis:
-          - all continuous : every exog node uses a continuous distribution.
-          - all discrete   : every exog node uses a discrete distribution.
-          - mixed exog     : some exog nodes are continuous, some are discrete.
-
-        Within the all-continuous case, "linear_gaussian" is flagged separately
-        because all exog nodes are Normal or MultivariateNormal : the classical
-        textbook SEM with potential for closed-form solutions.
-
-        Exogenous-only models (no endogenous nodes) follow the same logic on
-        the noise axis and default to the "linear" functional-form label.
-
-        Returns a SEMType enum member.
+        Types:
+            - LINEAR_GAUSSIAN: all linear endogenous nodes, all exogenous nodes are Normal/MultivariateNormal.
+            - LINEAR: all linear endogenous nodes, with non-Gaussian exogenous nodes.
+            - NONLINEAR: all endogenous nodes are MLPs.
+            - DISCRETE: all endogenous nodes are discrete.
+            - MIXED: some endogenous nodes are continuous, some are discrete.
+g
+        Returns: SEMType.
         """
         exog_specs = [ns for ns in self.node_specs.values() if ns.node_type == "exogenous"]
         endog_specs = [ns for ns in self.node_specs.values() if ns.node_type != "exogenous"]
 
-        # ── Functional-form axis ──────────────────────────────────────────────
         # Any MLP present -> nonlinear; otherwise linear (including exog-only).
         has_mlp = any(ns.node_type in ("mlp", "discrete") for ns in endog_specs)
-        func_label = "nonlinear" if has_mlp else "linear"
-
-        # ── Exogenous-noise axis ──────────────────────────────────────────────
-        n_discrete = sum(
-            1 for ns in exog_specs if ns.dist_name in _DISCRETE_DIST_NAMES
-        )
-        n_exog = len(exog_specs)
-
-        if n_discrete == 0:
-            # All exog nodes are continuous
-            _gaussian_names = {"Normal", "MultivariateNormal"}
-            is_all_gaussian = all(
-                ns.dist_name in _gaussian_names for ns in exog_specs if ns.dist_name
-            )
-            if func_label == "linear" and is_all_gaussian:
+        is_linear = not has_mlp
+        if is_linear:
+            # Is exogenous noise all Gaussian?
+            if all(ns.dist_name == "Normal" for ns in exog_specs):
                 return SEMType.LINEAR_GAUSSIAN
-            return SEMType.LINEAR if func_label == "linear" else SEMType.NONLINEAR
-
-        if n_discrete == n_exog:
-            # All discrete
-            return SEMType.LINEAR_DISCRETE if func_label == "linear" else SEMType.NONLINEAR_DISCRETE
-
-        # Mixed exogenous (some continuous, some discrete)
-        return SEMType.LINEAR_MIXED_EXOG if func_label == "linear" else SEMType.NONLINEAR_MIXED_EXOG
+            else:
+                return SEMType.LINEAR
+        else:
+            # Is discrete, continuous or mixed?
+            n_discrete = len([ns for ns in endog_specs if ns.node_type == "discrete"])
+            n_continuous = len(endog_specs) - n_discrete
+            if n_discrete == 0:
+                return SEMType.NONLINEAR
+            elif n_continuous == 0:
+                return SEMType.DISCRETE
+            else:
+                return SEMType.MIXED
 
     # ── Exogenous rhs parsing (with error handling) ───────────────────────────
 

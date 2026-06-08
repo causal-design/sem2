@@ -1,12 +1,12 @@
 import warnings
-
+import logging
 import torch
 from torch import nn
 from torch import Tensor
 
 from .nn_models import LinearNodeConfig, DiscreteModes
 from .nodes import NodeExogenous, NodeLinear, NodeMLP, NodeMLPDiscrete
-from .sem_parsing import DAG
+from .sem_parsing import DAG, SEMType
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -45,10 +45,14 @@ class SEM2(DAG, nn.Module):
         self.layer.to(device)
 
         # Inform the user what type of SEM they have built
-        warnings.warn(
-            f"[SEM2] Model '{model_formula}' detected as sem_type='{self.sem_type.value}'.",
-            stacklevel=2,
-        )
+        if self.sem_type == SEMType.NONLINEAR:
+            logging.info(f"Building a nonlinear SEM2 model.")
+        else:
+            warnings.warn(
+                f"SEM type {self.sem_type.value} detected from formula. This SEM2 implementation is primarily designed for nonlinear SEMs. "
+                f"To use additional functionality, consider using a different SEM2 implementation.",
+                stacklevel=2,
+            )
 
     def _build_and_initialize_nodes(self, node_cfgs: dict, device: str) -> dict:
         """Build all SEM2Node objects from DAG.node_specs in topological order.
@@ -144,6 +148,12 @@ class SEM2Discrete(SEM2):
     def __init__(self, model_formula: str, node_cfgs: dict = None, device="cpu"):
         super().__init__(model_formula, node_cfgs, device=device)
         self.device = device
+
+        # Check if the model is discrete
+        if self.sem_type != SEMType.DISCRETE:
+            raise ValueError(f'SEM2Discrete can only be used with a discrete model. Found "{self.sem_type.value}" model.')
+        else:
+            logging.info(f"Building a discrete SEM2 model.")
 
         # Prepare for all possible configurations of NN nodes for sampling probabilities.
         # Number of NN nodes and their output dimensions
