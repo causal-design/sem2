@@ -5,7 +5,7 @@ import torch
 from torch import nn
 from torch.distributions import Distribution
 
-from .nn_models import _LinearConfig, _LinearModel, LinearNodeConfig, MLPConfig, _MLP
+from .nn_models import _LinearConfig, _LinearModel, LinearNodeConfig, MLPConfig, _MLP, _MLPDiscrete
 
 
 # ── RandomVariable ────────────────────────────────────────────────────────────
@@ -35,12 +35,12 @@ class SEM2Node(RandomVariable, ABC, nn.Module):
     out_dim: int
     predecessors: list[str]
 
-    def __init__(self, name: str, rhs: str, predecessors: list[str], device="cpu"):
+    def __init__(self, name: str, rhs: str, predecessor_nodes: list['SEM2Node'], device="cpu"):
         super().__init__()
         self.name = name
         self.rhs = rhs
-        self.predecessors = predecessors
-        self.npredecessors = len(predecessors)
+        self.predecessors = [n.name for n in predecessor_nodes]
+        self.npredecessors = len(self.predecessors)
         self.device = device
         self.formula = name + "=" + rhs
         self.value = None
@@ -89,7 +89,7 @@ class NodeExogenous(SEM2Node):
         out_dim: int = 1,
         device="cpu",
     ):
-        super().__init__(name, rhs, predecessors=[], device=device)
+        super().__init__(name, rhs, predecessor_nodes=[], device=device)
         self.out_dim = out_dim
         self.dist = dist
 
@@ -104,8 +104,8 @@ class NodeEndogenous(SEM2Node, ABC):
     An endogenous node is a deterministic function of its parent nodes.
     """
 
-    def __init__(self, name: str, rhs: str, predecessors: list[str], device="cpu"):
-        super().__init__(name, rhs, predecessors, device=device)
+    def __init__(self, name: str, rhs: str, predecessor_nodes: list['SEM2Node'], device="cpu"):
+        super().__init__(name, rhs, predecessor_nodes, device=device)
 
 
 # ── Linear ────────────────────────────────────────────────────────────────────
@@ -124,17 +124,19 @@ class NodeLinear(NodeEndogenous):
     correctly with model.to(device) and are not counted as learnable parameters.
     """
 
+    fix_weights: torch.Tensor
+    _fixed_vals: torch.Tensor
+    _ones: torch.Tensor
     def __init__(
         self,
         name: str,
         rhs: str,
-        predecessors: list[str],
         coefficients: list[float | None],
         cfg: LinearNodeConfig | None,
         predecessor_nodes: list[SEM2Node],
         device="cpu",
     ):
-        super().__init__(name, rhs, predecessors, device=device)
+        super().__init__(name, rhs, predecessor_nodes, device=device)
         self.out_dim = cfg.output_dim if cfg is not None else 1
         self.use_bias = cfg.use_bias if cfg is not None else True
 
@@ -189,8 +191,8 @@ class NodeNonlinear(NodeEndogenous, ABC):
     Subclass this to plug in a different linking function (e.g. GP, spline).
     """
 
-    def __init__(self, name: str, rhs: str, predecessors: list[str], device="cpu"):
-        super().__init__(name, rhs, predecessors, device=device)
+    def __init__(self, name: str, rhs: str, predecessor_nodes: list[SEM2Node], device="cpu"):
+        super().__init__(name, rhs, predecessor_nodes, device=device)
 
     @abstractmethod
     def _forward_inner(self, x: list[torch.Tensor], batch_size: int = 1) -> torch.Tensor:
@@ -208,12 +210,11 @@ class NodeMLP(NodeNonlinear):
         self,
         name: str,
         rhs: str,
-        predecessors: list[str],
         cfg: MLPConfig | None,
         predecessor_nodes: list[SEM2Node],
         device="cpu",
     ):
-        super().__init__(name, rhs, predecessors, device=device)
+        super().__init__(name, rhs, predecessor_nodes, device=device)
         self.cfg = cfg if cfg is not None else MLPConfig()
 
         input_dim = sum(p.out_dim for p in predecessor_nodes)
@@ -224,3 +225,33 @@ class NodeMLP(NodeNonlinear):
 
     def _forward_inner(self, x: list[torch.Tensor], batch_size: int = 1) -> torch.Tensor:
         return self.mlp(self._collate_fn(x))
+
+
+# # ── Discrete Node ───────────────────────────────────────────────────────────────────
+#
+# class NodeMLPDiscrete(SEM2Node):
+#     """ Discrete NN node. """
+#     dist: torch.distributions.Distribution
+#     id: int = 0
+#
+#     def __init__(self, name: str, rhs: str, cfg: MLPConfig|None, predecessor_nodes: list[SEM2Node], mode=None, device="cpu"):
+#         super().__init__(name, rhs, predecessor_nodes, device=device)
+#         if cfg is None:
+#             cfg = MLPConfig()
+#         if isinstance(cfg, MLPConfig):
+#             self.nn_module = _MLPDiscrete(cfg, mode=mode, device=device)
+#         else:
+#             print(cfg)
+#             raise ValueError(f"Invalid MLP configuration: {cfg}. Must be MLPConfig object, or None if default config is needed.")
+#
+#         self.type = "NN_dist"
+#
+#     def _forward_inner(self, x: list[torch.Tensor], batch_size=1):
+#         """ x: List[Tensor], shape = [n_predecessors][bs, output_dim] """
+#         x = self._collate_fn(x)
+#         out = self.nn_module(x)
+#         return out
+#
+#     @property
+#     def output_dim(self):
+#         return self.nn_module.output_dim

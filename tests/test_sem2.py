@@ -164,13 +164,14 @@ class TestNodeLinear:
         """Build a NodeLinear with fake predecessor nodes."""
         n_preds = len(coefficients)
         out_dims = out_dims or [1] * n_preds
-        predecessors = [f"p{i}" for i in range(n_preds)]
 
         class FakeNode:
-            def __init__(self, d): self.out_dim = d
+            def __init__(self, name, d):
+                self.name = name
+                self.out_dim = d
 
-        pred_nodes = [FakeNode(d) for d in out_dims]
-        node = NodeLinear("y", "+".join(predecessors), predecessors, coefficients, cfg, pred_nodes)
+        pred_nodes = [FakeNode(f"p{i}", d) for i, d in enumerate(out_dims)]
+        node = NodeLinear("y", "+".join(f"p{i}" for i in range(n_preds)), coefficients, cfg, pred_nodes)
         return node
 
     def test_basic_shape(self):
@@ -252,10 +253,12 @@ class TestNodeMLP:
         rhs = "n(" + ",".join(predecessors) + ")"
 
         class FakeNode:
-            def __init__(self, d): self.out_dim = d
+            def __init__(self, name, d):
+                self.name = name
+                self.out_dim = d
 
-        pred_nodes = [FakeNode(d) for d in out_dims]
-        node = NodeMLP("y", rhs, predecessors, cfg, pred_nodes)
+        pred_nodes = [FakeNode(f"p{i}", d) for i, d in enumerate(out_dims)]
+        node = NodeMLP("y", rhs, cfg, pred_nodes)
         return node
 
     def test_output_shape(self):
@@ -926,13 +929,14 @@ class TestRegisterBuffer:
     def _make_linear_node(self, coefficients, out_dims=None):
         n_preds = len(coefficients)
         out_dims = out_dims or [1] * n_preds
-        predecessors = [f"p{i}" for i in range(n_preds)]
 
         class FakeNode:
-            def __init__(self, d): self.out_dim = d
+            def __init__(self, name, d):
+                self.name = name
+                self.out_dim = d
 
-        pred_nodes = [FakeNode(d) for d in out_dims]
-        return NodeLinear("y", "+".join(predecessors), predecessors, coefficients, None, pred_nodes)
+        pred_nodes = [FakeNode(f"p{i}", d) for i, d in enumerate(out_dims)]
+        return NodeLinear("y", "+".join(f"p{i}" for i in range(n_preds)), coefficients, None, pred_nodes)
 
     def test_fix_weights_is_buffer(self):
         """fix_weights must be a registered buffer, not a plain attribute."""
