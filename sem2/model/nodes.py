@@ -45,7 +45,7 @@ class SEM2Node(RandomVariable, ABC, nn.Module):
         self.value = None
 
     def __repr__(self):
-        return self.formula
+        return f'SEM2Node: {self.formula}'
 
     def set_value(self, value: torch.Tensor):
         self.value = value
@@ -60,12 +60,12 @@ class SEM2Node(RandomVariable, ABC, nn.Module):
         """Concatenate predecessor values along the last dimension."""
         return torch.cat(x, dim=-1)
 
-    def forward(self, x: list[torch.Tensor], batch_size: int = 1):
-        self.value = self._forward_inner(x, batch_size)
+    def forward(self, x: list[torch.Tensor], batch_size: int = 1, **kwargs):
+        self.value = self._forward_inner(x, batch_size=batch_size, **kwargs)
         return self.value
 
     @abstractmethod
-    def _forward_inner(self, x: list[torch.Tensor], batch_size: int = 1) -> torch.Tensor:
+    def _forward_inner(self, x: list[torch.Tensor], batch_size: int = 1, **kwargs) -> torch.Tensor:
         pass
 
 
@@ -123,9 +123,6 @@ class NodeLinear(NodeEndogenous):
     correctly with model.to(device) and are not counted as learnable parameters.
     """
 
-    fix_weights: torch.Tensor
-    _fixed_vals: torch.Tensor
-    _ones: torch.Tensor
     def __init__(
         self,
         name: str,
@@ -154,18 +151,9 @@ class NodeLinear(NodeEndogenous):
         fix_mask = [c is not None for c in expanded]
         fix_vals = [c if c is not None else 0.0 for c in expanded]
 
-        self.register_buffer(
-            "fix_weights",
-            torch.tensor(fix_mask, dtype=torch.bool, device=device).unsqueeze(0),
-        )
-        self.register_buffer(
-            "_fixed_vals",
-            torch.tensor(fix_vals, dtype=torch.float32, device=device).unsqueeze(0),
-        )
-        self.register_buffer(
-            "_ones",
-            torch.ones(1, input_dim, device=device),
-        )
+        self.fix_weights = nn.parameter.Buffer(torch.tensor(fix_mask, dtype=torch.bool, device=device).unsqueeze(0))
+        self._fixed_vals = nn.parameter.Buffer(torch.tensor(fix_vals, dtype=torch.float32, device=device).unsqueeze(0))
+        self._ones = nn.parameter.Buffer(torch.ones(1, input_dim, device=device))
 
         internal_cfg = _LinearConfig(
             input_dim=input_dim,
@@ -233,32 +221,20 @@ class NodeMLPDiscrete(SEM2Node):
     dist: torch.distributions.Distribution
     id: int = 0
 
-    def __init__(self, name: str, rhs: str, cfg: MLPConfig|None, predecessor_nodes: list[SEM2Node], mode=None, device="cpu"):
+    def __init__(self, name: str, rhs: str, cfg: MLPConfig, predecessor_nodes: list[SEM2Node], mode=None, device="cpu"):
         super().__init__(name, rhs, predecessor_nodes, device=device)
         if cfg is None:
             cfg = MLPConfig()
         if isinstance(cfg, MLPConfig):
             self.nn_module = _MLPDiscrete(cfg, mode=mode, device=device)
         else:
-            print(cfg)
-            print("cfg:", cfg)
-            print("type(cfg):", type(cfg))
-            print("expected:", MLPConfig)
-            print("same class:", type(cfg) is MLPConfig)
-            print("cfg module:", type(cfg).__module__)
-            print("expected module:", MLPConfig.__module__)
-            print("isinstance:", isinstance(cfg, MLPConfig))
+            raise ValueError(f"Invalid MLP configuration: \n{cfg}\n. Must be MLPConfig object, or None if default config is needed.")
 
-            raise ValueError(f"Invalid MLP configuration: {cfg}. Must be MLPConfig object, or None if default config is needed.")
+        self.n_classes = cfg.output_dim
 
-        self.type = "NN_dist"
-
-    def _forward_inner(self, x: list[torch.Tensor], batch_size=1):
+    def _forward_inner(self, x: list[torch.Tensor], mode="sample", batch_size=1):
         """ x: List[Tensor], shape = [n_predecessors][bs, output_dim] """
         x = self._collate_fn(x)
-        out = self.nn_module(x)
+        out = self.nn_module(x, mode=mode)
         return out
 
-    @property
-    def output_dim(self):
-        return self.nn_module.output_dim
