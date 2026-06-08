@@ -6,6 +6,30 @@ from dataclasses import dataclass, field
 from graphlib import TopologicalSorter, CycleError
 import ast
 
+
+def is_list_or_float_like(value):
+    """
+    Allows:
+      - float or int values
+      - lists/tuples containing only allowed values
+
+    Rejects:
+      - strings
+      - dicts
+      - booleans
+      - None
+    """
+    if isinstance(value, bool):
+        return False
+
+    if isinstance(value, (int, float)):
+        return True
+
+    if isinstance(value, (list, tuple)):
+        return all(is_list_or_float_like(item) for item in value)
+
+    return False
+
 # ══════════════════════════════════════════════════════════════════════════════
 # SEM type
 # ══════════════════════════════════════════════════════════════════════════════
@@ -62,30 +86,6 @@ _DISCRETE_DIST_NAMES = frozenset({
 # ══════════════════════════════════════════════════════════════════════════════
 # DAG
 # ══════════════════════════════════════════════════════════════════════════════
-
-
-def is_list_or_float_like(value):
-    """
-    Allows:
-      - float or int values
-      - lists/tuples containing only allowed values
-
-    Rejects:
-      - strings
-      - dicts
-      - booleans
-      - None
-    """
-    if isinstance(value, bool):
-        return False
-
-    if isinstance(value, (int, float)):
-        return True
-
-    if isinstance(value, (list, tuple)):
-        return all(is_list_or_float_like(item) for item in value)
-
-    return False
 
 
 class DAG:

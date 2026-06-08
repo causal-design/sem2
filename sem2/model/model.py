@@ -45,18 +45,19 @@ class SEM2(DAG, nn.Module):
         self.node_dict = nn.ModuleDict(name_to_node)
         self.node_dict.to(device)
 
-        # Inform the user what type of SEM they have built. If it could be different inform the user.
-        # The current type is SEMType.NONLINEAR. This is the most general class.
-        if self.sem_type == SEMType.NONLINEAR:
-            logging.info(f"Building a nonlinear SEM2 model.")
-        else:
-            warnings.warn(
-                f"SEM type {self.sem_type.value} detected from formula. This SEM2 implementation is primarily designed for nonlinear SEMs. "
-                f"To use additional functionality, consider using a different SEM2 implementation.",
-                stacklevel=2,
-            )
-        # Set SEM type to nonlinear for this type of SEM.
-        self.sem_type = SEMType.NONLINEAR
+        # TODO: This needs to only be run on the main SEM2 classes. Child classes have their own version, so this can't be in the main SEM2.__init__()
+        # # Inform the user what type of SEM they have built. If it could be different inform the user.
+        # # The current type is SEMType.NONLINEAR. This is the most general class.
+        # if self.sem_type == SEMType.NONLINEAR:
+        #     logging.info(f"Building a nonlinear SEM2 model.")
+        # else:
+        #     warnings.warn(
+        #         f"SEM type {self.sem_type.value} detected from formula. This SEM2 implementation is primarily designed for nonlinear SEMs. "
+        #         f"To use additional functionality, consider using a different SEM2 implementation.",
+        #         stacklevel=2,
+        #     )
+        # # Set SEM type to nonlinear for this type of SEM.
+        # self.sem_type = SEMType.NONLINEAR
 
     def _build_and_initialize_nodes(self, node_cfgs: dict, device: str) -> dict[str, SEM2Node]:
         """Build all SEM2Node objects from DAG.node_specs in topological order.
@@ -171,10 +172,9 @@ class SEM2Discrete(SEM2):
                 node.id = N_nn_nodes
                 N_nn_nodes += 1
                 n_classes.append(node.n_classes)
-                node_names.append(node)
+                node_names.append(node.name)
 
         self.output_dims = n_classes  # Store for later use
-        self.state_node_names = node_names  # List of node names, where index corresponds to column in all_states
 
         # Generate all possible discrete configurations of the NN nodes (Cartesian product).
         # N_conf = product of all output_dims
@@ -192,11 +192,18 @@ class SEM2Discrete(SEM2):
             grids = torch.meshgrid(*ranges, indexing='ij')
             all_states = torch.stack([g.flatten() for g in grids], dim=1).to(self.device)  # [N_conf, N_nn_nodes]
 
-        self.all_states = torch.nn.parameter.Buffer(all_states)
+        # Track order of output nodes.
+        self.state_node_names = node_names  # List of node names, where index corresponds to column in all_states
+        self.all_states = torch.nn.parameter.Buffer(all_states) # Which state each confguration corresponds to
 
-    def sample(self, batch_size=1, set_nodes: dict[str, torch.Tensor] = None) -> tuple[dict[str, Tensor], dict]:
+    def sample(self, batch_size=1, set_nodes: dict[str, torch.Tensor] = None) -> tuple[Tensor, dict]:
         """ Discrete sampling: Sample every possible discrete outcome.
             This involves sampling continuous variables, and computing every permutation of discrete variables.
+
+            Args:
+                batch_size: Number of samples to draw.
+                set_nodes: Optional dict of node name -> tensor to pin specific node
+                           values (e.g. for interventions). Shape: [batch_size, out_dim].
         """
 
         set_nodes = set_nodes if set_nodes is not None else {}
@@ -347,9 +354,9 @@ def main():
 
     # Example 4: Mixed discrete SEM, with sampling over discrete nodes
     formula1 = "U ~ Normal(0,1); eps_d ~ Uniform(0,1); eps_y ~ Uniform(0,1); Z ~ Categorical(probs=[1, 1, 1]);"
-    formula2 = "D <- d(Z, U, eps_d); Y <- d(D, U, eps_y)"
+    formula2 = "X <- d(Z, U, eps_d); Y <- d(X, U, eps_y)"
     mlp_cfgs = {"U": 2, "eps_d": 2, "eps_y": 2,
-                "D": MLPConfig(input_dim=1 + 2 + 2, hidden_dims=[1024, 1024, 1024], output_dim=2),
+                "X": MLPConfig(input_dim=1 + 2 + 2, hidden_dims=[1024, 1024, 1024], output_dim=2),
                 "Y": MLPConfig(input_dim=1 + 2 + 2, hidden_dims=[1024, 1024, 1024], output_dim=3)}
 
     model = SEM2(formula1 + formula2, node_cfgs=mlp_cfgs, device="cpu")
