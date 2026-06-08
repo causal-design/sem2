@@ -13,7 +13,6 @@ node_cfgs = {"U": 2, "eps_d": 2, "eps_y": 2,
 print("===== Test SEM2 Continuous =====")
 
 model = SEM2(formula1 + formula2, node_cfgs=node_cfgs, device="cpu")
-print(node_cfgs)
 model.eval()
 
 set_nodes = {"Z": torch.tensor([[1.], [0.], [100.]], device="cpu"),
