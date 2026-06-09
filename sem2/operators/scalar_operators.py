@@ -49,7 +49,7 @@ class EnergyLoss(SEM2Operator):
         for i in range(2):
             z_mask = (z.squeeze(-1) == i)
             es, extra = self.discrete_loss.energy_dist(p_all_hat[z_mask].unsqueeze(0), x_true=xy[z_mask].unsqueeze(0))
-            loss_tot += es
+            loss_tot += es * z_mask.sum() / z_mask.numel()
             L_extra.append(extra)
 
         # Average stats over all Z
@@ -96,6 +96,8 @@ class EnergyLoss(SEM2Operator):
         energy_score = (s1 - s2 / 2).mean()
         return energy_score, {"energy_score": energy_score, "estimated-true distance": s1.mean(), "estimated-estimated distance": s2.mean()}
 
+    def __repr__(self):
+        return "EnergyLoss"
 
 class MeanPotentialOutcome(SEM2Operator):
     """ Expected potential outcome:
@@ -197,6 +199,9 @@ class ATE(SEM2Operator):
         ATE = pot_out_t1 - pot_out_t0
         return ATE, {}
 
+    def __repr__(self):
+        return "ATE"
+
 
 class SEM2Loss(SEM2Operator):
     """ Computes the loss from overall loss from observations, with the ability to combine multiple losses together.
@@ -233,4 +238,6 @@ class SEM2Loss(SEM2Operator):
             loss_comp_value, sub_metrics = loss_comp.evaluate(observations, **kwargs)
             total_loss += weight * loss_comp_value
             metrics.update(sub_metrics)         # Potential collisions here.
+            metrics[str(loss_comp)] = loss_comp_value.detach()
+
         return total_loss, metrics

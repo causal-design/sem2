@@ -71,13 +71,13 @@ class TrainingConfig(BaseModel):
 
     # Optimiser
     optim: Optimisers = "AdamW"
-    lr: float = 3e-4
+    lr: float = 5e-4
     weight_decay: float = 0.
     momentum: float = 0.9                   # SGD only
 
     # Training loop
     batch_size: int = 1024
-    epochs: int = 8
+    epochs: int = 12
     rng_seed: int = 42
     sample_bs: int = 512                           # Sample batch size for distribution sampling
 
