@@ -50,18 +50,25 @@ class SEM2Trainer:
             epoch_st_t = time.perf_counter()
 
             losses = []
+            energy_loss, ate = 0, 0
             # Train steps
             for batch in self.dl:
                 batch = batch.to(self.device)
                 loss, loss_metrics = self._fit_batch(batch)
                 losses.append(loss)
+                energy_loss += loss_metrics["EnergyLoss"]
+                ate += loss_metrics["ATE"]
+
             # Timing
             epoch_end_t = time.perf_counter()
             epoch_time = epoch_end_t - epoch_st_t
             logger.info(f"Epoch {epoch}: {epoch_time:.2f}s")
+
             # Get loss statistics
             average_loss = torch.stack(losses).mean().item()
-            logger.info(f'{average_loss=:.4g}')
+            average_energy_loss = energy_loss / len(self.dl)
+            average_ATE = ate / len(self.dl)
+            logger.info(f'{average_loss=:.4g}, {average_energy_loss=:.4g}, {average_ATE=:.4g}')
 
     def _fit_batch(self, batch):
         """ Fit model on a single batch.
@@ -83,9 +90,10 @@ class SEM2Trainer:
 
 
 def main():
+    torch.set_printoptions(sci_mode=False, precision=5)
     torch.manual_seed(0)
     logging.basicConfig(level=logging.INFO)
-    cfg = TrainingConfig()
+    cfg = TrainingConfig(ate_weight=-0.02)
 
     formula1 = "U ~ Uniform(0,1); eps_d ~ Uniform(0,1); eps_y ~ Uniform(0,1); Z ~ Categorical(probs=[1, 1]);"
     formula2 = "X <- d(Z, U, eps_d); Y <- d(X, U, eps_y)"

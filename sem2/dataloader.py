@@ -19,6 +19,9 @@ class DummyDiscreteDataloader:
             batch_vals = [self.outcome_vals[i] for i in batch]
             yield torch.stack(batch_vals, dim=0)
 
+    def __len__(self):
+        return self.n_steps
+
 
 if __name__ == "__main__":
     dl = DummyDiscreteDataloader(n_steps=32)
