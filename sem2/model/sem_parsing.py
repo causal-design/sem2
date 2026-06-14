@@ -88,7 +88,7 @@ _DISCRETE_DIST_NAMES = frozenset({
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-class DAG:
+class _DAG:
     """Directed Acyclic Graph built from a model formula string.
 
     Owns all formula parsing and topological sorting. Stores only raw graph
@@ -141,12 +141,12 @@ class DAG:
         self.formula_list, self.input_node = self._parse_formula(model_formula)
 
         # Build node_specs: single parse, stored as NodeSpec objects
-        self.node_specs: dict[str, DAG.NodeSpec] = {}
+        self.node_specs: dict[str, _DAG.NodeSpec] = {}
         for formula in self.formula_list:
             if "~" in formula:
                 lhs, rhs = formula.split("~")
                 dist_name, dist_args, dist_kwargs = self._parse_exogenous_rhs(lhs, rhs)
-                self.node_specs[lhs] = DAG.NodeSpec(
+                self.node_specs[lhs] = _DAG.NodeSpec(
                     name=lhs, rhs=rhs, node_type="exogenous", predecessors=[],
                     dist_name=dist_name, dist_params=(dist_args, dist_kwargs),
                 )
@@ -155,19 +155,19 @@ class DAG:
                 if rhs.startswith("n("):
                     # Continuous neural network node
                     predecessors = rhs[2:-1].split(",")
-                    self.node_specs[lhs] = DAG.NodeSpec(
+                    self.node_specs[lhs] = _DAG.NodeSpec(
                         name=lhs, rhs=rhs, node_type="mlp", predecessors=predecessors,
                     )
                 elif rhs.startswith("d("):
                     predecessors = rhs[2:-1].split(",")
-                    self.node_specs[lhs] = DAG.NodeSpec(
+                    self.node_specs[lhs] = _DAG.NodeSpec(
                         name=lhs, rhs=rhs, node_type="discrete", predecessors=predecessors,
                     )
                 else:
                     # Linear node: parse coefficients and predecessors
                     terms = rhs.split("+")
                     parsed_terms = [self._parse_linear_term(t) for t in terms]
-                    self.node_specs[lhs] = DAG.NodeSpec(
+                    self.node_specs[lhs] = _DAG.NodeSpec(
                         name=lhs,
                         rhs=rhs,
                         node_type="linear",

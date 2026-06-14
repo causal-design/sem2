@@ -93,7 +93,7 @@ def main():
     torch.set_printoptions(sci_mode=False, precision=5)
     torch.manual_seed(0)
     logging.basicConfig(level=logging.INFO)
-    cfg = TrainingConfig(ate_weight=-0.02)
+    cfg = TrainingConfig(ate_weight=0.015)
 
     formula1 = "U ~ Uniform(0,1); eps_d ~ Uniform(0,1); eps_y ~ Uniform(0,1); Z ~ Categorical(probs=[1, 1]);"
     formula2 = "X <- d(Z, U, eps_d); Y <- d(X, U, eps_y)"
