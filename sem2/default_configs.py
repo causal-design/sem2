@@ -87,7 +87,7 @@ class TrainingConfig(BaseModel):
     energy_score_beta: float = 1.
 
     # ATE loss
-    use_ate: bool = True
+    use_ate: bool = False
     ate_weight: float = -0.05
     T_node: str = "X"
     Y_node: str = "Y"
