@@ -40,7 +40,7 @@ class SEMType(Enum):
     """Enum representing the inferred type of a SEM.
 
     Types:
-        - LINEAR_GAUSSIAN: all linear endogenous nodes, all exogenous nodes are Normal/MultivariateNormal.
+        - LINEAR_GAUSSIAN: all linear endogenous nodes, all exogenous nodes are Normal
         - LINEAR: all linear endogenous nodes, with non-Gaussian exogenous nodes.
         - NONLINEAR: all endogenous nodes are MLPs.
         - DISCRETE: all endogenous nodes are discrete.

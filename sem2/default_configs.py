@@ -37,7 +37,6 @@ class MLPConfig:
     input_dim: int = None                                                   # Inferred from graph
     hidden_dims: list = field(default_factory=lambda: [512, 512, 512])      # Hidden layer widths
     output_dim: int = 1                                                     # Output dimension
-    prob_output: bool = False                                               # Sigmoid on output -> [0, 1]
     dropout: float = 0.0                                                    # 0 = no dropout
     activation: str = "relu"                                                # relu | tanh | sigmoid | ... https://docs.pytorch.org/docs/2.12/nn.html
 
