@@ -283,7 +283,7 @@ class SEM2Discrete(SEM2):
             idx = state_idx_conf.view(1, N_conf, 1).expand(batch_size, N_conf, 1)
             cond_prob = torch.gather(p_per_conf, dim=-1, index=idx).squeeze(-1)  # [bs, N_conf]
 
-            log_cond_prob = torch.log(cond_prob.clamp(min=1e-5))
+            log_cond_prob = torch.log(cond_prob)
             log_probs = log_probs + log_cond_prob
             # if not torch.all(torch.isfinite(log_probs)):
             #     print("Warning: All probabilities are zero. Check for underflow or incorrect model specification.")
