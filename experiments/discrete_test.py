@@ -1,7 +1,10 @@
 import torch
+import logging
 
 from sem2.model.model import SEM2, SEM2Discrete
 from sem2.default_configs import MLPConfig
+
+logging.basicConfig(level=logging.INFO)
 
 # Base setup
 formula1 = "U ~ Normal(0,1); eps_d ~ Uniform(0,1); eps_y ~ Uniform(0,1); Z ~ Categorical(probs=[1, 1, 1]);"

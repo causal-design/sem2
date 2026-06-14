@@ -1,6 +1,8 @@
 """ Parse the formula used to build a SEM2 into a DAG structure. Determine the type of SEM2."""
 import re
 from enum import Enum
+import logging
+import warnings
 
 from dataclasses import dataclass, field
 from graphlib import TopologicalSorter, CycleError
@@ -104,7 +106,7 @@ class _DAG:
         graph:             Dict of node_name -> list of predecessor names.
                            Derived from node_specs for topological sorting.
         topological_order: Node names in topologically sorted order.
-        sem_type:          Inferred SEMType enum member. See SEMType above for
+        inferred_sem_type:          Inferred SEMType enum member. See SEMType above for
                            the full taxonomy.
     """
 
@@ -136,7 +138,7 @@ class _DAG:
         dist_name: str | None = None
         dist_params: tuple | None = None        # Tuple of (arguments, keyword_arguments)
 
-    def __init__(self, model_formula: str):
+    def __init__(self, model_formula: str, desired_type: SEMType):
         self.model_formula = model_formula
         self.formula_list, self.input_node = self._parse_formula(model_formula)
 
@@ -189,7 +191,20 @@ class _DAG:
                 f"Formula contains a cycle. Please check your formula: {e.args[1]}"
             ) from None
 
-        self.sem_type: SEMType = self._infer_sem_type()
+        # Check the type of the SEM, and if it is the same as the requested type.
+        inferred_sem_type: SEMType = self._infer_sem_type()
+        # Inform the user what type of SEM they have built. If it could be different inform the user.
+        # The current type is SEMType.NONLINEAR. This is the most general class.
+        if inferred_sem_type == desired_type:
+            logging.info(f"Building a {desired_type} SEM2 model.")
+        else:
+            warnings.warn(
+                f"SEM type {inferred_sem_type.value} detected from formula. "
+                f"To use additional functionality, consider using a different SEM2 implementation.",
+                stacklevel=2,
+            )
+        # Set SEM type to nonlinear for this type of SEM.
+        self.sem_type = desired_type
 
     def static_order(self):
         return iter(self.topological_order)
@@ -207,7 +222,7 @@ class _DAG:
             - NONLINEAR: all endogenous nodes are MLPs.
             - DISCRETE: all endogenous nodes are discrete.
             - MIXED: some endogenous nodes are continuous, some are discrete.
-g
+
         Returns: SEMType.
         """
         exog_specs = [ns for ns in self.node_specs.values() if ns.node_type == "exogenous"]

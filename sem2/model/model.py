@@ -1,10 +1,8 @@
-import warnings
 import logging
 import torch
 from torch import nn
 from torch import Tensor
 
-from .nn_models import LinearNodeConfig# , DiscreteModes
 from .nodes import NodeExogenous, NodeLinear, NodeMLP, NodeMLPDiscrete, SEM2Node, DiscreteModes
 from .sem_parsing import _DAG, SEMType
 
@@ -20,8 +18,9 @@ class SEM2(_DAG, nn.Module):
     and training from nn.Module.
     """
     node_dict: nn.ModuleDict[str, SEM2Node]  # Maps node name to its SEM2Node object, registered as submodule for PyTorch tracking
+    sem_type = SEMType.NONLINEAR
 
-    def __init__(self, model_formula: str, node_cfgs: dict = None, device="cpu"):
+    def __init__(self, model_formula: str, node_cfgs:dict|None = None, device="cpu"):
         """
         Args:
             model_formula: Semicolon-separated formulas defining the SEM.
@@ -31,7 +30,7 @@ class SEM2(_DAG, nn.Module):
                 - MLP node       : MLPConfig.
             device: PyTorch device string.
         """
-        _DAG.__init__(self, model_formula)
+        _DAG.__init__(self, model_formula, self.sem_type)
         nn.Module.__init__(self)
         self.device = device
 
@@ -44,20 +43,6 @@ class SEM2(_DAG, nn.Module):
         # Register all nodes as submodules so PyTorch tracks parameters
         self.node_dict = nn.ModuleDict(name_to_node)
         self.node_dict.to(device)
-
-        # TODO: This needs to only be run on the main SEM2 classes. Child classes have their own version, so this can't be in the main SEM2.__init__()
-        # # Inform the user what type of SEM they have built. If it could be different inform the user.
-        # # The current type is SEMType.NONLINEAR. This is the most general class.
-        # if self.sem_type == SEMType.NONLINEAR:
-        #     logging.info(f"Building a nonlinear SEM2 model.")
-        # else:
-        #     warnings.warn(
-        #         f"SEM type {self.sem_type.value} detected from formula. This SEM2 implementation is primarily designed for nonlinear SEMs. "
-        #         f"To use additional functionality, consider using a different SEM2 implementation.",
-        #         stacklevel=2,
-        #     )
-        # # Set SEM type to nonlinear for this type of SEM.
-        # self.sem_type = SEMType.NONLINEAR
 
     def _build_and_initialize_nodes(self, node_cfgs: dict, device: str) -> dict[str, SEM2Node]:
         """Build all SEM2Node objects from DAG.node_specs in topological order.
@@ -145,12 +130,13 @@ class SEM2(_DAG, nn.Module):
         raise NotImplementedError(f"call the sample() method instead of forward() or calling the model directly.")
 
     def likelihood(self, *args, **kwargs):
-        raise NotImplementedError(f"likelihood not implemented for this type of SEM2 model: {self.sem_type.value}")
+        raise NotImplementedError(f"likelihood not implemented for this type of SEM2 model: {self.inferred_sem_type.value}")
 
 
 class SEM2Discrete(SEM2):
     """Discrete SEM2."""
     node_dict: nn.ModuleDict[str, SEM2Node]  # Maps node name to its SEM2Node object, registered as submodule for PyTorch tracking
+    sem_type = SEMType.DISCRETE
 
     def __init__(self, model_formula: str, node_cfgs: dict = None, device="cpu"):
         super().__init__(model_formula, node_cfgs, device=device)
