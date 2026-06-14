@@ -17,7 +17,7 @@ from sem2.model.nodes import (
     NodeExogenous,
     NodeEndogenous, NodeLinear, NodeNonlinear, NodeMLP,
 )
-from sem2.model.model import DAG, SEM2
+from sem2.model.model import _DAG, SEM2
 from sem2.model.sem_parsing import SEMType
 
 #probably should breakdown into smaller test files but for now is fine I guess
@@ -276,153 +276,153 @@ class TestNodeMLP:
 class TestDAG:
 
     def test_basic_graph(self):
-        dag = DAG("e ~ Normal(0,1); x <- e")
+        dag = _DAG("e ~ Normal(0,1); x <- e")
         assert dag.graph["e"] == []
         assert dag.graph["x"] == ["e"]
 
     def test_multi_lhs_expansion(self):
-        dag = DAG("e1, e2, e3 ~ Normal(0,1)")
+        dag = _DAG("e1, e2, e3 ~ Normal(0,1)")
         assert {"e1", "e2", "e3"} == set(dag.graph.keys())
 
     def test_topological_order_valid(self):
-        dag = DAG("e1, e2 ~ Normal(0,1); x <- e1 + e2; y <- x + e2")
+        dag = _DAG("e1, e2 ~ Normal(0,1); x <- e1 + e2; y <- x + e2")
         o = dag.topological_order
         assert o.index("e1") < o.index("x")
         assert o.index("e2") < o.index("x")
         assert o.index("x") < o.index("y")
 
     def test_static_order_returns_iterator(self):
-        dag = DAG("e ~ Normal(0,1); x <- e")
+        dag = _DAG("e ~ Normal(0,1); x <- e")
         assert list(dag.static_order()) == dag.topological_order
 
     def test_no_pytorch_objects(self):
-        dag = DAG("e ~ Normal(0,1); x <- e")
+        dag = _DAG("e ~ Normal(0,1); x <- e")
         for val in dag.graph.values():
             assert not isinstance(val, nn.Module)
 
     def test_mlp_predecessors_in_graph(self):
-        dag = DAG("e1, e2 ~ Normal(0,1); y <- n(e1,e2)")
+        dag = _DAG("e1, e2 ~ Normal(0,1); y <- n(e1,e2)")
         assert dag.graph["y"] == ["e1", "e2"]
 
     def test_fixed_coeff_stripped_in_graph(self):
-        dag = DAG("e ~ Normal(0,1); y <- 1*e")
+        dag = _DAG("e ~ Normal(0,1); y <- 1*e")
         assert dag.graph["y"] == ["e"]
 
     def test_negative_coeff_stripped_in_graph(self):
-        dag = DAG("e ~ Normal(0,1); y <- -1*e")
+        dag = _DAG("e ~ Normal(0,1); y <- -1*e")
         assert dag.graph["y"] == ["e"]
 
     def test_fractional_coeff_stripped_in_graph(self):
-        dag = DAG("e ~ Normal(0,1); y <- 0.5*e")
+        dag = _DAG("e ~ Normal(0,1); y <- 0.5*e")
         assert dag.graph["y"] == ["e"]
 
     def test_mixed_coeffs_in_graph(self):
-        dag = DAG("e1, e2 ~ Normal(0,1); y <- 1*e1 + e2")
+        dag = _DAG("e1, e2 ~ Normal(0,1); y <- 1*e1 + e2")
         assert dag.graph["y"] == ["e1", "e2"]
 
     def test_mixed_linear_mlp_creates_intermediate(self):
-        dag = DAG("e1, e2, e3 ~ Normal(0,1); y <- n(e1,e2) + e3")
+        dag = _DAG("e1, e2, e3 ~ Normal(0,1); y <- n(e1,e2) + e3")
         assert len([k for k in dag.graph if k.startswith("y:")]) == 1
 
     def test_nested_mlp_creates_intermediates(self):
-        dag = DAG("e1, e2, e3 ~ Normal(0,1); y <- n(e1, n(e2,e3))")
+        dag = _DAG("e1, e2, e3 ~ Normal(0,1); y <- n(e1, n(e2,e3))")
         assert len([k for k in dag.graph if k.startswith("y:")]) >= 1
 
     def test_deeply_nested_mlp(self):
-        dag = DAG("e1,e2,e3,e4 ~ Normal(0,1); y <- n(e1, n(e2, n(e3,e4)))")
+        dag = _DAG("e1,e2,e3,e4 ~ Normal(0,1); y <- n(e1, n(e2, n(e3,e4)))")
         assert "y" in dag.graph
 
     def test_whitespace_ignored(self):
-        dag1 = DAG("e ~ Normal(0,1); y <- e")
-        dag2 = DAG("e ~ Normal( 0 , 1 ) ; y <- e")
+        dag1 = _DAG("e ~ Normal(0,1); y <- e")
+        dag2 = _DAG("e ~ Normal( 0 , 1 ) ; y <- e")
         assert set(dag1.graph.keys()) == set(dag2.graph.keys())
 
     def test_cycle_raises_value_error(self):
         with pytest.raises(ValueError, match="cycle"):
-            DAG("x <- y; y <- x")
+            _DAG("x <- y; y <- x")
 
     def test_invalid_formula_raises(self):
         with pytest.raises((ValueError, AttributeError, KeyError)):
-            DAG("y ? e")
+            _DAG("y ? e")
 
     def test_dag_standalone(self):
-        dag = DAG("e1, e2 ~ Normal(0,1); x <- e1; y <- x + e2")
+        dag = _DAG("e1, e2 ~ Normal(0,1); x <- e1; y <- x + e2")
         assert len(dag.topological_order) == 4
 
     # ── NodeSpec ──────────────────────────────────────────────────────────────
 
     def test_node_spec_is_dag_nested_class(self):
         """NodeSpec is a DAG implementation detail — must be accessed via DAG.NodeSpec."""
-        dag = DAG("e ~ Normal(0,1)")
-        assert isinstance(dag.node_specs["e"], DAG.NodeSpec)
+        dag = _DAG("e ~ Normal(0,1)")
+        assert isinstance(dag.node_specs["e"], _DAG.NodeSpec)
 
     def test_node_specs_keys_match_graph(self):
-        dag = DAG("e1, e2 ~ Normal(0,1); y <- e1 + e2")
+        dag = _DAG("e1, e2 ~ Normal(0,1); y <- e1 + e2")
         assert set(dag.node_specs.keys()) == set(dag.graph.keys())
 
     def test_node_spec_exogenous(self):
-        dag = DAG("e ~ Normal(0,1)")
+        dag = _DAG("e ~ Normal(0,1)")
         ns = dag.node_specs["e"]
         assert ns.node_type == "exogenous"
         assert ns.predecessors == []
         assert ns.coefficients == []
 
     def test_node_spec_linear(self):
-        dag = DAG("e1, e2 ~ Normal(0,1); y <- 1*e1 + e2")
+        dag = _DAG("e1, e2 ~ Normal(0,1); y <- 1*e1 + e2")
         ns = dag.node_specs["y"]
         assert ns.node_type == "linear"
         assert ns.predecessors == ["e1", "e2"]
         assert ns.coefficients == [1.0, None]
 
     def test_node_spec_mlp(self):
-        dag = DAG("e1, e2 ~ Normal(0,1); y <- n(e1,e2)")
+        dag = _DAG("e1, e2 ~ Normal(0,1); y <- n(e1,e2)")
         ns = dag.node_specs["y"]
         assert ns.node_type == "mlp"
         assert ns.predecessors == ["e1", "e2"]
         assert ns.coefficients == []
 
     def test_node_spec_linear_negative_coeff(self):
-        dag = DAG("e1, e2 ~ Normal(0,1); y <- -1*e1 + 0.5*e2")
+        dag = _DAG("e1, e2 ~ Normal(0,1); y <- -1*e1 + 0.5*e2")
         ns = dag.node_specs["y"]
         assert ns.coefficients == [-1.0, 0.5]
 
     def test_node_spec_intermediate_mlp(self):
         """Mixed formula creates an intermediate NodeSpec for the MLP part."""
-        dag = DAG("e1, e2, e3 ~ Normal(0,1); y <- n(e1,e2) + e3")
+        dag = _DAG("e1, e2, e3 ~ Normal(0,1); y <- n(e1,e2) + e3")
         intermediates = [k for k in dag.node_specs if k.startswith("y:")]
         assert len(intermediates) == 1
         assert dag.node_specs[intermediates[0]].node_type == "mlp"
 
     def test_graph_derived_from_node_specs(self):
         """graph must be consistent with node_specs predecessors."""
-        dag = DAG("e1, e2 ~ Normal(0,1); x <- e1; y <- x + e2")
+        dag = _DAG("e1, e2 ~ Normal(0,1); x <- e1; y <- x + e2")
         for name, ns in dag.node_specs.items():
             assert dag.graph[name] == ns.predecessors
 
     # ── _parse_linear_term ────────────────────────────────────────────────────
 
     def test_parse_no_prefix(self):
-        dag = DAG("e ~ Normal(0,1)")
+        dag = _DAG("e ~ Normal(0,1)")
         assert dag._parse_linear_term("x") == (None, "x")
 
     def test_parse_coeff_one(self):
-        dag = DAG("e ~ Normal(0,1)")
+        dag = _DAG("e ~ Normal(0,1)")
         assert dag._parse_linear_term("1*x") == (1.0, "x")
 
     def test_parse_coeff_negative(self):
-        dag = DAG("e ~ Normal(0,1)")
+        dag = _DAG("e ~ Normal(0,1)")
         assert dag._parse_linear_term("-1*x") == (-1.0, "x")
 
     def test_parse_coeff_fractional(self):
-        dag = DAG("e ~ Normal(0,1)")
+        dag = _DAG("e ~ Normal(0,1)")
         assert dag._parse_linear_term("0.5*x") == (0.5, "x")
 
     def test_parse_coeff_negative_fractional(self):
-        dag = DAG("e ~ Normal(0,1)")
+        dag = _DAG("e ~ Normal(0,1)")
         assert dag._parse_linear_term("-0.5*x") == (-0.5, "x")
 
     def test_parse_coeff_multidigit(self):
-        dag = DAG("e ~ Normal(0,1)")
+        dag = _DAG("e ~ Normal(0,1)")
         coeff, name = dag._parse_linear_term("10*x")
         assert coeff == 10.0 and name == "x"
 
@@ -434,7 +434,7 @@ class TestDAG:
 class TestSEM2Inheritance:
 
     def test_is_dag(self):
-        assert isinstance(make_model("e ~ Normal(0,1); y <- e"), DAG)
+        assert isinstance(make_model("e ~ Normal(0,1); y <- e"), _DAG)
 
     def test_is_nn_module(self):
         assert isinstance(make_model("e ~ Normal(0,1); y <- e"), nn.Module)
@@ -785,22 +785,22 @@ class TestFormulaParsingRobustness:
     def test_unknown_distribution_raises(self):
         """An unrecognised distribution name should raise ValueError, not AttributeError."""
         with pytest.raises(ValueError, match="Unknown distribution"):
-            DAG("e ~ NotARealDist(0,1)")
+            _DAG("e ~ NotARealDist(0,1)")
 
     def test_malformed_rhs_no_parens_raises(self):
         """Missing parentheses should raise ValueError."""
         with pytest.raises(ValueError, match="Could not parse"):
-            DAG("e ~ Normal")
+            _DAG("e ~ Normal")
 
     def test_non_numeric_param_raises(self):
         """Non-numeric distribution parameters should raise ValueError."""
         with pytest.raises(ValueError, match="Non-numeric"):
-            DAG("e ~ Normal(a,b)")
+            _DAG("e ~ Normal(a,b)")
 
     def test_typo_suggestion_in_error(self):
         """A near-miss distribution name should suggest the correct one."""
         try:
-            DAG("e ~ Normla(0,1)")
+            _DAG("e ~ Normla(0,1)")
             assert False, "Should have raised"
         except ValueError as exc:
             # The error should mention the typo'd name
@@ -815,21 +815,21 @@ class TestFormulaParsingRobustness:
             "e ~ Poisson(2.0)",
             "e ~ Exponential(1.0)",
         ]:
-            dag = DAG(formula)
+            dag = _DAG(formula)
             ns = dag.node_specs["e"]
             assert ns.dist_name is not None
             assert ns.dist_params is not None
 
     def test_dist_name_stored_on_node_spec(self):
-        dag = DAG("e ~ Normal(0,1)")
+        dag = _DAG("e ~ Normal(0,1)")
         assert dag.node_specs["e"].dist_name == "Normal"
 
     def test_dist_params_stored_on_node_spec(self):
-        dag = DAG("e ~ Normal(0,1)")
+        dag = _DAG("e ~ Normal(0,1)")
         assert dag.node_specs["e"].dist_params == ["0", "1"]
 
     def test_beta_params_stored(self):
-        dag = DAG("e ~ Beta(0.5,0.5)")
+        dag = _DAG("e ~ Beta(0.5,0.5)")
         assert dag.node_specs["e"].dist_params == ["0.5", "0.5"]
 
 
@@ -837,40 +837,40 @@ class TestSEMTypeDetection:
     """Verify sem_type is correctly inferred from the formula."""
 
     def test_linear_gaussian(self):
-        dag = DAG("e ~ Normal(0,1); y <- e")
+        dag = _DAG("e ~ Normal(0,1); y <- e")
         assert dag.sem_type == SEMType.LINEAR_GAUSSIAN
 
     def test_linear_gaussian_multi_node(self):
-        dag = DAG("e1, e2 ~ Normal(0,1); y <- e1 + e2")
+        dag = _DAG("e1, e2 ~ Normal(0,1); y <- e1 + e2")
         assert dag.sem_type == SEMType.LINEAR_GAUSSIAN
 
     def test_linear_non_gaussian(self):
-        dag = DAG("e ~ Beta(0.5,0.5); y <- e")
+        dag = _DAG("e ~ Beta(0.5,0.5); y <- e")
         assert dag.sem_type == SEMType.LINEAR
 
     def test_nonlinear(self):
-        dag = DAG("e1, e2 ~ Normal(0,1); y <- n(e1,e2)")
+        dag = _DAG("e1, e2 ~ Normal(0,1); y <- n(e1,e2)")
         assert dag.sem_type == SEMType.NONLINEAR
 
     def test_mixed_functional_form_is_nonlinear(self):
         """Linear + MLP in same model → nonlinear (MLP supersedes linear)."""
-        dag = DAG("e1, e2, e3 ~ Normal(0,1); y <- n(e1,e2) + e3")
+        dag = _DAG("e1, e2, e3 ~ Normal(0,1); y <- n(e1,e2) + e3")
         assert dag.sem_type == SEMType.NONLINEAR
 
     def test_discrete(self):
-        dag = DAG("e ~ Bernoulli(0.5); y <- e")
+        dag = _DAG("e ~ Bernoulli(0.5); y <- e")
         assert dag.sem_type == SEMType.LINEAR_DISCRETE
 
     def test_discrete_poisson(self):
-        dag = DAG("e ~ Poisson(2.0); y <- e")
+        dag = _DAG("e ~ Poisson(2.0); y <- e")
         assert dag.sem_type == SEMType.LINEAR_DISCRETE
 
     def test_mixed_discrete(self):
-        dag = DAG("e ~ Bernoulli(0.5); y <- n(e)")
+        dag = _DAG("e ~ Bernoulli(0.5); y <- n(e)")
         assert dag.sem_type == SEMType.NONLINEAR_DISCRETE
 
     def test_exogenous_only_gaussian(self):
-        dag = DAG("e1, e2 ~ Normal(0,1)")
+        dag = _DAG("e1, e2 ~ Normal(0,1)")
         assert dag.sem_type == SEMType.LINEAR_GAUSSIAN
 
     def test_sem2_inherits_sem_type(self):
@@ -888,30 +888,30 @@ class TestSEMTypeDetection:
 
 
     def test_nonlinear_discrete(self):
-        dag = DAG("e ~ Bernoulli(0.5); y <- n(e)")
+        dag = _DAG("e ~ Bernoulli(0.5); y <- n(e)")
         assert dag.sem_type == SEMType.NONLINEAR_DISCRETE
 
     def test_linear_mixed_exog(self):
         """Some continuous + some discrete exog nodes, linear endogenous."""
-        dag = DAG("e1 ~ Normal(0,1); e2 ~ Bernoulli(0.5); y <- e1 + e2")
+        dag = _DAG("e1 ~ Normal(0,1); e2 ~ Bernoulli(0.5); y <- e1 + e2")
         assert dag.sem_type == SEMType.LINEAR_MIXED_EXOG
 
     def test_nonlinear_mixed_exog(self):
         """Some continuous + some discrete exog nodes, MLP endogenous."""
-        dag = DAG("e1 ~ Normal(0,1); e2 ~ Bernoulli(0.5); y <- n(e1, e2)")
+        dag = _DAG("e1 ~ Normal(0,1); e2 ~ Bernoulli(0.5); y <- n(e1, e2)")
         assert dag.sem_type == SEMType.NONLINEAR_MIXED_EXOG
 
     def test_exogenous_only_non_gaussian(self):
-        dag = DAG("e1, e2 ~ Beta(0.5,0.5)")
+        dag = _DAG("e1, e2 ~ Beta(0.5,0.5)")
         assert dag.sem_type == SEMType.LINEAR
 
     def test_exogenous_only_discrete(self):
-        dag = DAG("e ~ Bernoulli(0.3)")
+        dag = _DAG("e ~ Bernoulli(0.3)")
         assert dag.sem_type == SEMType.LINEAR_DISCRETE
 
     def test_nonlinear_continuous(self):
         """Pure MLP with continuous noise is nonlinear."""
-        dag = DAG("e ~ Normal(0,1); y <- n(e)")
+        dag = _DAG("e ~ Normal(0,1); y <- n(e)")
         assert dag.sem_type == SEMType.NONLINEAR
 
 

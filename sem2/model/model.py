@@ -5,15 +5,15 @@ from torch import nn
 from torch import Tensor
 
 from .nn_models import LinearNodeConfig# , DiscreteModes
-from .nodes import NodeExogenous, NodeLinear, NodeMLP, NodeMLPDiscrete, SEM2Node
-from .sem_parsing import DAG, SEMType
+from .nodes import NodeExogenous, NodeLinear, NodeMLP, NodeMLPDiscrete, SEM2Node, DiscreteModes
+from .sem_parsing import _DAG, SEMType
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # SEM2 - DAG + nn.Module
 # ══════════════════════════════════════════════════════════════════════════════
 
-class SEM2(DAG, nn.Module):
+class SEM2(_DAG, nn.Module):
     """Structural Equation Model: a DAG whose nodes are PyTorch modules.
 
     Inherits graph structure and parsing from DAG, and parameter registration
@@ -31,7 +31,7 @@ class SEM2(DAG, nn.Module):
                 - MLP node       : MLPConfig.
             device: PyTorch device string.
         """
-        DAG.__init__(self, model_formula)
+        _DAG.__init__(self, model_formula)
         nn.Module.__init__(self)
         self.device = device
 
@@ -279,7 +279,7 @@ class SEM2Discrete(SEM2):
 
             # 3) Run NN only for M contexts
             # IMPORTANT: v(...) must accept parent_values with second dim = M
-            node(parent_values, batch_size, mode="softmax")
+            node(parent_values, batch_size, mode=DiscreteModes.SOFTMAX)
 
             # 4) Compute cond prob for each global configuration using inverse map
             # p_unique: [bs, M, n_outcome]
