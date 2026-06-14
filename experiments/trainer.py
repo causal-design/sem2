@@ -98,8 +98,8 @@ def main():
     formula1 = "U ~ Uniform(0,1); eps_d ~ Uniform(0,1); eps_y ~ Uniform(0,1); Z ~ Categorical(probs=[1, 1]);"
     formula2 = "X <- d(Z, U, eps_d); Y <- d(X, U, eps_y)"
     mlp_cfgs = {"U": 4, "eps_d": 4, "eps_y": 4,
-                "X": MLPConfig(input_dim=1 + 4 + 4, output_dim=2),
-                "Y": MLPConfig(input_dim=1 + 4 + 4, output_dim=2)
+                "X": MLPConfig(output_dim=2),
+                "Y": MLPConfig(output_dim=2)
                 }
     model_formula = formula1 + formula2
     sem_model = SEM2Discrete(model_formula, node_cfgs=mlp_cfgs, device=cfg.device)

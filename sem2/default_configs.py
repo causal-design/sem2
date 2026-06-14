@@ -34,7 +34,7 @@ class LinearNodeConfig:
 class MLPConfig:
     """Public configuration for MLP nodes."""
 
-    input_dim: int = 0                                                      # Inferred from graph, or explicitly given.
+    input_dim: int = None                                                   # Inferred from graph
     hidden_dims: list = field(default_factory=lambda: [512, 512, 512])      # Hidden layer widths
     output_dim: int = 1                                                     # Output dimension
     prob_output: bool = False                                               # Sigmoid on output -> [0, 1]

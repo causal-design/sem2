@@ -19,7 +19,7 @@ class PotentialOutcome(SEM2Operator):
         self.target_node = target_node
 
         # Select the correct forward method based on the SEM type
-        sem_type = self.model.inferred_sem_type
+        sem_type = self.model.sem_type
         if SEMType.is_continuous(sem_type):
             self.evaluate = self._evaluate_continuous
         else:
