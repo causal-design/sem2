@@ -342,8 +342,8 @@ def main():
     formula1 = "U ~ Normal(0,1); eps_d ~ Uniform(0,1); eps_y ~ Uniform(0,1); Z ~ Categorical(probs=[1, 1, 1]);"
     formula2 = "X <- d(Z, U, eps_d); Y <- d(X, U, eps_y)"
     mlp_cfgs = {"U": 2, "eps_d": 2, "eps_y": 2,
-                "X": MLPConfig(input_dim=1 + 2 + 2, hidden_dims=[1024, 1024, 1024], output_dim=2),
-                "Y": MLPConfig(input_dim=1 + 2 + 2, hidden_dims=[1024, 1024, 1024], output_dim=3)}
+                "X": MLPConfig(hidden_dims=[1024, 1024, 1024], output_dim=2),
+                "Y": MLPConfig(hidden_dims=[1024, 1024, 1024], output_dim=3)}
 
     model = SEM2(formula1 + formula2, node_cfgs=mlp_cfgs, device="cpu")
     model.eval()

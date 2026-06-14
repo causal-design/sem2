@@ -36,7 +36,7 @@ class SEM2Node(RandomVariable, ABC, nn.Module):
     out_dim: int
     predecessors: list[str]
 
-    def __init__(self, name: str, rhs: str, predecessor_nodes: list['SEM2Node'], device="cpu"):
+    def __init__(self, name: str, rhs: str, predecessor_nodes: list[SEM2Node], device="cpu"):
         super().__init__()
         self.name = name
         self.rhs = rhs
@@ -45,6 +45,9 @@ class SEM2Node(RandomVariable, ABC, nn.Module):
         self.device = device
         self.formula = name + "=" + rhs
         self.value = None
+
+        # Number of input variables.
+        self.input_dim = sum(p.out_dim for p in predecessor_nodes)
 
     def __repr__(self):
         return f'SEM2Node: {self.formula}'
@@ -206,13 +209,16 @@ class NodeMLP(NodeNonlinear):
         super().__init__(name, rhs, predecessor_nodes, device=device)
         self.cfg = cfg if cfg is not None else MLPConfig()
 
-        input_dim = sum(p.out_dim for p in predecessor_nodes)
-        if self.cfg.input_dim is None:
-            self.cfg.input_dim = input_dim
+        self.cfg.input_dim = self.input_dim
         self.mlp = _MLP(self.cfg, device=device)
         self.out_dim = self.cfg.output_dim
 
-    def _forward_inner(self, x: list[torch.Tensor], batch_size: int = 1) -> torch.Tensor:
+    def _forward_inner(self, x: list[torch.Tensor], **kwargs) -> torch.Tensor:
+        """ Input shape:
+                x: List[Tensor], shape = [n_predecessors][bs, output_dim]
+            Return shape:
+                return.shape = [bs, output_dim]
+        """
         return self.mlp(self._collate_fn(x))
 
 
@@ -227,13 +233,14 @@ class DiscreteModes(StrEnum):
 
 class NodeMLPDiscrete(SEM2Node):
     """ Discrete NN node. """
-    dist: torch.distributions.Distribution
     id: int = 0
+    out_dim = 1         # The discrete node outputs 1 value, with n_classes categories.
 
     def __init__(self, name: str, rhs: str, cfg: MLPConfig, predecessor_nodes: list[SEM2Node], mode=None, device="cpu"):
         super().__init__(name, rhs, predecessor_nodes, device=device)
-        if cfg is None:
-            cfg = MLPConfig()
+        self.cfg = cfg if cfg is not None else MLPConfig()
+
+        cfg.input_dim = self.input_dim
         if isinstance(cfg, MLPConfig):
             self.nn_module = _MLP(cfg, device=device)
         else:
@@ -241,8 +248,20 @@ class NodeMLPDiscrete(SEM2Node):
 
         self.n_classes = cfg.output_dim
 
-    def _forward_inner(self, x: list[torch.Tensor], mode=DiscreteModes.SAMPLE, batch_size=1):
-        """ x: List[Tensor], shape = [n_predecessors][bs, output_dim] """
+    def _forward_inner(self, x: list[torch.Tensor], mode=DiscreteModes.SAMPLE, **kwargs) -> torch.Tensor:
+        """ Input shape:
+                x: List[Tensor], shape = [n_predecessors][bs, output_dim]
+                mode: How to treat the discretization.
+            Return shape depends on the mode,
+                if DiscreteModes.SAMPLE:
+                    return.shape = [bs, 1]
+                if DiscreteModes.SOFTMAX:
+                    return.shape = [bs, n_classes]
+                if DiscreteModes.Gumbel:
+                    return.shape = TBD
+                if DiscreteModes.SAMPLE_ONEHOT:
+                    return.shape = TBD
+        """
         x = self._collate_fn(x)
         out = self.nn_module(x)
         out = self._discretize(out, mode)
