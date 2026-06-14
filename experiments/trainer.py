@@ -95,6 +95,8 @@ def main():
     logging.basicConfig(level=logging.INFO)
     cfg = TrainingConfig(ate_weight=0.015)
 
+    cfg.use_ate = True
+
     formula1 = "U ~ Uniform(0,1); eps_d ~ Uniform(0,1); eps_y ~ Uniform(0,1); Z ~ Categorical(probs=[1, 1]);"
     formula2 = "X <- d(Z, U, eps_d); Y <- d(X, U, eps_y)"
     mlp_cfgs = {"U": 4, "eps_d": 4, "eps_y": 4,
