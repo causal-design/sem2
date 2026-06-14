@@ -112,68 +112,62 @@ class _MLP(nn.Module):
     def forward(self, x: Tensor) -> Tensor:
         return self.net(x)
 
-
-class DiscreteModes(StrEnum):
-    GUMBEL = "gumbel"                   # Gumbel-Softmax, a soft approximation of a categorical distribution
-    SOFTMAX = "softmax"                 # Return probabilities for each outcome
-    SAMPLE_ONEHOT = "onehot"            # Return one-hot vectors sampled from the distribution
-    SAMPLE = "sample"                   # Return a single sample from the distribution. Does not support training.
     
-class _MLPDiscrete(nn.Module):
-    """MLP for discrete nodes. Not part of the public API and used internally by NodeMLPDiscrete.
-
-    Args:
-        config (MLPConfig): Configuration object for the MLP. If None, uses default values.
-    """
-    def __init__(self, config: MLPConfig, mode: DiscreteModes, device="cpu"):
-        super().__init__()
-        self.mode = mode 
-        
-        # Combine input_dim and hidden_dims to create the architecture
-        all_dims = [config.input_dim] + config.hidden_dims
-        self.activation_fn = ACTIVATION_FUNCTIONS[config.activation]()
-        self.dropout = config.dropout
-
-        # Add hidden layers with selected activation and optional dropout
-        self.layers = torch.nn.ModuleList()
-        for i in range(len(all_dims) - 1):
-            self.layers.append(nn.Linear(all_dims[i], all_dims[i + 1]))
-        self.out_layer = nn.Linear(all_dims[-1], config.output_dim)
-
-        self.cfg = config
-        self.to(device)
-
-    def _discretize(self, x, mode):
-        """ Turn input logits into a representation of discrete values. """
-        if mode == DiscreteModes.SOFTMAX:
-            # Return probabilities for each outcome. Shape = [..., n_outcomes]
-            return torch.softmax(x, dim=-1)
-        elif mode == DiscreteModes.SAMPLE:
-            # Draw from the observed distribution. Shape = [..., 1]
-            if self.training:
-                warnings.warn("Drawing sample for discrete nodes does not support backpropagation during training. \n"
-                              " To train discrete nodes, use another sampling strategy, via a different SEM2 class. ")
-            probs = torch.softmax(x, dim=-1)
-            sample = torch.distributions.Categorical(probs=probs).sample()
-            return sample.unsqueeze(-1)
-        else:
-            raise NotImplementedError(f"Discretisation mode {mode} not implemented yet.")
-        
-    def forward(self, x: Tensor, mode=DiscreteModes.SAMPLE) -> Tensor:
-        """ x.shape = [..., n_predecessors]
-            mode: How to process the discrete node.
-
-            if we are in SAMPLE mode:
-                returns shape = [..., 1], where we draw from the observed distribution.
-            Otherwise,
-                returns shape = [..., n_outcomes], where we return probabilities for each outcome.
-        """
-        for layer in self.layers:
-            x = layer(x)
-            x = self.activation_fn(x)
-            if self.dropout > 0:
-                x = F.dropout(x, p=self.dropout)
-
-        x = self.out_layer(x)
-        x = self._discretize(x, mode)
-        return x
+# class _MLPDiscrete(nn.Module):
+#     """MLP for discrete nodes. Not part of the public API and used internally by NodeMLPDiscrete.
+#
+#     Args:
+#         config (MLPConfig): Configuration object for the MLP. If None, uses default values.
+#     """
+#     def __init__(self, config: MLPConfig, mode: DiscreteModes, device="cpu"):
+#         super().__init__()
+#         self.mode = mode
+#
+#         # Combine input_dim and hidden_dims to create the architecture
+#         all_dims = [config.input_dim] + config.hidden_dims
+#         self.activation_fn = ACTIVATION_FUNCTIONS[config.activation]()
+#         self.dropout = config.dropout
+#
+#         # Add hidden layers with selected activation and optional dropout
+#         self.layers = torch.nn.ModuleList()
+#         for i in range(len(all_dims) - 1):
+#             self.layers.append(nn.Linear(all_dims[i], all_dims[i + 1]))
+#         self.out_layer = nn.Linear(all_dims[-1], config.output_dim)
+#
+#         self.cfg = config
+#         self.to(device)
+#
+#     def _discretize(self, x, mode):
+#         """ Turn input logits into a representation of discrete values. """
+#         if mode == DiscreteModes.SOFTMAX:
+#             # Return probabilities for each outcome. Shape = [..., n_outcomes]
+#             return torch.softmax(x, dim=-1)
+#         elif mode == DiscreteModes.SAMPLE:
+#             # Draw from the observed distribution. Shape = [..., 1]
+#             if self.training:
+#                 warnings.warn("Drawing sample for discrete nodes does not support backpropagation during training. \n"
+#                               " To train discrete nodes, use another sampling strategy, via a different SEM2 class. ")
+#             probs = torch.softmax(x, dim=-1)
+#             sample = torch.distributions.Categorical(probs=probs).sample()
+#             return sample.unsqueeze(-1)
+#         else:
+#             raise NotImplementedError(f"Discretisation mode {mode} not implemented yet.")
+#
+#     def forward(self, x: Tensor, mode=DiscreteModes.SAMPLE) -> Tensor:
+#         """ x.shape = [..., n_predecessors]
+#             mode: How to process the discrete node.
+#
+#             if we are in SAMPLE mode:
+#                 returns shape = [..., 1], where we draw from the observed distribution.
+#             Otherwise,
+#                 returns shape = [..., n_outcomes], where we return probabilities for each outcome.
+#         """
+#         for layer in self.layers:
+#             x = layer(x)
+#             x = self.activation_fn(x)
+#             if self.dropout > 0:
+#                 x = F.dropout(x, p=self.dropout)
+#
+#         x = self.out_layer(x)
+#         x = self._discretize(x, mode)
+#         return x

@@ -4,7 +4,7 @@ import torch
 from torch import nn
 from torch import Tensor
 
-from .nn_models import LinearNodeConfig, DiscreteModes
+from .nn_models import LinearNodeConfig# , DiscreteModes
 from .nodes import NodeExogenous, NodeLinear, NodeMLP, NodeMLPDiscrete, SEM2Node
 from .sem_parsing import DAG, SEMType
 

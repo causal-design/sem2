@@ -1,10 +1,12 @@
 from abc import ABC, abstractmethod
 from typing import Optional
+from enum import StrEnum
 import torch
+import warnings
 from torch import nn
 from torch.distributions import Distribution
 
-from .nn_models import _LinearConfig, _LinearModel, _MLP, _MLPDiscrete
+from .nn_models import _LinearConfig, _LinearModel, _MLP#, _MLPDiscrete
 from ..default_configs import LinearNodeConfig, MLPConfig
 
 # ── RandomVariable ────────────────────────────────────────────────────────────
@@ -216,6 +218,13 @@ class NodeMLP(NodeNonlinear):
 
 # ── Discrete Node ───────────────────────────────────────────────────────────────────
 
+class DiscreteModes(StrEnum):
+    GUMBEL = "gumbel"                   # Gumbel-Softmax, a soft approximation of a categorical distribution
+    SOFTMAX = "softmax"                 # Return probabilities for each outcome
+    SAMPLE_ONEHOT = "onehot"            # Return one-hot vectors sampled from the distribution
+    SAMPLE = "sample"                   # Return a single sample from the distribution. Does not support training.
+
+
 class NodeMLPDiscrete(SEM2Node):
     """ Discrete NN node. """
     dist: torch.distributions.Distribution
@@ -226,15 +235,31 @@ class NodeMLPDiscrete(SEM2Node):
         if cfg is None:
             cfg = MLPConfig()
         if isinstance(cfg, MLPConfig):
-            self.nn_module = _MLPDiscrete(cfg, mode=mode, device=device)
+            self.nn_module = _MLP(cfg, device=device)
         else:
             raise ValueError(f"Invalid MLP configuration: \n{cfg}\n. Must be MLPConfig object, or None if default config is needed.")
 
         self.n_classes = cfg.output_dim
 
-    def _forward_inner(self, x: list[torch.Tensor], mode="sample", batch_size=1):
+    def _forward_inner(self, x: list[torch.Tensor], mode=DiscreteModes.SAMPLE, batch_size=1):
         """ x: List[Tensor], shape = [n_predecessors][bs, output_dim] """
         x = self._collate_fn(x)
-        out = self.nn_module(x, mode=mode)
+        out = self.nn_module(x)
+        out = self._discretize(out, mode)
         return out
 
+    def _discretize(self, x, mode):
+        """ Turn input logits into a representation of discrete values. """
+        if mode == DiscreteModes.SOFTMAX:
+            # Return probabilities for each outcome. Shape = [..., n_outcomes]
+            return torch.softmax(x, dim=-1)
+        elif mode == DiscreteModes.SAMPLE:
+            # Draw from the observed distribution. Shape = [..., 1]
+            if self.training:
+                warnings.warn("Drawing sample for discrete nodes does not support backpropagation during training. \n"
+                              " To train discrete nodes, use another sampling strategy, via a different SEM2 class. ")
+            probs = torch.softmax(x, dim=-1)
+            sample = torch.distributions.Categorical(probs=probs).sample()
+            return sample.unsqueeze(-1)
+        else:
+            raise NotImplementedError(f"Discretisation mode {mode} not implemented yet.")
