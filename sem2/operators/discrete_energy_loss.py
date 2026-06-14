@@ -67,97 +67,87 @@ class DiscreteEnergyLoss:
 
         return onehot
 
-    def energy_score(self, x_true, p_hat):
-        """ Loss function based on the energy score, where model predicts joint probability for every outcome.
-        4 possible values: (0, 0), (0, 1), (1, 0), (1, 1)
-        E(|x_h - x_true|) - 1/2E(|x_hi - x_hj|) = E(pred_error) - 1/2 E(pairwise_pred_distance)
+    def _energy_components(self, p_hat, x_true=None, p_true_mean=None):
+        """Compute shared components: pred_err and unbiased pair_pred_dist.
 
         Args:
-            x_true (torch.Tensor): iid samples from the true distribution of. Shape = [BS, n_samples, 2]
-            p_hat (torch.Tensor): Predicted probabilities. shape = [BS, n_samples, n_states]
+            p_hat: [bs, n_samples, n_states]
+            x_true: [bs, n_samples, n_nodes] (optional, used if p_true_mean not given)
+            p_true_mean: [bs, n_states] (optional, precomputed)
         Returns:
-            loss (torch.Tensor): energy loss.
-        """
-
-        bs, n_samples, dim = p_hat.shape
-
-        x_true = x_true.long()
-        p_true = self.idx_to_onehot(x_true)  # shape = [bs, n_samples, n_states]
-
-        p_true_mean = p_true.mean(dim=1)  # shape = [bs, n_states]
-        p_hat_mean = p_hat.mean(dim=1)  # shape = [bs, n_states]
-
-        # All pairs distance between pred and true
-        prob_mat = p_true_mean.unsqueeze(-1) @ p_hat_mean.unsqueeze(1)  # shape = [bs, n_states, n_states]
-        pred_err = (prob_mat * self.D_mat.unsqueeze(0)).mean(dim=0).sum()  # scalar = ∑_{m,k} A[m,k]*D[m,k]
-
-        # Between prediction distance
-        prob_mat = p_hat_mean.unsqueeze(-1) @ p_hat_mean.unsqueeze(1)  # shape = [bs, n_states, n_states]
-        pair_pred_dist = (prob_mat * self.D_mat.unsqueeze(0)).mean(dim=0).sum()  # shape = []
-
-        # Bias correction for fintie sample size.
-        if self.unbiased:
-            n_tot, n_corr = n_samples / (n_samples - 1), 1 / (n_samples * (n_samples - 1))
-
-            correct_pred = torch.einsum("bni,ij,bnj->bn", p_hat, self.D_mat, p_hat)  # shape = [bs, n_samples]
-            correct_pred = correct_pred.mean(dim=0).sum()  # shape = []
-            pair_pred_dist = pair_pred_dist * n_tot - correct_pred * n_corr
-
-        pred_loss = pred_err - pair_pred_dist / 2
-
-        return pred_loss, {"estimated-true distance": pred_err, "estimated-estimated distance": pair_pred_dist}
-
-    def energy_dist(self, p_hat, x_true=None, p_true_mean=None):
-        """ Loss function based on the energy score, where the model predicts joint probability for every outcome.
-        4 possible values: (0, 0), (0, 1), (1, 0), (1, 1)
-        E(|x_h - x_true|) - 1/2E(|x_hi - x_hj|) - 1/2 E(|x_truei - x_truej|) = E(pred_error) - 1/2 E(pairwise_pred_distance) - 1/2 E(pairwise_true_distance)
-        Includes debiasing.
-        if x_true, it is used as samples; mean is calculated from batch
-        if p_true_mean, it the mean is precomputed from the entire dataset.
-
-        Args:
-            p_hat (torch.Tensor): Predicted probabilities. Shape = [BS, n_samples, n_states]
-            x_true (torch.Tensor): iid samples from the true distribution. Shape = [BS, n_samples, 2]
-            p_true_mean (torch.Tensor): Mean probability, precomputed. Shape = [BS, n_states]
-        Returns:
-            loss (torch.Tensor): energy loss.
+            (pred_err, pair_pred_dist, p_true_mean, p_true)
+                p_true is None if p_true_mean was precomputed.
         """
         bs, n_samples, dim = p_hat.shape
+        precomputed = p_true_mean is not None
+        p_true = None
 
-        precomputed_true = p_true_mean is not None
-        if not precomputed_true:
-            p_true = self.idx_to_onehot(x_true.long())  # shape = [bs, n_samples, n_states]
-            p_true_mean = p_true.mean(dim=1)  # shape = [bs, n_states]
-        p_hat_mean = p_hat.mean(dim=1)  # shape = [bs, n_states]
+        if not precomputed:
+            p_true = self.idx_to_onehot(x_true.long())
+            p_true_mean = p_true.mean(dim=1)
 
-        # All pairs distance between pred and true
-        prob_mat = p_true_mean.unsqueeze(-1) @ p_hat_mean.unsqueeze(1)  # shape = [bs, n_states, n_states]
-        pred_err = (prob_mat * self.D_mat.unsqueeze(0)).mean(dim=0).sum()  # scalar = ∑_{m,k} A[m,k]*D[m,k]
+        p_hat_mean = p_hat.mean(dim=1)
 
-        # Between prediction distance, unbiased
-        prob_mat = p_hat_mean.unsqueeze(-1) @ p_hat_mean.unsqueeze(1)  # shape = [bs, n_states, n_states]
+        # Cross distance: true vs pred
+        prob_mat = p_true_mean.unsqueeze(-1) @ p_hat_mean.unsqueeze(1)
+        pred_err = (prob_mat * self.D_mat.unsqueeze(0)).mean(dim=0).sum()
+
+        # Pairwise pred distance
+        prob_mat = p_hat_mean.unsqueeze(-1) @ p_hat_mean.unsqueeze(1)
         pair_pred_dist = (prob_mat * self.D_mat.unsqueeze(0)).mean(dim=0).sum()
 
-        # Between true distance, unbiased
-        prob_mat = p_true_mean.unsqueeze(-1) @ p_true_mean.unsqueeze(1)  # shape = [bs, n_states, n_states]
-        pair_true_dist = (prob_mat * self.D_mat.unsqueeze(0)).mean(dim=0).sum()  # shape = []
-
-        # Bias correction for fintie sample size
+        # Bias correction
         if self.unbiased:
-            # Correction factor for finite sample size
             n_tot, n_corr = n_samples / (n_samples - 1), 1 / (n_samples * (n_samples - 1))
-
-            correct_hat = torch.einsum("bni,ij,bnj->bn", p_hat, self.D_mat, p_hat)  # shape = [bs, n_samples]
-            correct_hat = correct_hat.mean(dim=0).sum()  # shape = []
+            correct_hat = torch.einsum("bni,ij,bnj->bn", p_hat, self.D_mat, p_hat)
+            correct_hat = correct_hat.mean(dim=0).sum()
             pair_pred_dist = pair_pred_dist * n_tot - correct_hat * n_corr
 
-            if not precomputed_true:
-                correct_pred = torch.einsum("bni,ij,bnj->bn", p_true, self.D_mat, p_true)  # shape = [bs, n_samples]
-                correct_pred = correct_pred.mean(dim=0).sum()  # shape = []
-                pair_true_dist = pair_true_dist * n_tot - correct_pred * n_corr
+        return pred_err, pair_pred_dist, p_true_mean, p_true
 
-        energy_dist = pred_err - pair_pred_dist / 2 - pair_true_dist / 2
+    def energy_score(self, x_true, p_hat, p_true_mean=None):
+        """Energy score: E(|x_h - x_true|) - 1/2 E(|x_hi - x_hj|)
 
-        return energy_dist, {"estimated-true distance": pred_err, "estimated-estimated distance": pair_pred_dist, "true-true distance:": pair_true_dist}
+        Args:
+            x_true: [bs, n_samples, n_nodes] iid samples from true distribution.
+            p_hat:  [bs, n_samples, n_states] predicted probabilities.
+            p_true_mean: [bs, n_states] optional precomputed mean.
+        Returns:
+            (loss, log_dict)
+        """
+        pred_err, pair_pred_dist, _, _ = self._energy_components(
+            p_hat, x_true=x_true, p_true_mean=p_true_mean
+        )
+        loss = pred_err - pair_pred_dist / 2
+        return loss, {"estimated-true distance": pred_err,
+                      "estimated-estimated distance": pair_pred_dist}
 
+    def energy_dist(self, p_hat, x_true=None, p_true_mean=None):
+        """Energy distance: E|x_h - x_true| - 1/2 E|x_hi - x_hj| - 1/2 E|x_truei - x_truej|
 
+        Args:
+            p_hat:  [bs, n_samples, n_states] predicted probabilities.
+            x_true: [bs, n_samples, n_nodes] samples (optional if p_true_mean given).
+            p_true_mean: [bs, n_states] optional precomputed mean.
+        Returns:
+            (loss, log_dict)
+        """
+        pred_err, pair_pred_dist, p_true_mean, p_true = self._energy_components(
+            p_hat, x_true=x_true, p_true_mean=p_true_mean
+        )
+
+        # Pairwise true distance
+        prob_mat = p_true_mean.unsqueeze(-1) @ p_true_mean.unsqueeze(1)
+        pair_true_dist = (prob_mat * self.D_mat.unsqueeze(0)).mean(dim=0).sum()
+
+        if self.unbiased and p_true is not None:
+            n_samples = p_hat.shape[1]
+            n_tot, n_corr = n_samples / (n_samples - 1), 1 / (n_samples * (n_samples - 1))
+            correct_pred = torch.einsum("bni,ij,bnj->bn", p_true, self.D_mat, p_true)
+            correct_pred = correct_pred.mean(dim=0).sum()
+            pair_true_dist = pair_true_dist * n_tot - correct_pred * n_corr
+
+        loss = pred_err - pair_pred_dist / 2 - pair_true_dist / 2
+        return loss, {"estimated-true distance": pred_err,
+                      "estimated-estimated distance": pair_pred_dist,
+                      "true-true distance": pair_true_dist}

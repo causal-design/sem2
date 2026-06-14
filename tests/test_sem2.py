@@ -838,40 +838,40 @@ class TestSEMTypeDetection:
 
     def test_linear_gaussian(self):
         dag = _DAG("e ~ Normal(0,1); y <- e")
-        assert dag.sem_type == SEMType.LINEAR_GAUSSIAN
+        assert dag.inferred_sem_type == SEMType.LINEAR_GAUSSIAN
 
     def test_linear_gaussian_multi_node(self):
         dag = _DAG("e1, e2 ~ Normal(0,1); y <- e1 + e2")
-        assert dag.sem_type == SEMType.LINEAR_GAUSSIAN
+        assert dag.inferred_sem_type == SEMType.LINEAR_GAUSSIAN
 
     def test_linear_non_gaussian(self):
         dag = _DAG("e ~ Beta(0.5,0.5); y <- e")
-        assert dag.sem_type == SEMType.LINEAR
+        assert dag.inferred_sem_type == SEMType.LINEAR
 
     def test_nonlinear(self):
         dag = _DAG("e1, e2 ~ Normal(0,1); y <- n(e1,e2)")
-        assert dag.sem_type == SEMType.NONLINEAR
+        assert dag.inferred_sem_type == SEMType.NONLINEAR
 
     def test_mixed_functional_form_is_nonlinear(self):
         """Linear + MLP in same model → nonlinear (MLP supersedes linear)."""
         dag = _DAG("e1, e2, e3 ~ Normal(0,1); y <- n(e1,e2) + e3")
-        assert dag.sem_type == SEMType.NONLINEAR
+        assert dag.inferred_sem_type == SEMType.NONLINEAR
 
     def test_discrete(self):
         dag = _DAG("e ~ Bernoulli(0.5); y <- e")
-        assert dag.sem_type == SEMType.LINEAR_DISCRETE
+        assert dag.inferred_sem_type == SEMType.LINEAR_DISCRETE
 
     def test_discrete_poisson(self):
         dag = _DAG("e ~ Poisson(2.0); y <- e")
-        assert dag.sem_type == SEMType.LINEAR_DISCRETE
+        assert dag.inferred_sem_type == SEMType.LINEAR_DISCRETE
 
     def test_mixed_discrete(self):
         dag = _DAG("e ~ Bernoulli(0.5); y <- n(e)")
-        assert dag.sem_type == SEMType.NONLINEAR_DISCRETE
+        assert dag.inferred_sem_type == SEMType.NONLINEAR_DISCRETE
 
     def test_exogenous_only_gaussian(self):
         dag = _DAG("e1, e2 ~ Normal(0,1)")
-        assert dag.sem_type == SEMType.LINEAR_GAUSSIAN
+        assert dag.inferred_sem_type == SEMType.LINEAR_GAUSSIAN
 
     def test_sem2_inherits_sem_type(self):
         """SEM2 exposes the same sem_type as the underlying DAG."""
@@ -879,7 +879,7 @@ class TestSEMTypeDetection:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             m = make_model("e ~ Normal(0,1); y <- e")
-        assert m.sem_type == SEMType.LINEAR_GAUSSIAN
+        assert m.inferred_sem_type == SEMType.LINEAR_GAUSSIAN
 
     def test_sem2_init_emits_warning(self):
         """SEM2.__init__ should warn the user about the detected sem_type."""
@@ -889,30 +889,30 @@ class TestSEMTypeDetection:
 
     def test_nonlinear_discrete(self):
         dag = _DAG("e ~ Bernoulli(0.5); y <- n(e)")
-        assert dag.sem_type == SEMType.NONLINEAR_DISCRETE
+        assert dag.inferred_sem_type == SEMType.NONLINEAR_DISCRETE
 
     def test_linear_mixed_exog(self):
         """Some continuous + some discrete exog nodes, linear endogenous."""
         dag = _DAG("e1 ~ Normal(0,1); e2 ~ Bernoulli(0.5); y <- e1 + e2")
-        assert dag.sem_type == SEMType.LINEAR_MIXED_EXOG
+        assert dag.inferred_sem_type == SEMType.LINEAR_MIXED_EXOG
 
     def test_nonlinear_mixed_exog(self):
         """Some continuous + some discrete exog nodes, MLP endogenous."""
         dag = _DAG("e1 ~ Normal(0,1); e2 ~ Bernoulli(0.5); y <- n(e1, e2)")
-        assert dag.sem_type == SEMType.NONLINEAR_MIXED_EXOG
+        assert dag.inferred_sem_type == SEMType.NONLINEAR_MIXED_EXOG
 
     def test_exogenous_only_non_gaussian(self):
         dag = _DAG("e1, e2 ~ Beta(0.5,0.5)")
-        assert dag.sem_type == SEMType.LINEAR
+        assert dag.inferred_sem_type == SEMType.LINEAR
 
     def test_exogenous_only_discrete(self):
         dag = _DAG("e ~ Bernoulli(0.3)")
-        assert dag.sem_type == SEMType.LINEAR_DISCRETE
+        assert dag.inferred_sem_type == SEMType.LINEAR_DISCRETE
 
     def test_nonlinear_continuous(self):
         """Pure MLP with continuous noise is nonlinear."""
         dag = _DAG("e ~ Normal(0,1); y <- n(e)")
-        assert dag.sem_type == SEMType.NONLINEAR
+        assert dag.inferred_sem_type == SEMType.NONLINEAR
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
