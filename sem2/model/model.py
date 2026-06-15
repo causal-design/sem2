@@ -2,6 +2,7 @@ import logging
 import torch
 from torch import nn
 from torch import Tensor
+from collections import defaultdict
 
 from .nodes import NodeExogenous, NodeLinear, NodeMLP, NodeMLPDiscrete, SEM2Node, DiscreteModes
 from .sem_parsing import _DAG, SEMType
@@ -182,6 +183,19 @@ class SEM2Discrete(SEM2):
         self.state_node_names = node_names  # List of node names, where index corresponds to column in all_states
         self.all_states = torch.nn.parameter.Buffer(all_states) # Which state each confguration corresponds to
 
+        # Generate fixed ordering of discrete node parents
+        self.disc_parents: dict[str, list[NodeMLPDiscrete]] = defaultdict(list)
+        self.cont_parents: dict[str, list[SEM2Node]] = defaultdict(list)
+        for node_name in self.topological_order:
+            node = self.node_dict[node_name]
+            if isinstance(node, NodeMLPDiscrete):
+                for p in node.predecessors:
+                    pn = self.node_dict[p]
+                    if isinstance(pn, NodeMLPDiscrete):
+                        self.disc_parents[node_name].append(pn)
+                    else:
+                        self.cont_parents[node_name].append(pn)
+
     def sample(self, batch_size=1, set_nodes: dict[str, torch.Tensor] = None) -> tuple[Tensor, dict]:
         """ Discrete sampling: Sample every possible discrete outcome.
             This involves sampling continuous variables, and computing every permutation of discrete variables.
@@ -226,16 +240,9 @@ class SEM2Discrete(SEM2):
                 parent_values = [self.node_dict[p].get_value() for p in parent_names]
                 node(parent_values, batch_size)
                 continue
-
-            # v.type == "NodeMLPDiscrete"
-            disc_parents = []
-            cont_parents = []
-            for p in node.predecessors:
-                pn = self.node_dict[p]
-                if isinstance(pn, NodeMLPDiscrete):
-                    disc_parents.append(pn)
-                else:
-                    cont_parents.append(pn)
+            # node.type == "NodeMLPDiscrete"
+            disc_parents = self.disc_parents[node_name]
+            cont_parents = self.cont_parents[node_name]
 
             # 1) Build context keys from *discrete parents only*
             if len(disc_parents) == 0:

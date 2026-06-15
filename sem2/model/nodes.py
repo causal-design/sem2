@@ -6,7 +6,7 @@ import warnings
 from torch import nn
 from torch.distributions import Distribution
 
-from .nn_models import _LinearConfig, _LinearModel, _MLP#, _MLPDiscrete
+from .nn_models import _LinearConfig, _LinearModel, _MLP
 from ..default_configs import LinearNodeConfig, MLPConfig
 
 # ── RandomVariable ────────────────────────────────────────────────────────────
