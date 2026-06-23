@@ -1,11 +1,10 @@
-from typing import TYPE_CHECKING
-import torch
+from typing import TYPE_CHECKING, cast
 from .operators_base import SEM2Operator, OperatorInput, OperatorOutput
-from ..model import SEMType
+from ..model.sem_parsing import SEMType
 
 if TYPE_CHECKING:
     from torch import Tensor
-    from ..model import SEM2
+    from ..model.model import SEM2, SEM2Discrete
 
 
 class PotentialOutcome(SEM2Operator):
@@ -22,7 +21,6 @@ class PotentialOutcome(SEM2Operator):
         # Select the correct forward method based on the SEM type
         sem_type = self.model.sem_type
         if SEMType.is_continuous(sem_type):
-            # Continuous node
             self.evaluate = self._evaluate_continuous
         else:
             raise NotImplementedError(f"Potential Outcome sampling is not implemented for this SEM type: {sem_type}")
@@ -39,7 +37,7 @@ class PotentialOutcome(SEM2Operator):
             The computed tensor for the target node.
             {} Dummy dict, no metrics are generated.
         """
-        layer = self.model.layer
+        layer = self.model.node_dict
         topological_order = self.model.topological_order
 
         assert self.target_node in layer, f"target_node {self.target_node} not found in model"
