@@ -1,12 +1,13 @@
-import re
 from abc import ABC, abstractmethod
 from typing import Optional
+from enum import StrEnum
 import torch
+import warnings
 from torch import nn
 from torch.distributions import Distribution
 
-from .nn_models import _LinearConfig, _LinearModel, LinearNodeConfig, MLPConfig, _MLP
-
+from .nn_models import _LinearConfig, _LinearModel, _MLP
+from ..default_configs import LinearNodeConfig, MLPConfig
 
 # ── RandomVariable ────────────────────────────────────────────────────────────
 
@@ -35,18 +36,21 @@ class SEM2Node(RandomVariable, ABC, nn.Module):
     out_dim: int
     predecessors: list[str]
 
-    def __init__(self, name: str, rhs: str, predecessors: list[str], device="cpu"):
+    def __init__(self, name: str, rhs: str, predecessor_nodes: list[SEM2Node], device="cpu"):
         super().__init__()
         self.name = name
         self.rhs = rhs
-        self.predecessors = predecessors
-        self.npredecessors = len(predecessors)
+        self.predecessors = [n.name for n in predecessor_nodes]
+        self.npredecessors = len(self.predecessors)
         self.device = device
         self.formula = name + "=" + rhs
         self.value = None
 
+        # Number of input variables.
+        self.input_dim = sum(p.out_dim for p in predecessor_nodes)
+
     def __repr__(self):
-        return self.formula
+        return f'SEM2Node: {self.formula}'
 
     def set_value(self, value: torch.Tensor):
         self.value = value
@@ -61,12 +65,12 @@ class SEM2Node(RandomVariable, ABC, nn.Module):
         """Concatenate predecessor values along the last dimension."""
         return torch.cat(x, dim=-1)
 
-    def forward(self, x: list[torch.Tensor], batch_size: int = 1):
-        self.value = self._forward_inner(x, batch_size)
+    def forward(self, x: list[torch.Tensor], batch_size: int = 1, **kwargs):
+        self.value = self._forward_inner(x, batch_size=batch_size, **kwargs)
         return self.value
 
     @abstractmethod
-    def _forward_inner(self, x: list[torch.Tensor], batch_size: int = 1) -> torch.Tensor:
+    def _forward_inner(self, x: list[torch.Tensor], batch_size: int = 1, **kwargs) -> torch.Tensor:
         pass
 
 
@@ -89,7 +93,7 @@ class NodeExogenous(SEM2Node):
         out_dim: int = 1,
         device="cpu",
     ):
-        super().__init__(name, rhs, predecessors=[], device=device)
+        super().__init__(name, rhs, predecessor_nodes=[], device=device)
         self.out_dim = out_dim
         self.dist = dist
 
@@ -104,8 +108,8 @@ class NodeEndogenous(SEM2Node, ABC):
     An endogenous node is a deterministic function of its parent nodes.
     """
 
-    def __init__(self, name: str, rhs: str, predecessors: list[str], device="cpu"):
-        super().__init__(name, rhs, predecessors, device=device)
+    def __init__(self, name: str, rhs: str, predecessor_nodes: list['SEM2Node'], device="cpu"):
+        super().__init__(name, rhs, predecessor_nodes, device=device)
 
 
 # ── Linear ────────────────────────────────────────────────────────────────────
@@ -128,13 +132,12 @@ class NodeLinear(NodeEndogenous):
         self,
         name: str,
         rhs: str,
-        predecessors: list[str],
         coefficients: list[float | None],
         cfg: LinearNodeConfig | None,
         predecessor_nodes: list[SEM2Node],
         device="cpu",
     ):
-        super().__init__(name, rhs, predecessors, device=device)
+        super().__init__(name, rhs, predecessor_nodes, device=device)
         self.out_dim = cfg.output_dim if cfg is not None else 1
         self.use_bias = cfg.use_bias if cfg is not None else True
 
@@ -153,18 +156,9 @@ class NodeLinear(NodeEndogenous):
         fix_mask = [c is not None for c in expanded]
         fix_vals = [c if c is not None else 0.0 for c in expanded]
 
-        self.register_buffer(
-            "fix_weights",
-            torch.tensor(fix_mask, dtype=torch.bool, device=device).unsqueeze(0),
-        )
-        self.register_buffer(
-            "_fixed_vals",
-            torch.tensor(fix_vals, dtype=torch.float32, device=device).unsqueeze(0),
-        )
-        self.register_buffer(
-            "_ones",
-            torch.ones(1, input_dim, device=device),
-        )
+        self.fix_weights = nn.parameter.Buffer(torch.tensor(fix_mask, dtype=torch.bool, device=device).unsqueeze(0))
+        self._fixed_vals = nn.parameter.Buffer(torch.tensor(fix_vals, dtype=torch.float32, device=device).unsqueeze(0))
+        self._ones = nn.parameter.Buffer(torch.ones(1, input_dim, device=device))
 
         internal_cfg = _LinearConfig(
             input_dim=input_dim,
@@ -189,8 +183,8 @@ class NodeNonlinear(NodeEndogenous, ABC):
     Subclass this to plug in a different linking function (e.g. GP, spline).
     """
 
-    def __init__(self, name: str, rhs: str, predecessors: list[str], device="cpu"):
-        super().__init__(name, rhs, predecessors, device=device)
+    def __init__(self, name: str, rhs: str, predecessor_nodes: list[SEM2Node], device="cpu"):
+        super().__init__(name, rhs, predecessor_nodes, device=device)
 
     @abstractmethod
     def _forward_inner(self, x: list[torch.Tensor], batch_size: int = 1) -> torch.Tensor:
@@ -208,19 +202,83 @@ class NodeMLP(NodeNonlinear):
         self,
         name: str,
         rhs: str,
-        predecessors: list[str],
         cfg: MLPConfig | None,
         predecessor_nodes: list[SEM2Node],
         device="cpu",
     ):
-        super().__init__(name, rhs, predecessors, device=device)
+        super().__init__(name, rhs, predecessor_nodes, device=device)
         self.cfg = cfg if cfg is not None else MLPConfig()
 
-        input_dim = sum(p.out_dim for p in predecessor_nodes)
-        if self.cfg.input_dim is None:
-            self.cfg.input_dim = input_dim
+        self.cfg.input_dim = self.input_dim
         self.mlp = _MLP(self.cfg, device=device)
         self.out_dim = self.cfg.output_dim
 
-    def _forward_inner(self, x: list[torch.Tensor], batch_size: int = 1) -> torch.Tensor:
+    def _forward_inner(self, x: list[torch.Tensor], **kwargs) -> torch.Tensor:
+        """ Input shape:
+                x: List[Tensor], shape = [n_predecessors][bs, output_dim]
+            Return shape:
+                return.shape = [bs, output_dim]
+        """
         return self.mlp(self._collate_fn(x))
+
+
+# ── Discrete Node ───────────────────────────────────────────────────────────────────
+
+class DiscreteModes(StrEnum):
+    GUMBEL = "gumbel"                   # Gumbel-Softmax, a soft approximation of a categorical distribution
+    SOFTMAX = "softmax"                 # Return probabilities for each outcome
+    SAMPLE_ONEHOT = "onehot"            # Return one-hot vectors sampled from the distribution
+    SAMPLE = "sample"                   # Return a single sample from the distribution. Does not support training.
+
+
+class NodeMLPDiscrete(SEM2Node):
+    """ Discrete NN node. """
+    id: int = 0
+    out_dim = 1         # The discrete node outputs 1 value, with n_classes categories.
+
+    def __init__(self, name: str, rhs: str, cfg: MLPConfig, predecessor_nodes: list[SEM2Node], mode=None, device="cpu"):
+        super().__init__(name, rhs, predecessor_nodes, device=device)
+        self.cfg = cfg if cfg is not None else MLPConfig()
+
+        cfg.input_dim = self.input_dim
+        if isinstance(cfg, MLPConfig):
+            self.nn_module = _MLP(cfg, device=device)
+        else:
+            raise ValueError(f"Invalid MLP configuration: \n{cfg}\n. Must be MLPConfig object, or None if default config is needed.")
+
+        self.n_classes = cfg.output_dim
+
+    def _forward_inner(self, x: list[torch.Tensor], mode=DiscreteModes.SAMPLE, **kwargs) -> torch.Tensor:
+        """ Input shape:
+                x: List[Tensor], shape = [n_predecessors][bs, output_dim]
+                mode: How to treat the discretization.
+            Return shape depends on the mode,
+                if DiscreteModes.SAMPLE:
+                    return.shape = [bs, 1]
+                if DiscreteModes.SOFTMAX:
+                    return.shape = [bs, n_classes]
+                if DiscreteModes.Gumbel:
+                    return.shape = TBD
+                if DiscreteModes.SAMPLE_ONEHOT:
+                    return.shape = TBD
+        """
+        x = self._collate_fn(x)
+        out = self.nn_module(x)
+        out = self._discretize(out, mode)
+        return out
+
+    def _discretize(self, x, mode):
+        """ Turn input logits into a representation of discrete values. """
+        if mode == DiscreteModes.SOFTMAX:
+            # Return probabilities for each outcome. Shape = [..., n_outcomes]
+            return torch.softmax(x, dim=-1)
+        elif mode == DiscreteModes.SAMPLE:
+            # Draw from the observed distribution. Shape = [..., 1]
+            if self.training:
+                warnings.warn("Drawing sample for discrete nodes does not support backpropagation during training. \n"
+                              " To train discrete nodes, use another sampling strategy, via a different SEM2 class. ")
+            probs = torch.softmax(x, dim=-1)
+            sample = torch.distributions.Categorical(probs=probs).sample()
+            return sample.unsqueeze(-1)
+        else:
+            raise NotImplementedError(f"Discretisation mode {mode} not implemented yet.")

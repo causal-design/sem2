@@ -1,14 +1,18 @@
+from typing import TYPE_CHECKING
 from dataclasses import dataclass
 from typing import Optional
+
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+if TYPE_CHECKING:
+    from torch import Tensor
 
 # LinearNodeConfig and MLPConfig are the public user-facing node configs.
 # They live in default_configs and are re-exported here so internal node
 # constructors can import from a single place.
-from .default_configs import LinearNodeConfig, MLPConfig
+from ..default_configs import MLPConfig
 
 
 # ── Internal linear config + model ────────────────────────────────────────────
@@ -19,8 +23,8 @@ class _LinearConfig:
     input_dim: int = None
     output_dim: int = 1
     use_bias: bool = True
-    init_weight_val: Optional[torch.Tensor] = None
-    init_bias_val: Optional[torch.Tensor] = None
+    init_weight_val: Optional[Tensor] = None
+    init_bias_val: Optional[Tensor] = None
 
 
 class _LinearModel(nn.Module):
@@ -58,7 +62,7 @@ class _LinearModel(nn.Module):
 
         self.to(device)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: Tensor) -> Tensor:
         return F.linear(x, self.weight, self.bias)
 
 
@@ -82,11 +86,8 @@ class _MLP(nn.Module):
     Args:
         config (MLPConfig): Configuration object for the MLP. If None, uses default values.
     """
-    def __init__(self, config: MLPConfig = None, device="cpu"):
+    def __init__(self, config: MLPConfig, device="cpu"):
         super().__init__()
-
-        if config is None:
-            config = MLPConfig()
 
         layers = []
         # Combine input_dim and hidden_dims to create the architecture
@@ -102,13 +103,10 @@ class _MLP(nn.Module):
 
         layers.append(nn.Linear(all_dims[-1], config.output_dim))
 
-        if config.prob_output:
-            layers.append(nn.Sigmoid())
-
         # Wrap the layers in a Sequential module
         self.net = nn.Sequential(*layers)
         self.cfg = config
         self.to(device)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: Tensor) -> Tensor:
         return self.net(x)

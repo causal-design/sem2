@@ -34,12 +34,11 @@ class LinearNodeConfig:
 class MLPConfig:
     """Public configuration for MLP nodes."""
 
-    input_dim: Optional[int] = None                                      # Inferred from graph if None
-    hidden_dims: list = field(default_factory=lambda: [128, 128, 128])   # Hidden layer widths
-    output_dim: int = 1                                                   # Output dimension
-    prob_output: bool = False                                            # Sigmoid on output -> [0, 1]
-    dropout: float = 0.0                                                 # 0 = no dropout
-    activation: str = "relu"                                             # relu | tanh | sigmoid | ... https://docs.pytorch.org/docs/2.12/nn.html
+    input_dim: int = None                                                   # Inferred from graph
+    hidden_dims: list = field(default_factory=lambda: [512, 512, 512])      # Hidden layer widths
+    output_dim: int = 1                                                     # Output dimension
+    dropout: float = 0.0                                                    # 0 = no dropout
+    activation: str = "relu"                                                # relu | tanh | sigmoid | ... https://docs.pytorch.org/docs/2.12/nn.html
 
     def __post_init__(self):
         self.hidden_dims = list(self.hidden_dims)
@@ -71,15 +70,15 @@ class TrainingConfig(BaseModel):
 
     # Optimiser
     optim: Optimisers = "AdamW"
-    lr: float = 10e-4
+    lr: float = 5e-4
     weight_decay: float = 0.
     momentum: float = 0.9                   # SGD only
 
     # Training loop
-    batch_size: int = 128
-    epochs: int = 100
+    batch_size: int = 1024
+    epochs: int = 12
     rng_seed: int = 42
-    bs: int = 256                           # Sample batch size for distribution sampling
+    sample_bs: int = 512                           # Sample batch size for distribution sampling
 
     # Energy score loss
     use_energy_score: bool = True
@@ -87,9 +86,9 @@ class TrainingConfig(BaseModel):
     energy_score_beta: float = 1.
 
     # ATE loss
-    use_ate: bool = True
-    ate_weight: float = 0.0
-    T_node: str = "D"
+    use_ate: bool = False
+    ate_weight: float = -0.05
+    T_node: str = "X"
     Y_node: str = "Y"
 
     # MMD loss  # TODO
