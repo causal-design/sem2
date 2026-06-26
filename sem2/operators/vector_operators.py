@@ -1,10 +1,13 @@
+# Defer annotation evaluation so TYPE_CHECKING-only type hints (SEM2, TrainingConfig, ...)
+# do not crash at runtime on Python < 3.14.
+from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 from .operators_base import SEM2Operator, OperatorInput, OperatorOutput
-from ..model.sem_parsing import SEMType
+from ..model.construction import SEMType
 
 if TYPE_CHECKING:
     from torch import Tensor
-    from ..model.model import SEM2, SEM2Discrete
+    from ..model.models import SEM2, SEM2Discrete
 
 
 class PotentialOutcome(SEM2Operator):
