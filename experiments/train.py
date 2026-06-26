@@ -2,7 +2,7 @@ import torch
 import logging
 
 from sem2.sem2trainer import TrainingConfig, SEM2Trainer
-from sem2.model.model import SEM2
+from sem2.model.models import SEM2
 
 
 def main():

@@ -6,14 +6,18 @@ build-backend = "setuptools.build_meta"
 name = "sem2"
 version = "0.1.0"
 description = "SEM2 Package"
-requires-python = ">=3.14"
+requires-python = ">=3.10"
 dependencies = [
     "torch",
     "numpy",
-    "pydantic",
+    "pydantic>=2",
     "pytest",
 ]
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["sem2", "sem2.*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
