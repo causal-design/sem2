@@ -1,3 +1,5 @@
 __pycache__/
 .pytest_cache/
 /sem2.egg-info/
+/.agent-shell/
+/DESIGN.pdf
