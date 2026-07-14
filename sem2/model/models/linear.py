@@ -25,9 +25,8 @@ class SEM2Linear(SEM2):
         - the model-implied covariance Sigma = (I - B)^-1 Omega (I - B)^-T,
           where Omega is the diagonal covariance of the exogenous inputs.
 
-    Only scalar nodes (out_dim == 1) and scalar exogenous distributions are
-    supported; multi-output nodes or vector-valued exogenous distributions raise
-    a clear error.
+    Linear SEMs are assumed to have scalar nodes (out_dim == 1) and scalar
+    exogenous distributions; anything else raises a clear error.
     """
     sem_type = SEMType.LINEAR
 
@@ -47,11 +46,6 @@ class SEM2Linear(SEM2):
         super().__init__(model_formula, node_cfgs, device=device)
         self.device = device
 
-        # Canonical node ordering for all matrices (topological order makes B
-        # strictly lower-triangular, so I - B is unit lower-triangular).
-        self.node_order: list[str] = list(self.topological_order)
-        self._node_index: dict[str, int] = {n: i for i, n in enumerate(self.node_order)}
-
         self._assert_scalar_nodes()
         # Validate that path coefficients can be extracted (issue: "Call coef_matrix").
         self.coef_matrix()
@@ -62,9 +56,9 @@ class SEM2Linear(SEM2):
         """coef_matrix / cov_matrix assume every node is scalar (out_dim == 1)."""
         bad = [n for n in self.node_order if self.node_dict[n].out_dim != 1]
         if bad:
-            raise NotImplementedError(
-                f"SEM2Linear matrices currently support only scalar nodes "
-                f"(out_dim == 1). Multi-output nodes: {bad}."
+            raise ValueError(
+                f"SEM2Linear requires scalar nodes (out_dim == 1). "
+                f"Multi-output nodes: {bad}."
             )
 
         vector_exog = []
@@ -73,15 +67,11 @@ class SEM2Linear(SEM2):
             if isinstance(node, NodeExogenous) and (node.dist.batch_shape or node.dist.event_shape):
                 vector_exog.append(name)
         if vector_exog:
-            raise NotImplementedError(
-                f"SEM2Linear matrices currently support only scalar independent "
-                f"exogenous distributions. Vector-valued or multivariate "
+            raise ValueError(
+                f"SEM2Linear requires scalar independent exogenous "
+                f"distributions. Vector-valued or multivariate "
                 f"exogenous nodes: {vector_exog}."
             )
-
-    def _index(self, nodes: list[str] | None) -> list[int]:
-        nodes = nodes if nodes is not None else self.node_order
-        return [self._node_index[n] for n in nodes]
 
     # ── path coefficients ─────────────────────────────────────────────────────
 
