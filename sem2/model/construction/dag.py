@@ -38,6 +38,8 @@ class _DAG:
         graph:             Dict of node_name -> list of predecessor names.
                            Derived from node_specs for topological sorting.
         topological_order: Node names in topologically sorted order.
+        node_order:        Canonical node ordering for matrices over the node set
+                           (a copy of topological_order).
         inferred_sem_type:          Inferred SEMType enum member. See SEMType above for
                            the full taxonomy.
     """
@@ -74,6 +76,11 @@ class _DAG:
                 f"Formula contains a cycle. Please check your formula: {e.args[1]}"
             ) from None
 
+        # Canonical node ordering for anything matrix-valued over the node set
+        # (topological order makes coefficient matrices strictly lower-triangular).
+        self.node_order: list[str] = list(self.topological_order)
+        self._node_index: dict[str, int] = {n: i for i, n in enumerate(self.node_order)}
+
         if self._unobserved_declared:
             hidden = set(self.unobserved_vars)
             self.observed_vars = [n for n in self.topological_order if n not in hidden]
@@ -87,6 +94,10 @@ class _DAG:
 
     def static_order(self):
         return iter(self.topological_order)
+
+    def _index(self, nodes: list[str] | None) -> list[int]:
+        nodes = nodes if nodes is not None else self.node_order
+        return [self._node_index[n] for n in nodes]
 
     def _validate_referenced_nodes(self):
         defined = set(self.node_specs)

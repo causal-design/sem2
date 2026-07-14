@@ -1065,7 +1065,7 @@ class TestRegisterBuffer:
 
 from sem2.model import SEM2Linear
 from sem2.operators.linear import (
-    SEM2LinearModelOperator, LogLikelihood, PseudoGaussianLogLikelihood, L2Covariance,
+    SEM2LinearModelOperator, LogLikelihood, WeightedFrobeniusDistance,
 )
 
 
@@ -1135,12 +1135,12 @@ class TestSEM2Linear:
         assert torch.allclose(emp, theo, atol=0.1)
 
     def test_multi_output_node_raises(self):
-        with pytest.raises(NotImplementedError, match="scalar"):
+        with pytest.raises(ValueError, match="scalar"):
             SEM2Linear("e ~ Normal(0,1); y <- e",
                        node_cfgs={"y": LinearNodeConfig(output_dim=2)})
 
     def test_multivariate_exogenous_distribution_raises(self):
-        with pytest.raises(NotImplementedError, match="scalar independent"):
+        with pytest.raises(ValueError, match="scalar independent"):
             SEM2Linear("e ~ MultivariateNormal([0,0], [[1,0], [0,1]]); y <- e")
 
     def test_cov_matrix_works_for_non_gaussian_linear_second_moments(self):
@@ -1212,56 +1212,51 @@ class TestLinearOperators:
         with pytest.raises(ValueError, match="centered"):
             LogLikelihood(m, centered=True, loc=torch.zeros(1))
 
-    def test_loglikelihood_rejects_non_gaussian_linear(self):
-        m = _chain_linear_nongaussian()
-        with pytest.raises(ValueError, match="PseudoGaussianLogLikelihood"):
-            LogLikelihood(m, ["x", "y"])
-
-    def test_pseudo_gaussian_loglikelihood_warns_for_non_gaussian_linear(self):
+    def test_loglikelihood_warns_for_non_gaussian_linear(self):
         m = _chain_linear_nongaussian()
         with pytest.warns(UserWarning, match="pseudo-log-likelihood"):
-            PseudoGaussianLogLikelihood(m, ["x", "y"])
+            LogLikelihood(m, ["x", "y"])
 
-    def test_pseudo_gaussian_loglikelihood_matches_mvn_formula(self):
+    def test_loglikelihood_matches_mvn_formula_for_non_gaussian_linear(self):
         m = _chain_linear_nongaussian()
         data = self._data(m)
         with pytest.warns(UserWarning, match="finite second moments"):
-            op = PseudoGaussianLogLikelihood(m, ["x", "y"])
+            op = LogLikelihood(m, ["x", "y"])
         ll, metrics = op.evaluate(data)
         idx = torch.tensor(m._index(["x", "y"]))
         mu = m.mean_vector().detach().index_select(0, idx)
         Sigma = m.cov_matrix(["x", "y"]).detach()
         mvn = torch.distributions.MultivariateNormal(mu, Sigma)
         assert ll.item() == pytest.approx(mvn.log_prob(data).mean().item(), abs=1e-4)
-        assert "pseudo_gaussian_log_likelihood" in metrics
+        assert "log_likelihood" in metrics
 
-    def test_pseudo_gaussian_loglikelihood_requires_finite_second_moments(self):
+    def test_loglikelihood_requires_finite_second_moments(self):
         m = SEM2Linear("e ~ Cauchy(0,1); y <- 1*e",
                        node_cfgs={"y": LinearNodeConfig(use_bias=False)})
         with pytest.warns(UserWarning, match="pseudo-log-likelihood"):
-            op = PseudoGaussianLogLikelihood(m, ["y"], loc=torch.zeros(1))
+            op = LogLikelihood(m, ["y"], loc=torch.zeros(1))
         with pytest.raises(ValueError, match="finite second moments"):
             op.evaluate(torch.zeros(3, 1))
 
-    def test_l2covariance_zero_on_model_data(self):
+    def test_weighted_frobenius_zero_on_model_data(self):
         m = _chain_linear()
         data = self._data(m, n=20000)
-        loss, _ = L2Covariance(m, ["x", "y"]).evaluate(data)
+        loss, _ = WeightedFrobeniusDistance(m, ["x", "y"]).evaluate(data)
         assert loss.item() < 0.05
 
-    def test_l2covariance_weighted(self):
+    def test_weighted_frobenius_weighted(self):
         m = _chain_linear()
         data = self._data(m)
         W = torch.ones(2, 2)
-        unweighted, _ = L2Covariance(m, ["x", "y"]).evaluate(data)
-        weighted, _ = L2Covariance(m, ["x", "y"], weight=W).evaluate(data)
+        unweighted, _ = WeightedFrobeniusDistance(m, ["x", "y"]).evaluate(data)
+        weighted, _ = WeightedFrobeniusDistance(m, ["x", "y"], weight=W).evaluate(data)
         assert weighted.item() == pytest.approx(unweighted.item(), abs=1e-6)
 
 
     def test_gradients_flow_through_cov(self):
         m = _chain_linear()
         data = self._data(m)
-        loss, _ = L2Covariance(m, ["x", "y"]).evaluate(data)
+        loss, _ = WeightedFrobeniusDistance(m, ["x", "y"]).evaluate(data)
         loss.backward()
         grads = [p.grad for p in m.parameters() if p.grad is not None]
         assert len(grads) > 0
