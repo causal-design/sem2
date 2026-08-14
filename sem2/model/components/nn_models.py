@@ -1,3 +1,7 @@
+# Defer annotation evaluation so the Tensor type hint (imported only under
+# TYPE_CHECKING) used in _LinearConfig's dataclass fields does not crash on
+# Python < 3.14.
+from __future__ import annotations
 from typing import TYPE_CHECKING
 from dataclasses import dataclass
 from typing import Optional
@@ -12,7 +16,7 @@ if TYPE_CHECKING:
 # LinearNodeConfig and MLPConfig are the public user-facing node configs.
 # They live in default_configs and are re-exported here so internal node
 # constructors can import from a single place.
-from ..default_configs import MLPConfig
+from ...default_configs import MLPConfig
 
 
 # ── Internal linear config + model ────────────────────────────────────────────

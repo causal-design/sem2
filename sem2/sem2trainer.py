@@ -4,7 +4,7 @@ from typing import Iterable
 import time
 import logging
 
-from .model.model import SEM2
+from .model.models import SEM2
 from .operators.scalar_operators import SEM2Loss
 from .default_configs import TrainingConfig
 
