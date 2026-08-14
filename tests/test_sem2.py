@@ -10,15 +10,18 @@ import pytest
 import torch
 import torch.nn as nn
 
-from sem2.model.nn_models import _LinearConfig, _LinearModel, _MLP
+from sem2.model.components.nn_models import _LinearConfig, _LinearModel, _MLP
 from sem2.default_configs import LinearNodeConfig, MLPConfig
-from sem2.model.nodes import (
+from sem2.model.components.nodes import (
     RandomVariable, SEM2Node,
     NodeExogenous,
     NodeEndogenous, NodeLinear, NodeNonlinear, NodeMLP,
 )
-from sem2.model.model import _DAG, SEM2
-from sem2.model.sem_parsing import SEMType
+from sem2.model.models import SEM2
+from sem2.model.construction import _DAG
+from sem2.model.construction import SEMType
+from sem2.model.construction import FormulaParser
+from sem2.model.construction import NodeSpec
 
 #probably should breakdown into smaller test files but for now is fine I guess
 
@@ -352,9 +355,11 @@ class TestDAG:
     # ── NodeSpec ──────────────────────────────────────────────────────────────
 
     def test_node_spec_is_dag_nested_class(self):
-        """NodeSpec is a DAG implementation detail — must be accessed via DAG.NodeSpec."""
+        """NodeSpec is the shared lowered IR (defined in sem_ast); _DAG.NodeSpec
+        is an alias to it for convenience."""
         dag = _DAG("e ~ Normal(0,1)")
-        assert isinstance(dag.node_specs["e"], _DAG.NodeSpec)
+        assert isinstance(dag.node_specs["e"], NodeSpec)
+        assert _DAG.NodeSpec is NodeSpec
 
     def test_node_specs_keys_match_graph(self):
         dag = _DAG("e1, e2 ~ Normal(0,1); y <- e1 + e2")
@@ -402,28 +407,22 @@ class TestDAG:
     # ── _parse_linear_term ────────────────────────────────────────────────────
 
     def test_parse_no_prefix(self):
-        dag = _DAG("e ~ Normal(0,1)")
-        assert dag._parse_linear_term("x") == (None, "x")
+        assert FormulaParser._parse_linear_term("x") == (None, "x")
 
     def test_parse_coeff_one(self):
-        dag = _DAG("e ~ Normal(0,1)")
-        assert dag._parse_linear_term("1*x") == (1.0, "x")
+        assert FormulaParser._parse_linear_term("1*x") == (1.0, "x")
 
     def test_parse_coeff_negative(self):
-        dag = _DAG("e ~ Normal(0,1)")
-        assert dag._parse_linear_term("-1*x") == (-1.0, "x")
+        assert FormulaParser._parse_linear_term("-1*x") == (-1.0, "x")
 
     def test_parse_coeff_fractional(self):
-        dag = _DAG("e ~ Normal(0,1)")
-        assert dag._parse_linear_term("0.5*x") == (0.5, "x")
+        assert FormulaParser._parse_linear_term("0.5*x") == (0.5, "x")
 
     def test_parse_coeff_negative_fractional(self):
-        dag = _DAG("e ~ Normal(0,1)")
-        assert dag._parse_linear_term("-0.5*x") == (-0.5, "x")
+        assert FormulaParser._parse_linear_term("-0.5*x") == (-0.5, "x")
 
     def test_parse_coeff_multidigit(self):
-        dag = _DAG("e ~ Normal(0,1)")
-        coeff, name = dag._parse_linear_term("10*x")
+        coeff, name = FormulaParser._parse_linear_term("10*x")
         assert coeff == 10.0 and name == "x"
 
 
@@ -792,6 +791,14 @@ class TestFormulaParsingRobustness:
         with pytest.raises(ValueError, match="Could not parse"):
             _DAG("e ~ Normal")
 
+    def test_malformed_rhs_syntax_error_raises_value_error(self):
+        with pytest.raises(ValueError, match="Could not parse"):
+            _DAG("e ~ Normal(0,")
+
+    def test_undefined_parent_raises_clear_value_error(self):
+        with pytest.raises(ValueError, match="undefined parent"):
+            _DAG("y <- x")
+
     def test_non_numeric_param_raises(self):
         """Non-numeric distribution parameters should raise ValueError."""
         with pytest.raises(ValueError, match="Non-numeric"):
@@ -826,11 +833,95 @@ class TestFormulaParsingRobustness:
 
     def test_dist_params_stored_on_node_spec(self):
         dag = _DAG("e ~ Normal(0,1)")
-        assert dag.node_specs["e"].dist_params == ["0", "1"]
+        # dist_params is a parsed (args, kwargs) tuple, ready for instantiation.
+        assert dag.node_specs["e"].dist_params == ([0.0, 1.0], {})
 
     def test_beta_params_stored(self):
         dag = _DAG("e ~ Beta(0.5,0.5)")
-        assert dag.node_specs["e"].dist_params == ["0.5", "0.5"]
+        assert dag.node_specs["e"].dist_params == ([0.5, 0.5], {})
+
+
+class TestFormulaParserAST:
+    """The parser builds a typed AST that lowers to NodeSpec objects."""
+
+    def test_parse_returns_specs_and_inputs(self):
+        specs, inputs = FormulaParser("e1, e2 ~ Normal(0,1); y <- e1 + e2").parse()
+        assert set(specs.keys()) == {"e1", "e2", "y"}
+        assert inputs == {"e1", "e2", "y"}
+
+    def test_ast_statement_types(self):
+        from sem2.model.construction import ExogenousDecl, EndogenousDecl
+        parser = FormulaParser("e ~ Normal(0,1); y <- 1*e")
+        parser.parse()
+        kinds = [type(s).__name__ for s in parser.statements]
+        assert kinds == ["ExogenousDecl", "EndogenousDecl"]
+
+    def test_exogenous_ast_holds_distribution(self):
+        from sem2.model.construction import ExogenousDecl
+        parser = FormulaParser("e ~ Normal(0,1)")
+        parser.parse()
+        decl = parser.statements[0]
+        assert isinstance(decl, ExogenousDecl)
+        assert decl.dist.name == "Normal"
+        assert decl.dist.args == [0.0, 1.0]
+
+    def test_linear_ast_holds_terms(self):
+        from sem2.model.construction import EndogenousDecl
+        parser = FormulaParser("e1, e2 ~ Normal(0,1); y <- 1*e1 + e2")
+        parser.parse()
+        y_decl = parser.statements[-1]
+        assert isinstance(y_decl, EndogenousDecl)
+        assert y_decl.node_type == "linear"
+        assert [(t.coeff, t.parent) for t in y_decl.terms] == [(1.0, "e1"), (None, "e2")]
+
+    def test_mechanism_ast_holds_parents(self):
+        parser = FormulaParser("e1, e2 ~ Normal(0,1); y <- n(e1,e2)")
+        parser.parse()
+        y_decl = parser.statements[-1]
+        assert y_decl.node_type == "mlp"
+        assert y_decl.mechanism.parents == ["e1", "e2"]
+
+    def test_lowered_spec_matches_dag(self):
+        """Specs produced standalone match those built via _DAG."""
+        formula = "e1, e2 ~ Normal(0,1); y <- 0.5*e1 + -1*e2"
+        specs, _ = FormulaParser(formula).parse()
+        dag = _DAG(formula)
+        assert specs["y"].coefficients == dag.node_specs["y"].coefficients
+        assert specs["y"].predecessors == dag.node_specs["y"].predecessors
+
+    def test_unobs_statement_sets_observed_vars(self):
+        dag = _DAG("e ~ Normal(0,1); x <- e; y <- x; unobs(e)")
+        assert dag.unobserved_vars == ["e"]
+        assert dag.observed_vars == ["x", "y"]
+
+    def test_unobs_statement_can_be_empty(self):
+        dag = _DAG("e ~ Normal(0,1); x <- e; unobs()")
+        assert dag.unobserved_vars == []
+        assert dag.observed_vars == ["e", "x"]
+
+    def test_unobs_statement_rejects_unknown_node(self):
+        with pytest.raises(ValueError, match="Unobserved variables"):
+            _DAG("unobs(z); e ~ Normal(0,1); x <- e")
+
+    def test_unobs_statement_rejects_duplicates(self):
+        with pytest.raises(ValueError, match="Duplicate unobserved"):
+            _DAG("unobs(e,e); e ~ Normal(0,1); x <- e")
+
+
+class TestDistributionRegistry:
+    """Distribution-name validation lives in the parser frontend."""
+
+    def test_known_distributions_accepted(self):
+        for name in ["Normal", "Beta", "Bernoulli", "Poisson", "Uniform"]:
+            FormulaParser(f"e ~ {name}(0.5)").parse()  # should not raise
+
+    def test_unknown_distribution_rejected(self):
+        with pytest.raises(ValueError, match="Unknown distribution"):
+            FormulaParser("e ~ NotARealDist(0,1)").parse()
+
+    def test_typo_suggestion(self):
+        with pytest.raises(ValueError, match="Normal"):
+            FormulaParser("e ~ Normla(0,1)").parse()
 
 
 class TestSEMTypeDetection:
@@ -848,6 +939,10 @@ class TestSEMTypeDetection:
         dag = _DAG("e ~ Beta(0.5,0.5); y <- e")
         assert dag.inferred_sem_type == SEMType.LINEAR
 
+    def test_multivariate_normal_is_not_scalar_linear_gaussian(self):
+        dag = _DAG("e ~ MultivariateNormal([0,0], [[1,0],[0,1]])")
+        assert dag.inferred_sem_type == SEMType.LINEAR
+
     def test_nonlinear(self):
         dag = _DAG("e1, e2 ~ Normal(0,1); y <- n(e1,e2)")
         assert dag.inferred_sem_type == SEMType.NONLINEAR
@@ -857,17 +952,22 @@ class TestSEMTypeDetection:
         dag = _DAG("e1, e2, e3 ~ Normal(0,1); y <- n(e1,e2) + e3")
         assert dag.inferred_sem_type == SEMType.NONLINEAR
 
-    def test_discrete(self):
+    # NOTE: "discrete" here refers to a discrete *exogenous distribution* (Bernoulli,
+    # Poisson, ...). The current taxonomy does not give these a dedicated type; they
+    # fold into LINEAR / NONLINEAR based on the endogenous nodes. (SEMType.DISCRETE is
+    # reserved for discrete *endogenous* d(...) nodes.) A finer discrete-exog taxonomy
+    # is intentionally not implemented yet.
+    def test_discrete_exog_dist_is_linear(self):
         dag = _DAG("e ~ Bernoulli(0.5); y <- e")
-        assert dag.inferred_sem_type == SEMType.LINEAR_DISCRETE
+        assert dag.inferred_sem_type == SEMType.LINEAR
 
-    def test_discrete_poisson(self):
+    def test_poisson_exog_dist_is_linear(self):
         dag = _DAG("e ~ Poisson(2.0); y <- e")
-        assert dag.inferred_sem_type == SEMType.LINEAR_DISCRETE
+        assert dag.inferred_sem_type == SEMType.LINEAR
 
-    def test_mixed_discrete(self):
+    def test_discrete_exog_dist_is_nonlinear(self):
         dag = _DAG("e ~ Bernoulli(0.5); y <- n(e)")
-        assert dag.inferred_sem_type == SEMType.NONLINEAR_DISCRETE
+        assert dag.inferred_sem_type == SEMType.NONLINEAR
 
     def test_exogenous_only_gaussian(self):
         dag = _DAG("e1, e2 ~ Normal(0,1)")
@@ -887,27 +987,23 @@ class TestSEMTypeDetection:
             SEM2("e ~ Normal(0,1); y <- e")
 
 
-    def test_nonlinear_discrete(self):
-        dag = _DAG("e ~ Bernoulli(0.5); y <- n(e)")
-        assert dag.inferred_sem_type == SEMType.NONLINEAR_DISCRETE
-
-    def test_linear_mixed_exog(self):
-        """Some continuous + some discrete exog nodes, linear endogenous."""
+    def test_mixed_exog_dist_is_linear(self):
+        """Mixed continuous + discrete exogenous dists, linear endogenous -> LINEAR."""
         dag = _DAG("e1 ~ Normal(0,1); e2 ~ Bernoulli(0.5); y <- e1 + e2")
-        assert dag.inferred_sem_type == SEMType.LINEAR_MIXED_EXOG
+        assert dag.inferred_sem_type == SEMType.LINEAR
 
-    def test_nonlinear_mixed_exog(self):
-        """Some continuous + some discrete exog nodes, MLP endogenous."""
+    def test_mixed_exog_dist_is_nonlinear(self):
+        """Mixed continuous + discrete exogenous dists, MLP endogenous -> NONLINEAR."""
         dag = _DAG("e1 ~ Normal(0,1); e2 ~ Bernoulli(0.5); y <- n(e1, e2)")
-        assert dag.inferred_sem_type == SEMType.NONLINEAR_MIXED_EXOG
+        assert dag.inferred_sem_type == SEMType.NONLINEAR
 
     def test_exogenous_only_non_gaussian(self):
         dag = _DAG("e1, e2 ~ Beta(0.5,0.5)")
         assert dag.inferred_sem_type == SEMType.LINEAR
 
-    def test_exogenous_only_discrete(self):
+    def test_exogenous_only_discrete_dist_is_linear(self):
         dag = _DAG("e ~ Bernoulli(0.3)")
-        assert dag.inferred_sem_type == SEMType.LINEAR_DISCRETE
+        assert dag.inferred_sem_type == SEMType.LINEAR
 
     def test_nonlinear_continuous(self):
         """Pure MLP with continuous noise is nonlinear."""
@@ -961,3 +1057,206 @@ class TestRegisterBuffer:
         node.to("cpu")
         for name, buf in node.named_buffers():
             assert buf.device.type == "cpu", f"Buffer '{name}' not on cpu"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 12. SEM2Linear: coef_matrix / cov_matrix
+# ═══════════════════════════════════════════════════════════════════════════════
+
+from sem2.model import SEM2Linear
+from sem2.operators.linear import (
+    SEM2LinearModelOperator, LogLikelihood, WeightedFrobeniusDistance,
+)
+
+
+def _chain_linear():
+    """x = e1; y = 2x + ey, all noise N(0,1), no bias. Cov[x,y] = [[1,2],[2,5]]."""
+    return SEM2Linear(
+        "e1, ey ~ Normal(0,1); x <- 1*e1; y <- 2*x + 1*ey",
+        node_cfgs={"x": LinearNodeConfig(use_bias=False), "y": LinearNodeConfig(use_bias=False)},
+    )
+
+
+def _chain_linear_nongaussian():
+    """x = e1; y = 2x + ey, all noise Beta(0.5,0.5), no bias."""
+    return SEM2Linear(
+        "e1, ey ~ Beta(0.5,0.5); x <- 1*e1; y <- 2*x + 1*ey",
+        node_cfgs={"x": LinearNodeConfig(use_bias=False), "y": LinearNodeConfig(use_bias=False)},
+    )
+
+
+class TestSEM2Linear:
+
+    def test_rejects_nonlinear_formula(self):
+        with pytest.raises(ValueError, match="linear"):
+            SEM2Linear("a, b ~ Normal(0,1); y <- n(a,b)",
+                       node_cfgs={"y": MLPConfig(hidden_dims=[4], output_dim=1)})
+
+    def test_accepts_linear_formula(self):
+        m = _chain_linear()
+        assert SEMType.is_linear(m.inferred_sem_type)
+
+    def test_node_order_is_topological(self):
+        m = _chain_linear()
+        assert m.node_order == list(m.topological_order)
+
+    def test_coef_matrix_lower_triangular(self):
+        m = _chain_linear()
+        B = m.coef_matrix()
+        # strictly lower triangular under topological order
+        assert torch.allclose(torch.triu(B), torch.zeros_like(B))
+
+    def test_coef_matrix_values(self):
+        m = _chain_linear()
+        B = m.coef_matrix()
+        i = m._node_index
+        assert B[i["x"], i["e1"]].item() == pytest.approx(1.0)
+        assert B[i["y"], i["x"]].item() == pytest.approx(2.0)
+        assert B[i["y"], i["ey"]].item() == pytest.approx(1.0)
+
+    def test_cov_matrix_full_symmetric(self):
+        m = _chain_linear()
+        S = m.cov_matrix()
+        assert torch.allclose(S, S.T, atol=1e-6)
+
+    def test_cov_matrix_observed_subset(self):
+        m = _chain_linear()
+        S = m.cov_matrix(["x", "y"])
+        expected = torch.tensor([[1.0, 2.0], [2.0, 5.0]])
+        assert torch.allclose(S, expected, atol=1e-5)
+
+    def test_cov_matrix_matches_empirical(self):
+        torch.manual_seed(0)
+        m = _chain_linear()
+        samp, _ = m.sample(batch_size=100000)
+        data = torch.cat([samp["x"], samp["y"]], dim=-1).detach()
+        emp = torch.cov(data.T)
+        theo = m.cov_matrix(["x", "y"]).detach()
+        assert torch.allclose(emp, theo, atol=0.1)
+
+    def test_multi_output_node_raises(self):
+        with pytest.raises(ValueError, match="scalar"):
+            SEM2Linear("e ~ Normal(0,1); y <- e",
+                       node_cfgs={"y": LinearNodeConfig(output_dim=2)})
+
+    def test_multivariate_exogenous_distribution_raises(self):
+        with pytest.raises(ValueError, match="scalar independent"):
+            SEM2Linear("e ~ MultivariateNormal([0,0], [[1,0], [0,1]]); y <- e")
+
+    def test_cov_matrix_works_for_non_gaussian_linear_second_moments(self):
+        m = SEM2Linear(
+            "e1, ey ~ Uniform(-1,1); x <- 1*e1; y <- 2*x + 1*ey",
+            node_cfgs={"x": LinearNodeConfig(use_bias=False), "y": LinearNodeConfig(use_bias=False)},
+        )
+        S = m.cov_matrix(["x", "y"])
+        expected = torch.tensor([[1 / 3, 2 / 3], [2 / 3, 5 / 3]])
+        assert torch.allclose(S, expected, atol=1e-5)
+
+
+class TestLinearOperators:
+
+    def _data(self, m, n=5000, seed=0):
+        torch.manual_seed(seed)
+        samp, _ = m.sample(batch_size=n)
+        return torch.cat([samp["x"], samp["y"]], dim=-1).detach()
+
+    def test_base_guards_linearity(self):
+        nl = SEM2("a, b ~ Normal(0,1); y <- n(a,b)",
+                  node_cfgs={"y": MLPConfig(hidden_dims=[4], output_dim=1)})
+        with pytest.raises(ValueError, match="linear"):
+            LogLikelihood(nl, ["y"])
+
+    def test_base_rejects_plain_sem2_linear_with_hint(self):
+        with pytest.warns(UserWarning, match="sem_type"):
+            m = SEM2("e ~ Normal(0,1); y <- e")
+        with pytest.warns(UserWarning, match="special child class"):
+            with pytest.raises(TypeError, match="SEM2Linear.*cov_matrix"):
+                LogLikelihood(m, ["y"])
+
+    def test_loglikelihood_matches_torch_mvn(self):
+        m = _chain_linear()
+        data = self._data(m)
+        ll, _ = LogLikelihood(m, ["x", "y"], loc=torch.zeros(2)).evaluate(data)
+        Sigma = m.cov_matrix(["x", "y"]).detach()
+        mvn = torch.distributions.MultivariateNormal(torch.zeros(2), Sigma)
+        assert ll.item() == pytest.approx(mvn.log_prob(data).mean().item(), abs=1e-4)
+
+    def test_loglikelihood_uses_formula_observed_vars(self):
+        m = SEM2Linear(
+            "e1, ey ~ Normal(0,1); x <- 1*e1; y <- 2*x + 1*ey; unobs(e1,ey)",
+            node_cfgs={"x": LinearNodeConfig(use_bias=False), "y": LinearNodeConfig(use_bias=False)},
+        )
+        data = self._data(m)
+        implicit, _ = LogLikelihood(m, centered=True).evaluate(data)
+        explicit, _ = LogLikelihood(m, ["x", "y"], centered=True).evaluate(data)
+        assert implicit.item() == pytest.approx(explicit.item(), abs=1e-6)
+
+    def test_loglikelihood_requires_observed_vars_without_formula_mapping(self):
+        m = _chain_linear()
+        with pytest.raises(ValueError, match="observed variables"):
+            LogLikelihood(m)
+
+    def test_centered_loglikelihood_matches_zero_loc(self):
+        m = SEM2Linear("e ~ Normal(2,1); x <- 1*e; unobs(e)",
+                       node_cfgs={"x": LinearNodeConfig(use_bias=False)})
+        data = torch.zeros(4, 1)
+        centered, _ = LogLikelihood(m, centered=True).evaluate(data)
+        explicit, _ = LogLikelihood(m, loc=torch.zeros(1)).evaluate(data)
+        model_mean, _ = LogLikelihood(m).evaluate(data)
+        assert centered.item() == pytest.approx(explicit.item(), abs=1e-6)
+        assert centered.item() > model_mean.item()
+
+    def test_centered_and_loc_are_mutually_exclusive(self):
+        m = SEM2Linear("e ~ Normal(0,1); x <- 1*e; unobs(e)",
+                       node_cfgs={"x": LinearNodeConfig(use_bias=False)})
+        with pytest.raises(ValueError, match="centered"):
+            LogLikelihood(m, centered=True, loc=torch.zeros(1))
+
+    def test_loglikelihood_warns_for_non_gaussian_linear(self):
+        m = _chain_linear_nongaussian()
+        with pytest.warns(UserWarning, match="pseudo-log-likelihood"):
+            LogLikelihood(m, ["x", "y"])
+
+    def test_loglikelihood_matches_mvn_formula_for_non_gaussian_linear(self):
+        m = _chain_linear_nongaussian()
+        data = self._data(m)
+        with pytest.warns(UserWarning, match="finite second moments"):
+            op = LogLikelihood(m, ["x", "y"])
+        ll, metrics = op.evaluate(data)
+        idx = torch.tensor(m._index(["x", "y"]))
+        mu = m.mean_vector().detach().index_select(0, idx)
+        Sigma = m.cov_matrix(["x", "y"]).detach()
+        mvn = torch.distributions.MultivariateNormal(mu, Sigma)
+        assert ll.item() == pytest.approx(mvn.log_prob(data).mean().item(), abs=1e-4)
+        assert "log_likelihood" in metrics
+
+    def test_loglikelihood_requires_finite_second_moments(self):
+        m = SEM2Linear("e ~ Cauchy(0,1); y <- 1*e",
+                       node_cfgs={"y": LinearNodeConfig(use_bias=False)})
+        with pytest.warns(UserWarning, match="pseudo-log-likelihood"):
+            op = LogLikelihood(m, ["y"], loc=torch.zeros(1))
+        with pytest.raises(ValueError, match="finite second moments"):
+            op.evaluate(torch.zeros(3, 1))
+
+    def test_weighted_frobenius_zero_on_model_data(self):
+        m = _chain_linear()
+        data = self._data(m, n=20000)
+        loss, _ = WeightedFrobeniusDistance(m, ["x", "y"]).evaluate(data)
+        assert loss.item() < 0.05
+
+    def test_weighted_frobenius_weighted(self):
+        m = _chain_linear()
+        data = self._data(m)
+        W = torch.ones(2, 2)
+        unweighted, _ = WeightedFrobeniusDistance(m, ["x", "y"]).evaluate(data)
+        weighted, _ = WeightedFrobeniusDistance(m, ["x", "y"], weight=W).evaluate(data)
+        assert weighted.item() == pytest.approx(unweighted.item(), abs=1e-6)
+
+
+    def test_gradients_flow_through_cov(self):
+        m = _chain_linear()
+        data = self._data(m)
+        loss, _ = WeightedFrobeniusDistance(m, ["x", "y"]).evaluate(data)
+        loss.backward()
+        grads = [p.grad for p in m.parameters() if p.grad is not None]
+        assert len(grads) > 0

@@ -1,13 +1,16 @@
+# Defer annotation evaluation so forward references (e.g. SEM2Node used in its
+# own method signatures) resolve lazily on Python < 3.14.
+from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Optional
-from enum import StrEnum
 import torch
 import warnings
 from torch import nn
 from torch.distributions import Distribution
 
+from ..._compat import StrEnum
 from .nn_models import _LinearConfig, _LinearModel, _MLP
-from ..default_configs import LinearNodeConfig, MLPConfig
+from ...default_configs import LinearNodeConfig, MLPConfig
 
 # ── RandomVariable ────────────────────────────────────────────────────────────
 
@@ -170,6 +173,18 @@ class NodeLinear(NodeEndogenous):
     def _effective_weight(self) -> torch.Tensor:
         """Learned weights where free, fixed values where pinned."""
         return self.linear.weight * (~self.fix_weights) + self._fixed_vals * self.fix_weights
+
+    def effective_weight(self) -> torch.Tensor:
+        """Public accessor for the node's effective weight matrix, shape
+        [out_dim, input_dim], combining learned weights (where free) and fixed
+        coefficients (where pinned). Columns follow predecessor order, with each
+        predecessor occupying `out_dim` consecutive columns.
+        """
+        return self._effective_weight()
+
+    def bias(self) -> torch.Tensor | None:
+        """The node's bias vector [out_dim], or None if the node has no bias."""
+        return self.linear.bias
 
     def _forward_inner(self, x: list[torch.Tensor], batch_size: int = 1) -> torch.Tensor:
         x_cat = self._collate_fn(x)

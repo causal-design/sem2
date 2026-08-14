@@ -1,7 +1,7 @@
 import torch
 import logging
 
-from sem2.model.model import SEM2, SEM2Discrete
+from sem2.model.models import SEM2, SEM2Discrete
 from sem2.default_configs import MLPConfig
 
 logging.basicConfig(level=logging.INFO)

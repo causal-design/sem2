@@ -3,13 +3,17 @@
         a) Inputs type
         b) Output type
 """
+# Defer annotation evaluation so the TYPE_CHECKING-only SEM2 hint on the
+# SEM2Operator.model class attribute does not crash at runtime on Python < 3.14.
+from __future__ import annotations
 from typing import TYPE_CHECKING
 from abc import ABC, abstractmethod
 import torch
-from enum import StrEnum
+
+from .._compat import StrEnum
 
 if TYPE_CHECKING:
-    from sem2.model.model import SEM2
+    from sem2.model.models import SEM2
 
 
 class OperatorInput(StrEnum):

@@ -5,7 +5,7 @@ import time
 import logging
 
 from sem2.dataloader import DummyDiscreteDataloader
-from sem2.model.model import SEM2Discrete
+from sem2.model.models import SEM2Discrete
 from sem2.operators.scalar_operators import SEM2Loss
 from sem2.default_configs import TrainingConfig, MLPConfig
 
