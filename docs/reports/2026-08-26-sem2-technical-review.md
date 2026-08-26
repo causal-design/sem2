@@ -9,12 +9,12 @@
 
 SEM2 starts with a formula. The formula declares a directed acyclic graph (DAG), the exogenous distributions, the structural equations, which nodes are observed, and which path coefficients are fixed. SEM2 turns that declaration into PyTorch modules that can be sampled, fitted, inspected, and intervened on.
 
-Given independent table rows $v_1,\ldots,v_n$, fitting means choosing parameters $\theta$ so that the graph-induced observed distribution $P_\theta^O$ agrees with the empirical distribution $\widehat P_n$. The objective depends on the model:
+Given independent table rows $`v_1,\ldots,v_n`$, fitting means choosing parameters $`\theta`$ so that the graph-induced observed distribution $`P_\theta^O`$ agrees with the empirical distribution $`\widehat P_n`$. The objective depends on the model:
 
 - Linear Gaussian models have exact implied moments and an exact Gaussian observed-data likelihood.
 - Linear non-Gaussian models can be built and sampled, but the package does not yet have a general observed-data fitting operator for them.
 - Nonlinear continuous models can be fitted through simulated samples and a distributional loss. The current energy loss is still experimental and contains a correction-factor bug. MMD is not implemented, and the Sinkhorn method used in Report 2 is not part of `sem2/`.
-- Finite discrete models use exact state enumeration and latent-state marginalisation. Their current loss wrapper is written around a binary $(Z,X,Y)$ instrumental-variable example rather than a general table schema.
+- Finite discrete models use exact state enumeration and latent-state marginalisation. Their current loss wrapper is written around a binary $`(Z,X,Y)`$ instrumental-variable example rather than a general table schema.
 - The parser recognises mixed discrete/continuous graphs, but the fitting stack does not support them end to end.
 
 My main conclusion is that the model-building core is in much better shape than the general fitting interface. The parser, DAG builder, node modules, samplers, and linear operators are coherent, and the test suite passes. The trainer and generic losses still read like research prototypes. I would fix those before expanding the model catalogue.
@@ -27,25 +27,25 @@ One caveat runs through the whole report. A SEM2 graph is causal only if its cau
 
 ### 1.1 Structural definition
 
-Take a DAG $G=(N,E)$ with exogenous nodes $U=(U_1,\ldots,U_q)$ and endogenous nodes $V=(V_1,\ldots,V_p)$. A structural model assigns a distribution to each exogenous node,
+Take a DAG $`G=(N,E)`$ with exogenous nodes $`U=(U_1,\ldots,U_q)`$ and endogenous nodes $`V=(V_1,\ldots,V_p)`$. A structural model assigns a distribution to each exogenous node,
 
-$$
+```math
 U_k \sim F_k(\eta_k), \qquad k=1,\ldots,q,
-$$
+```
 
 then evaluates the endogenous assignments in topological order:
 
-$$
-V_j = f_j\!\left(V_{\operatorname{pa}_V(j)},
-                  U_{\operatorname{pa}_U(j)};\theta_j\right),
+```math
+V_j = f_j\left(V_{\mathrm{pa}_V(j)},
+                U_{\mathrm{pa}_U(j)};\theta_j\right),
 \qquad j=1,\ldots,p.
-$$
+```
 
-Here $\operatorname{pa}_V(j)$ and $\operatorname{pa}_U(j)$ are the endogenous and exogenous parents of $V_j$. Together, the exogenous law and the deterministic equations define a joint distribution $P_\theta(U,V)$. If $O\subseteq N$ is the observed set, fitting uses the observed marginal
+Here $`\mathrm{pa}_V(j)`$ and $`\mathrm{pa}_U(j)`$ are the endogenous and exogenous parents of $`V_j`$. Together, the exogenous law and the deterministic equations define a joint distribution $`P_\theta(U,V)`$. If $`O\subseteq N`$ is the observed set, fitting uses the observed marginal
 
-$$
-P_\theta^O(A)=\int \mathbf 1\{V_O(u;\theta)\in A\}\,dP_U(u).
-$$
+```math
+P_\theta^O(A)=\int \mathrm{I}\left\{V_O(u;\theta)\in A\right\}\,dP_U(u).
+```
 
 In SEM2, `unobs(...)` lists the latent nodes. Every other graph node is treated as observed. A shared exogenous parent can represent latent confounding or residual covariance. The graph must be acyclic.
 
@@ -68,60 +68,60 @@ For a fixed network architecture, however, the implementation is finite-dimensio
 
 ### 1.3 Observational fitting
 
-Let the observed table be
+Let the observed table contain independent rows:
 
-$$
-D=\{v_i^O\}_{i=1}^n, \qquad v_i^O\stackrel{\text{iid}}\sim P_0^O.
-$$
+```math
+D=\left\{v_i^O\right\}_{i=1}^n, \qquad v_i^O\sim P_0^O.
+```
 
 The fitting routes in this repository can all be written as
 
-$$
+```math
 \widehat\theta
 \in \arg\min_{\theta\in\Theta}
-D\!\left(\widehat P_n^O,P_\theta^O\right)
+D\left(\widehat P_n^O,P_\theta^O\right)
 +\lambda\,R(\theta),
-$$
+```
 
-Here $D$ is a likelihood or minimum-distance criterion. The term $R$ may be an ordinary regulariser or a scientific target such as an average treatment effect (ATE).
+Here $`D`$ is a likelihood or minimum-distance criterion. The term $`R`$ may be an ordinary regulariser or a scientific target such as an average treatment effect (ATE).
 
 #### Exact linear-Gaussian route
 
 For a linear SEM,
 
-$$
+```math
 V=BV+c+\varepsilon,
-$$
+```
 
-with exogenous covariance contribution $\Omega$, the implied moments are
+with exogenous covariance contribution $`\Omega`$, the implied moments are
 
-$$
+```math
 \mu=(I-B)^{-1}c,
 \qquad
 \Sigma=(I-B)^{-1}\Omega(I-B)^{-T}.
-$$
+```
 
 [`SEM2Linear`](../../sem2/model/models/linear.py) constructs these quantities directly. [`LogLikelihood`](../../sem2/operators/linear.py) evaluates the observed Gaussian log-likelihood with a Cholesky factorisation and triangular solves, so optimisation does not carry Monte Carlo noise. [`WeightedFrobeniusDistance`](../../sem2/operators/linear.py) is the moment-matching alternative.
 
 #### Sample-based continuous route
 
-If the density is unavailable but the model is differentiably sampleable, real and generated rows can be compared directly. The attached draft discusses energy distance and maximum mean discrepancy (MMD). For $0<\beta<2$, one form of energy distance is
+If the density is unavailable but the model is differentiably sampleable, real and generated rows can be compared directly. The attached draft discusses energy distance and maximum mean discrepancy (MMD). For $`0<\beta<2`$, one form of energy distance is
 
-$$
-\mathcal E_\beta(P,Q)
-=2\,\mathbb E\|X-Y\|^\beta
--\mathbb E\|X-X'\|^\beta
--\mathbb E\|Y-Y'\|^\beta,
-$$
+```math
+E_\beta(P,Q)
+=2\,\mathrm{E}\|X-Y\|^\beta
+-\mathrm{E}\|X-X'\|^\beta
+-\mathrm{E}\|Y-Y'\|^\beta,
+```
 
-where $X,X'\stackrel{\text{iid}}\sim P$ and $Y,Y'\stackrel{\text{iid}}\sim Q$. The observed-data-only term can be omitted when optimising $\theta$. The current [`EnergyLoss`](../../sem2/operators/scalar_operators.py) implements this family for continuous samples, but it should not be treated as a general estimator until the defect and hard-coded assumptions in Section 4 are fixed.
+where $`X,X'`$ are independent draws from $`P`$ and $`Y,Y'`$ are independent draws from $`Q`$. The observed-data-only term can be omitted when optimising $`\theta`$. The current [`EnergyLoss`](../../sem2/operators/scalar_operators.py) implements this family for continuous samples, but it should not be treated as a general estimator until the defect and hard-coded assumptions in Section 4 are fixed.
 
 MMD has the analogous population form
 
-$$
-\operatorname{MMD}_k^2(P,Q)
-=\mathbb E k(X,X')+\mathbb E k(Y,Y')-2\mathbb E k(X,Y).
-$$
+```math
+\mathrm{MMD}_k^2(P,Q)
+=\mathrm{E}\,k(X,X')+\mathrm{E}\,k(Y,Y')-2\mathrm{E}\,k(X,Y).
+```
 
 MMD appears in the mathematical setup and configuration, but `SEM2Loss` raises `NotImplementedError` when `use_mmd=True`.
 
@@ -131,32 +131,32 @@ Report 2 uses Sinkhorn divergence for its nonlinear regression-discontinuity stu
 
 [`SEM2Discrete`](../../sem2/model/models/discrete.py) enumerates the Cartesian product of the discrete-node states. For each configuration it accumulates conditional log-probabilities, masks states ruled out by an intervention, exponentiates, and sums over latent coordinates. The result is an exact mass function over the observed finite state space, not a categorical draw.
 
-[`DiscreteEnergyLoss`](../../sem2/operators/discrete_energy_loss.py) compares the predicted mass $p_\theta$ with observed states or an empirical mass vector. This is particularly useful in partially identified models because one can fit the observational law while tracing variation in a causal functional:
+[`DiscreteEnergyLoss`](../../sem2/operators/discrete_energy_loss.py) compares the predicted mass $`p_\theta`$ with observed states or an empirical mass vector. This is particularly useful in partially identified models because one can fit the observational law while tracing variation in a causal functional:
 
-$$
+```math
 \min_\theta
-D\!\left(\widehat P_n^O,P_\theta^O\right)
+D\left(\widehat P_n^O,P_\theta^O\right)
 +\lambda\,a(\theta),
-$$
+```
 
 where, for example,
 
-$$
+```math
 a(\theta)
-=\mathbb E_\theta[Y\mid do(X=1)]
--\mathbb E_\theta[Y\mid do(X=0)].
-$$
+=\mathrm{E}_\theta[Y\mid \mathrm{do}(X=1)]
+-\mathrm{E}_\theta[Y\mid \mathrm{do}(X=0)].
+```
 
 The finite-state machinery and scalar causal operators are present. The repository does not yet package the repeated sweeps, restarts, fit tolerances, and identified-set summaries needed for a reusable partial-identification workflow.
 
 ### 1.4 Causal interpretation and its limits
 
-In a structural causal model, $do(V_k=v)$ replaces the equation for $V_k$ with $V_k:=v$ and leaves the other equations alone. SEM2's `set_nodes={...}` mechanism performs this replacement during graph evaluation. This is different from conditioning:
+In a structural causal model, $`\mathrm{do}(V_k=v)`$ replaces the equation for $`V_k`$ with $`V_k:=v`$ and leaves the other equations alone. SEM2's `set_nodes={...}` mechanism performs this replacement during graph evaluation. This is different from conditioning:
 
-$$
-P_\theta(Y\mid do(X=x))
+```math
+P_\theta(Y\mid \mathrm{do}(X=x))
 \ne P_\theta(Y\mid X=x)
-$$
+```
 
 in general, especially with confounding.
 
@@ -168,7 +168,7 @@ The code does not infer or validate the causal graph. Study design, domain knowl
 4. positivity/support and consistency assumptions;
 5. the identification conditions for the requested causal estimand.
 
-A good observational fit says that $P_\theta^O$ approximates the observed law. It does not show that the DAG is true or that an intervention distribution is identified. The discrete IV work handles this correctly by studying a set of compatible causal effects instead of forcing a point estimate.
+A good observational fit says that $`P_\theta^O`$ approximates the observed law. It does not show that the DAG is true or that an intervention distribution is identified. The discrete IV work handles this correctly by studying a set of compatible causal effects instead of forcing a point estimate.
 
 ---
 
@@ -318,7 +318,7 @@ The second call replaces the equation for `x`; it does not condition an observat
 
 ### 3.2 Fitting one path coefficient to a synthetic table
 
-The next example generates a two-column table with true coefficient $1.5$, then fits the learned `x -> y` coefficient with the exact linear-Gaussian likelihood.
+The next example generates a two-column table with true coefficient $`1.5`$, then fits the learned `x -> y` coefficient with the exact linear-Gaussian likelihood.
 
 ```python
 import torch
@@ -365,7 +365,7 @@ Verified output:
 -2.8476
 ```
 
-The difference from $1.5$ is ordinary finite-sample variation. This example also shows a current API requirement that should be made safer: the tensor columns must be in exactly `model.observed_vars` order.
+The difference from $`1.5`$ is ordinary finite-sample variation. This example also shows a current API requirement that should be made safer: the tensor columns must be in exactly `model.observed_vars` order.
 
 ### 3.3 Exact finite-state output
 
@@ -428,7 +428,7 @@ I would start with the fitting path, not with new model classes. The graph and s
 
 - Mixed graphs can be classified as `SEMType.MIXED`, but there is no complete mixed-model fitting route. Until one exists, construction should fail early with a precise message.
 - Exact discrete inference builds the full Cartesian state table. Context deduplication saves network evaluations, but the state space still grows exponentially. Add state-count and memory checks before exploring variable elimination, factorised messages, sparse support, or controlled approximations.
-- `MeanPotentialOutcome` and `ATE` need a general interface for named treatment and outcome nodes. The partial-identification workflow also needs multi-start $\lambda$ sweeps, observational-fit tolerances, and diagnostics that distinguish a numerical extremum from a proven sharp bound.
+- `MeanPotentialOutcome` and `ATE` need a general interface for named treatment and outcome nodes. The partial-identification workflow also needs multi-start $`\lambda`$ sweeps, observational-fit tolerances, and diagnostics that distinguish a numerical extremum from a proven sharp bound.
 - Operator choice is manual even though `inferred_sem_type` already carries useful information. A `fit(...)` dispatcher could recommend or select the exact Gaussian likelihood, a declared non-Gaussian likelihood, or a configured minimum-distance method. It should never change the statistical objective silently.
 - Model assessment is missing. Useful first additions are held-out likelihood or discrepancy, empirical-versus-implied moments, residual checks, optimisation traces, and restart sensitivity.
 - Causal query results should record the estimand and assumptions used to identify it. A computable `set_nodes` result is not automatically an identified causal effect.
@@ -519,4 +519,4 @@ Repository research sources:
 
 The report intentionally does not import causal claims from the attached draft, which the request correctly describes as not addressing causality.
 
-The equations use [GitHub's supported math delimiters](https://docs.github.com/en/get-started/writing-on-github/working-with-advanced-formatting/writing-mathematical-expressions): `$...$` for inline expressions and `$$...$$` for display equations.
+The equations use [GitHub's alternate inline-math delimiter and fenced `math` blocks](https://docs.github.com/en/get-started/writing-on-github/working-with-advanced-formatting/writing-mathematical-expressions). These forms protect the LaTeX source from Markdown parsing before GitHub sends it to MathJax.
