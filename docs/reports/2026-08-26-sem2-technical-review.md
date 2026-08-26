@@ -7,19 +7,19 @@
 
 ## Executive summary
 
-SEM2 is best understood as a **formula-driven, differentiable structural generative modelling framework**. A formula defines a directed acyclic graph (DAG), exogenous distributions, deterministic structural assignments, latent/observed status, and optional fixed path coefficients. The package turns that declaration into PyTorch modules and exposes sampling, node replacement for interventions, exact calculations for some model classes, and differentiable fitting operators.
+SEM2 starts with a formula. The formula declares a directed acyclic graph (DAG), the exogenous distributions, the structural equations, which nodes are observed, and which path coefficients are fixed. SEM2 turns that declaration into PyTorch modules that can be sampled, fitted, inspected, and intervened on.
 
-For independent tabular rows \(v_1,\ldots,v_n\), the common fitting principle is to choose structural parameters \(\theta\) so that the observed distribution induced by the graph, \(P_\theta^O\), is close to the empirical distribution \(\widehat P_n\). The statistically appropriate notion of “close” depends on the declared model:
+Given independent table rows $v_1,\ldots,v_n$, fitting means choosing parameters $\theta$ so that the graph-induced observed distribution $P_\theta^O$ agrees with the empirical distribution $\widehat P_n$. The objective depends on the model:
 
-- **Linear Gaussian:** use exact implied means and covariances and the exact Gaussian observed-data log-likelihood.
-- **Linear non-Gaussian:** the graph and sampler are present, but a general package-level observed-data fitting operator is not.
-- **Nonlinear continuous:** use differentiable simulation and a sample discrepancy. An energy-score operator exists, but its current implementation is experimental and contains a correction-factor defect; MMD is explicitly unimplemented and the Sinkhorn fitting described in Report 2 is not present in `sem2/`.
-- **Finite discrete:** enumerate the finite state space, exactly marginalise latent states, and minimise a finite-support energy distance, optionally with a causal estimand penalty. The current loss wrapper is specialised to a binary \((Z,X,Y)\) instrumental-variable layout.
-- **Mixed discrete/continuous:** the parser can classify a graph as mixed, but the model/operator stack does not yet provide a complete mixed-model fitting path.
+- Linear Gaussian models have exact implied moments and an exact Gaussian observed-data likelihood.
+- Linear non-Gaussian models can be built and sampled, but the package does not yet have a general observed-data fitting operator for them.
+- Nonlinear continuous models can be fitted through simulated samples and a distributional loss. The current energy loss is still experimental and contains a correction-factor bug. MMD is not implemented, and the Sinkhorn method used in Report 2 is not part of `sem2/`.
+- Finite discrete models use exact state enumeration and latent-state marginalisation. Their current loss wrapper is written around a binary $(Z,X,Y)$ instrumental-variable example rather than a general table schema.
+- The parser recognises mixed discrete/continuous graphs, but the fitting stack does not support them end to end.
 
-The **model-construction core is substantially stronger than the top-level user and training interface**. The formula parser, DAG construction, node modules, continuous and finite-discrete samplers, and linear exact operators are coherent and covered by a sizeable test suite. During this review, the full suite completed with **190 passing tests**. The most urgent work is to make the fitting layer mathematically correct and graph-generic, reconcile Report 2’s claims with code that is actually shipped, and replace the almost empty or obsolete documentation.
+My main conclusion is that the model-building core is in much better shape than the general fitting interface. The parser, DAG builder, node modules, samplers, and linear operators are coherent, and the test suite passes. The trainer and generic losses still read like research prototypes. I would fix those before expanding the model catalogue.
 
-A central scientific qualification is essential: a fitted SEM2 graph is a causal model **only under externally justified causal assumptions**. Observational distribution matching does not discover the causal DAG, prove exogeneity, or identify an intervention effect by itself. `set_nodes` correctly represents equation replacement inside the assumed structural model; it does not establish that the assumed model is causally valid for the data.
+One caveat runs through the whole report. A SEM2 graph is causal only if its causal assumptions are defensible. Matching the observed distribution does not discover the DAG, prove exogeneity, or identify an intervention effect. `set_nodes` performs equation replacement inside the model; it cannot establish that the model is a valid causal account of the data.
 
 ---
 
@@ -27,27 +27,27 @@ A central scientific qualification is essential: a fitted SEM2 graph is a causal
 
 ### 1.1 Structural definition
 
-Let \(G=(N,E)\) be a DAG with exogenous nodes \(U=(U_1,\ldots,U_q)\) and endogenous nodes \(V=(V_1,\ldots,V_p)\). A structural model consists of
+Take a DAG $G=(N,E)$ with exogenous nodes $U=(U_1,\ldots,U_q)$ and endogenous nodes $V=(V_1,\ldots,V_p)$. A structural model assigns a distribution to each exogenous node,
 
-\[
+$$
 U_k \sim F_k(\eta_k), \qquad k=1,\ldots,q,
-\]
+$$
 
-and assignments evaluated in a topological order,
+then evaluates the endogenous assignments in topological order:
 
-\[
+$$
 V_j = f_j\!\left(V_{\operatorname{pa}_V(j)},
                   U_{\operatorname{pa}_U(j)};\theta_j\right),
 \qquad j=1,\ldots,p.
-\]
+$$
 
-Here \(\operatorname{pa}_V(j)\) and \(\operatorname{pa}_U(j)\) are the endogenous and exogenous parents of \(V_j\). The joint exogenous law and the deterministic assignments induce a joint distribution \(P_\theta(U,V)\). If \(O\subseteq N\) is the set of observed nodes, the data likelihood or discrepancy is evaluated on the observed marginal
+Here $\operatorname{pa}_V(j)$ and $\operatorname{pa}_U(j)$ are the endogenous and exogenous parents of $V_j$. Together, the exogenous law and the deterministic equations define a joint distribution $P_\theta(U,V)$. If $O\subseteq N$ is the observed set, fitting uses the observed marginal
 
-\[
+$$
 P_\theta^O(A)=\int \mathbf 1\{V_O(u;\theta)\in A\}\,dP_U(u).
-\]
+$$
 
-In SEM2, the declaration `unobs(...)` specifies the latent set; all remaining graph nodes are treated as observed. Shared exogenous parents can induce latent confounding or residual covariance. The graph must be acyclic.
+In SEM2, `unobs(...)` lists the latent nodes. Every other graph node is treated as observed. A shared exogenous parent can represent latent confounding or residual covariance. The graph must be acyclic.
 
 A SEM2 formula such as
 
@@ -58,109 +58,109 @@ y <- x + 1*ey;
 unobs(ex,ey)
 ```
 
-therefore means: `ex` and `ey` are latent exogenous standard-normal variables; `x` and `y` are observed; the coefficient on `ex -> x` and `ey -> y` is fixed at one; and the coefficient on `x -> y` is learned.
+Here `ex` and `ey` are latent standard-normal variables, while `x` and `y` are observed. The coefficients on `ex -> x` and `ey -> y` are fixed at one. The coefficient on `x -> y` is learned.
 
 ### 1.2 In what sense is the model semiparametric?
 
-The repository uses *semiparametric* in a broad modelling sense: the graph and some distributional components are structured, while selected mechanisms can be flexible neural functions. In particular, `n(...)` creates a configurable multilayer perceptron rather than imposing a linear equation. This combines interpretable structural restrictions with a flexible function class.
+The word *semiparametric* needs some care here. SEM2 fixes the graph and some distributional structure, but `n(...)` can replace a linear equation with a configurable multilayer perceptron. This gives the model a clear structural form without forcing every mechanism to be linear.
 
-There is an important precision point. The **implemented estimator is finite-dimensional for any fixed network architecture**. It is most accurately described as a neural sieve or flexible parametric approximation to a semiparametric model, unless the project additionally specifies an asymptotic regime in which network capacity grows and proves the relevant consistency or inference results. The attached rough draft motivates universal function approximation and minimum-distance fitting, but it does not supply that complete semiparametric theory. The distinction matters most when making claims about rates, efficiency, confidence intervals, or identification.
+For a fixed network architecture, however, the implementation is finite-dimensional. I would describe it as a neural-sieve approximation to a semiparametric model unless the project also specifies how network capacity grows and proves the associated consistency and inference results. The attached draft motivates universal approximation and minimum-distance fitting, but it does not yet provide that theory. This distinction matters when discussing rates, efficiency, confidence intervals, and identification.
 
 ### 1.3 Observational fitting
 
-Suppose the observed table is
+Let the observed table be
 
-\[
+$$
 D=\{v_i^O\}_{i=1}^n, \qquad v_i^O\stackrel{\text{iid}}\sim P_0^O.
-\]
+$$
 
-The common SEM2 objective can be written as
+The fitting routes in this repository can all be written as
 
-\[
+$$
 \widehat\theta
 \in \arg\min_{\theta\in\Theta}
 D\!\left(\widehat P_n^O,P_\theta^O\right)
 +\lambda\,R(\theta),
-\]
+$$
 
-where \(D\) is a likelihood-based or minimum-distance criterion, and \(R\) may be a regulariser or a scientific target such as an average treatment effect (ATE). This formulation covers the repository’s main fitting regimes.
+Here $D$ is a likelihood or minimum-distance criterion. The term $R$ may be an ordinary regulariser or a scientific target such as an average treatment effect (ATE).
 
 #### Exact linear-Gaussian route
 
 For a linear SEM,
 
-\[
+$$
 V=BV+c+\varepsilon,
-\]
+$$
 
-with exogenous covariance contribution \(\Omega\), the implied moments are
+with exogenous covariance contribution $\Omega$, the implied moments are
 
-\[
+$$
 \mu=(I-B)^{-1}c,
 \qquad
 \Sigma=(I-B)^{-1}\Omega(I-B)^{-T}.
-\]
+$$
 
-[`SEM2Linear`](../../sem2/model/models/linear.py) constructs these quantities directly. [`LogLikelihood`](../../sem2/operators/linear.py) then evaluates the observed Gaussian log-likelihood using a Cholesky factorisation and triangular solves. This avoids Monte Carlo noise during optimisation. [`WeightedFrobeniusDistance`](../../sem2/operators/linear.py) provides a moment-discrepancy alternative.
+[`SEM2Linear`](../../sem2/model/models/linear.py) constructs these quantities directly. [`LogLikelihood`](../../sem2/operators/linear.py) evaluates the observed Gaussian log-likelihood with a Cholesky factorisation and triangular solves, so optimisation does not carry Monte Carlo noise. [`WeightedFrobeniusDistance`](../../sem2/operators/linear.py) is the moment-matching alternative.
 
 #### Sample-based continuous route
 
-When the observed density is unavailable but the model can be sampled differentiably, one can compare real and generated rows. The attached draft discusses energy distance and maximum mean discrepancy (MMD). For \(0<\beta<2\), an energy-distance form is
+If the density is unavailable but the model is differentiably sampleable, real and generated rows can be compared directly. The attached draft discusses energy distance and maximum mean discrepancy (MMD). For $0<\beta<2$, one form of energy distance is
 
-\[
+$$
 \mathcal E_\beta(P,Q)
 =2\,\mathbb E\|X-Y\|^\beta
 -\mathbb E\|X-X'\|^\beta
 -\mathbb E\|Y-Y'\|^\beta,
-\]
+$$
 
-where \(X,X'\stackrel{\text{iid}}\sim P\) and \(Y,Y'\stackrel{\text{iid}}\sim Q\). The term depending only on the observed data can be dropped when optimising \(\theta\). The current [`EnergyLoss`](../../sem2/operators/scalar_operators.py) implements this family for continuous samples, but Section 4 identifies a correctness issue and several hard-coded assumptions that should be fixed before treating it as a general estimator.
+where $X,X'\stackrel{\text{iid}}\sim P$ and $Y,Y'\stackrel{\text{iid}}\sim Q$. The observed-data-only term can be omitted when optimising $\theta$. The current [`EnergyLoss`](../../sem2/operators/scalar_operators.py) implements this family for continuous samples, but it should not be treated as a general estimator until the defect and hard-coded assumptions in Section 4 are fixed.
 
 MMD has the analogous population form
 
-\[
+$$
 \operatorname{MMD}_k^2(P,Q)
 =\mathbb E k(X,X')+\mathbb E k(Y,Y')-2\mathbb E k(X,Y).
-\]
+$$
 
-It is part of the mathematical setup and configuration surface, but `SEM2Loss` currently raises `NotImplementedError` when `use_mmd=True`.
+MMD appears in the mathematical setup and configuration, but `SEM2Loss` raises `NotImplementedError` when `use_mmd=True`.
 
-Report 2 describes Sinkhorn-divergence fitting for its nonlinear regression-discontinuity study. No Sinkhorn/optimal-transport operator or dependency is present in the current `sem2/` package. That experiment should therefore be understood as report-level research code unless and until its fitting implementation is moved into the package and tested.
+Report 2 uses Sinkhorn divergence for its nonlinear regression-discontinuity study. The current `sem2/` package has no Sinkhorn operator or optimal-transport dependency. For now, that experiment belongs to the research record rather than the shipped API.
 
 #### Exact finite-support discrete route
 
-[`SEM2Discrete`](../../sem2/model/models/discrete.py) enumerates the Cartesian product of discrete-node states. For each global configuration it accumulates conditional log-probabilities, masks configurations incompatible with interventions, exponentiates, and sums over unobserved coordinates. Thus the output is an exact probability mass function over the observed finite state space rather than a non-differentiable categorical draw.
+[`SEM2Discrete`](../../sem2/model/models/discrete.py) enumerates the Cartesian product of the discrete-node states. For each configuration it accumulates conditional log-probabilities, masks states ruled out by an intervention, exponentiates, and sums over latent coordinates. The result is an exact mass function over the observed finite state space, not a categorical draw.
 
-[`DiscreteEnergyLoss`](../../sem2/operators/discrete_energy_loss.py) compares the predicted mass \(p_\theta\) with observed states or an empirical mass vector. This is particularly useful in partially identified models because one can fit the observational law while tracing variation in a causal functional:
+[`DiscreteEnergyLoss`](../../sem2/operators/discrete_energy_loss.py) compares the predicted mass $p_\theta$ with observed states or an empirical mass vector. This is particularly useful in partially identified models because one can fit the observational law while tracing variation in a causal functional:
 
-\[
+$$
 \min_\theta
 D\!\left(\widehat P_n^O,P_\theta^O\right)
 +\lambda\,a(\theta),
-\]
+$$
 
 where, for example,
 
-\[
+$$
 a(\theta)
 =\mathbb E_\theta[Y\mid do(X=1)]
 -\mathbb E_\theta[Y\mid do(X=0)].
-\]
+$$
 
-The finite-state machinery and scalar causal operators are present. A reusable sweep, tolerance-envelope, restart, and identified-set reporting API is not.
+The finite-state machinery and scalar causal operators are present. The repository does not yet package the repeated sweeps, restarts, fit tolerances, and identified-set summaries needed for a reusable partial-identification workflow.
 
 ### 1.4 Causal interpretation and its limits
 
-Within a structural causal model, an intervention \(do(V_k=v)\) replaces the equation for \(V_k\) with the constant assignment \(V_k:=v\), leaving the other assignments unchanged. SEM2’s `set_nodes={...}` mechanism performs this node replacement during topological evaluation. It is not ordinary conditioning:
+In a structural causal model, $do(V_k=v)$ replaces the equation for $V_k$ with $V_k:=v$ and leaves the other equations alone. SEM2's `set_nodes={...}` mechanism performs this replacement during graph evaluation. This is different from conditioning:
 
-\[
+$$
 P_\theta(Y\mid do(X=x))
 \ne P_\theta(Y\mid X=x)
-\]
+$$
 
 in general, especially with confounding.
 
-However, the code does not infer or validate the causal graph. The following must come from design, domain knowledge, or a separate identification argument:
+The code does not infer or validate the causal graph. Study design, domain knowledge, or a separate identification argument must justify:
 
 1. the edge directions and absence of omitted parents;
 2. which roots can be treated as exogenous;
@@ -168,7 +168,7 @@ However, the code does not infer or validate the causal graph. The following mus
 4. positivity/support and consistency assumptions;
 5. the identification conditions for the requested causal estimand.
 
-Consequently, good observational fit is evidence that \(P_\theta^O\) approximates the observed law. It is **not** by itself evidence that the intervention distribution is identified or that the DAG is true. The discrete IV work is valuable precisely because it treats this honestly as partial identification rather than forcing a point estimate.
+A good observational fit says that $P_\theta^O$ approximates the observed law. It does not show that the DAG is true or that an intervention distribution is identified. The discrete IV work handles this correctly by studying a set of compatible causal effects instead of forcing a point estimate.
 
 ---
 
@@ -263,13 +263,13 @@ The generic fitting stack consists of:
 - [`SEM2Trainer`](../../sem2/sem2trainer.py), which constructs Adam or SGD and iterates a loader;
 - [`dataloader.py`](../../sem2/dataloader.py), which currently supplies only a synthetic binary-IV dummy loader.
 
-This stack should be treated as a prototype. It is not yet a graph-generic tabular-data estimator: the loss has variable-name/layout assumptions, and the trainer discards the first member of each `(Xs, targets)` batch.
+This part of the package is still a prototype. The loss assumes particular variable names and a particular column layout, while the trainer discards the first element of each `(Xs, targets)` batch. It is not yet a general tabular fitting interface.
 
 ---
 
 ## 3. Reproducible illustrative examples
 
-These examples are deliberately small. They illustrate the current API; they are not simulation evidence for broad statistical or causal claims. They were executed from the reviewed repository with fixed random seeds.
+These examples only demonstrate the current API. They are small on purpose and should not be read as evidence for broad statistical or causal claims. Each one was run from the reviewed repository with a fixed seed.
 
 ### 3.1 Sampling and intervention in a linear SEM
 
@@ -318,7 +318,7 @@ The second call replaces the equation for `x`; it does not condition an observat
 
 ### 3.2 Fitting one path coefficient to a synthetic table
 
-The next example generates a two-column table with true coefficient \(1.5\), then fits the learned `x -> y` coefficient with the exact linear-Gaussian likelihood.
+The next example generates a two-column table with true coefficient $1.5$, then fits the learned `x -> y` coefficient with the exact linear-Gaussian likelihood.
 
 ```python
 import torch
@@ -365,7 +365,7 @@ Verified output:
 -2.8476
 ```
 
-The difference from \(1.5\) is ordinary finite-sample variation. This example also shows a current API requirement that should be made safer: the tensor columns must be in exactly `model.observed_vars` order.
+The difference from $1.5$ is ordinary finite-sample variation. This example also shows a current API requirement that should be made safer: the tensor columns must be in exactly `model.observed_vars` order.
 
 ### 3.3 Exact finite-state output
 
@@ -408,56 +408,61 @@ Each row is an exact probability vector over the observed `(x,y)` states conditi
 
 ---
 
-## 4. What needs to be updated?
+## 4. What I would update
 
-The table separates direct **observations** from their likely **impact**. “Not found” means not found in the reviewed branch; some research code may exist outside the repository.
+I would start with the fitting path, not with new model classes. The graph and sampler already support useful work; the weakest part is the layer that maps a real table to a statistically correct objective.
 
-| Priority | Area and evidence | Impact / recommended update |
-|---|---|---|
-| **P0** | In `EnergyLoss._energy_score`, `m = preds.shape[1]` is the feature dimension, but `m/(m-1)` is used as the correction for the diagonal terms of the generated-sample pairwise matrix. | The U-statistic correction must use the number of generated draws, not the number of columns. It is undefined for one-dimensional data under the current code. Correct the estimator, define the intended V- or U-statistic explicitly, and add analytic unit tests in one and multiple dimensions. |
-| **P0** | Continuous `EnergyLoss` assembles only `preds["Z"]`, `preds["X"]`, and `preds["Y"]`. The discrete wrapper assumes the first data column is binary `Z`, fixes the node named `"Z"`, and loops over `range(2)`. | The generic loss is actually a binary-IV-specific adapter. Derive observed variables from `model.observed_vars`, require an explicit table schema, and move IV-specific grouping into a named specialised operator. Validate empty groups and non-binary supports. |
-| **P0** | `SEM2Trainer._fit_batch` unpacks `(Xs, targets)` but ignores `Xs`; it does not enforce column order, shape, dtype, device, or missing-data policy. `rng_seed` is configured but unused. | Define one public tabular fitting contract. A strong option is a tensor plus ordered column names (or a DataFrame adapter) mapped against `model.observed_vars`, with clear errors. Make seeding and device transfer explicit and test them. |
-| **P0** | Report 2 describes package capabilities based on Sinkhorn divergence and a change-of-variables ICA likelihood. Neither operator exists under `sem2/`; the RDD/ICA implementation is not reproducible from the package. MMD is explicitly unimplemented. | Decide which report methods are product capabilities. Move the retained methods into versioned, tested operators with dependencies and runnable examples, or revise the reports/API claims to label them as external research scripts. Do not leave three different pictures of the fitting stack in code, reports, and notebooks. |
-| **P0** | No tests under `tests/` refer to `SEM2Trainer`, `EnergyLoss`, `DiscreteEnergyLoss`, `SEM2Loss`, `ATE`, or the potential-outcome operators. | Add correctness tests for every fitting and causal operator before extending features: hand-computable finite-support distributions, intervention contrasts, gradient checks, loss convergence, and schema failures. The 190 passing tests currently establish model/parser/linear behaviour, not the generic training claims. |
-| **P1** | `SEMType.MIXED` can be inferred, but there is no complete mixed-model class or fitting operator. | Either reject mixed graphs at construction with a precise message or implement a documented mixed inference strategy. Silent partial support is riskier than an explicit boundary. |
-| **P1** | Exact discrete inference enumerates the Cartesian product of all discrete states. Context deduplication reduces repeated network evaluation but not the exponential state table. | Add state-space size checks and memory estimates; benchmark scaling; then consider variable elimination, factorised messages, sparse support, or controlled Monte Carlo/relaxation fallbacks. |
-| **P1** | `MeanPotentialOutcome` and `ATE` are specialised and the repository has no general sweep/restart/tolerance-envelope API for partial identification. | Generalise estimands to named treatment/outcome nodes and values, then provide a reproducible multi-start \(\lambda\)-sweep workflow with observational-fit tolerances and diagnostics. Separate “a fitted extremum found” from “a sharp bound established.” |
-| **P1** | SEM2 produces point estimates but no package-level standard errors, confidence sets, or bootstrap workflow. | For regular linear-Gaussian models, add Hessian/observed-information and delta-method support. Add sandwich and refit-bootstrap interfaces where justified. For nonregular or partially identified models, report confidence regions for identified sets rather than ordinary point-estimate intervals. |
-| **P1** | Operator choice is manual even when `inferred_sem_type` contains useful structure. | Add an explicit `fit(...)` dispatcher or recommendation API: exact Gaussian likelihood when valid, declared non-Gaussian likelihood when available, and configured minimum-distance methods otherwise. Never silently fall back to a statistically different objective. |
-| **P1** | There is no standard model-assessment layer. | Add held-out likelihood/discrepancy, empirical-versus-implied moment diagnostics, posterior-predictive-style plots, residual checks, convergence traces, restart sensitivity, and parameter/graph identifiability warnings. |
-| **P1** | Causal intervention is an operational graph feature, but the API does not record identification assumptions or distinguish an interventional estimate from an observational fit. | Introduce causal-query objects or result metadata containing graph assumptions, estimand, treatment values, adjustment/identification argument where applicable, and sensitivity/partial-identification status. Avoid presenting `set_nodes` output as identified solely because it can be computed. |
-| **P2** | [`README.md`](../../README.md) contains only `# sem2`. [`DESIGN.md`](../../DESIGN.md) describes a pre-refactor `sem2.py`, calls `model(...)` even though `forward` now raises, uses obsolete `model.layer`, imports from the empty package root, and refers to a nonexistent `DESIGN_refactor.md`. | Replace them with current installation, formula, architecture, data-schema, fitting, intervention, and limitation documentation. Keep one small tested example per supported model class. |
-| **P2** | The notebooks use imports such as `from sem2 import SEM2`, `sem2.model.nn_models`, old object attributes, and undeclared packages such as `engression`. | Port only scientifically useful notebooks to the current API, clear stale output, pin their optional dependencies, and execute them in CI. Archive or delete superseded exploratory notebooks after human review. |
-| **P2** | The package root exports nothing; `pyproject.toml` includes `pytest` as a runtime dependency and has no documented development extra, CI workflow, licence, changelog, or contribution guide. | Define and test the public API, move test tooling to a development extra, add minimal packaging metadata and CI, and publish compatibility/versioning expectations. |
-| **P2** | `PathAnalysis` remains an explicit placeholder. Several configuration fields are unused or only partly honoured. | Either implement these surfaces with tests or remove/deprecate them until their semantics are designed. Public configuration should not imply functionality that is ignored. |
+### 4.1 Fix before relying on the generic fitter
 
-### 4.1 Documentation/research reconciliation
+1. [`EnergyLoss._energy_score`](../../sem2/operators/scalar_operators.py) uses `preds.shape[1]`, the feature count, in the correction for diagonal entries of the generated-sample distance matrix. That correction should depend on the number of generated draws. The current expression is even undefined for one-dimensional data. The code needs an explicit choice between a U- and V-statistic, followed by hand-calculated tests in one and several dimensions.
 
-The reports are useful scientific records, but they currently mix three layers that should be separated:
+2. The continuous energy wrapper concatenates only `preds["Z"]`, `preds["X"]`, and `preds["Y"]`. The discrete wrapper assumes that the first table column is a binary `Z`, fixes a node named `"Z"`, and loops over `range(2)`. These are binary-IV conventions hiding inside a generic class. A general loss should use `model.observed_vars` and an explicit table schema. The IV grouping logic should live in a clearly named specialised operator.
 
-1. **package capabilities present and tested in `sem2/`;**
-2. **research implementations living in notebooks or one-off experiment scripts;**
-3. **planned methods or theoretical proposals.**
+3. [`SEM2Trainer._fit_batch`](../../sem2/sem2trainer.py) unpacks `(Xs, targets)` and ignores `Xs`. It also leaves column order, shape, dtype, device transfer, missing values, and seeding implicit. The public fitting API needs one unambiguous table contract, such as a tensor plus ordered column names or a DataFrame adapter checked against `model.observed_vars`.
 
-For example, Report 2 accurately describes the current exact linear mean/covariance and Gaussian likelihood interfaces. In contrast, its Sinkhorn RDD and non-Gaussian ICA likelihood do not have corresponding core operators in this branch. The older notebooks appear to use an earlier module layout and external energy-loss code. A small capability matrix in the README and reports—*implemented, experimental, report-only, planned*—would prevent this drift.
+4. The test suite does not exercise `SEM2Trainer`, `EnergyLoss`, `DiscreteEnergyLoss`, `SEM2Loss`, `ATE`, or the potential-outcome operators. The 190 passing tests give good coverage of parsing, model construction, sampling, and the linear route; they do not validate the generic trainer. Add small analytical tests, gradient checks, schema-error tests, and one convergence test for each supported fitting regime.
 
-### 4.2 Statistical and causal research gaps
+5. Report 2 describes a Sinkhorn RDD fit and a change-of-variables ICA likelihood, but neither operator is present in `sem2/`. MMD is explicitly unimplemented. The team should either move the retained research methods into tested package code or label them as report-only experiments.
 
-Beyond engineering work, several research questions remain open:
+### 4.2 Build next
 
-- **Estimator theory:** consistency and rates for the chosen neural sieve, discrepancy, architecture growth, optimisation error, and latent-variable setting.
-- **Identification:** conditions under which structural functions or causal queries are point identified, set identified, or unidentifiable from the declared observed margin.
-- **Optimisation versus identification:** repeated starts and low observational discrepancy do not prove that an identified-set boundary is sharp; numerical error and structural non-identification need separate diagnostics.
-- **Uncertainty:** sampling uncertainty must be propagated through model fitting and nonlinear intervention functionals. Partial identification requires uncertainty around a set, not only a sweep curve.
-- **Robustness:** misspecified exogenous distributions, weak instruments, support violations, heavy tails, missingness, mixed measurement scales, and architecture sensitivity need controlled studies.
-- **Scalability:** exact finite-state enumeration and pairwise sample discrepancies become expensive with dimension or batch size.
-- **Causal validation:** the graph should be treated as an auditable scientific assumption. Where possible, test implications of the graph, compare alternative admissible graphs, and report sensitivity to unmeasured confounding.
+- Mixed graphs can be classified as `SEMType.MIXED`, but there is no complete mixed-model fitting route. Until one exists, construction should fail early with a precise message.
+- Exact discrete inference builds the full Cartesian state table. Context deduplication saves network evaluations, but the state space still grows exponentially. Add state-count and memory checks before exploring variable elimination, factorised messages, sparse support, or controlled approximations.
+- `MeanPotentialOutcome` and `ATE` need a general interface for named treatment and outcome nodes. The partial-identification workflow also needs multi-start $\lambda$ sweeps, observational-fit tolerances, and diagnostics that distinguish a numerical extremum from a proven sharp bound.
+- Operator choice is manual even though `inferred_sem_type` already carries useful information. A `fit(...)` dispatcher could recommend or select the exact Gaussian likelihood, a declared non-Gaussian likelihood, or a configured minimum-distance method. It should never change the statistical objective silently.
+- Model assessment is missing. Useful first additions are held-out likelihood or discrepancy, empirical-versus-implied moments, residual checks, optimisation traces, and restart sensitivity.
+- Causal query results should record the estimand and assumptions used to identify it. A computable `set_nodes` result is not automatically an identified causal effect.
+- SEM2 currently reports point estimates. Linear Gaussian models are the natural place to add Hessian or observed-information standard errors. Bootstrap and sandwich methods can follow. Partially identified models need uncertainty for a set, not an ordinary interval around one point.
+
+### 4.3 Repair the public documentation and package surface
+
+[`README.md`](../../README.md) contains only `# sem2`. [`DESIGN.md`](../../DESIGN.md) describes the pre-refactor `sem2.py`, calls `model(...)` even though `forward` now raises, uses the old `model.layer` attribute, imports from the empty package root, and links to a `DESIGN_refactor.md` file that does not exist.
+
+The notebooks have the same problem. Several import `SEM2` from the empty package root, use the old `sem2.model.nn_models` path, or depend on undeclared packages such as `engression`. Keep the notebooks that still support the research, port them to the current API, clear stale outputs, and run them in CI. Archive the rest after review.
+
+The package also needs a deliberate public import surface. `pytest` should move out of runtime dependencies and into a development extra. A licence, CI workflow, changelog, and short contribution guide would make the repository easier to use and maintain. Placeholder surfaces such as `PathAnalysis`, along with ignored configuration fields, should either be implemented or removed until their semantics are settled.
+
+### 4.4 Keep the code and research record in sync
+
+The reports currently mix shipped features, one-off research implementations, and proposed methods. Report 2 accurately describes the exact linear moments and Gaussian likelihood. Its Sinkhorn RDD and non-Gaussian ICA fitting paths, however, are not core operators in this branch. The older notebooks use yet another API and an external energy-loss implementation.
+
+A short capability matrix would resolve much of this confusion. For each method, mark it as implemented, experimental, report-only, or planned, and link to the code or script that reproduces it.
+
+### 4.5 Research questions that remain open
+
+- What consistency and convergence rates hold for the chosen neural sieve, loss, architecture sequence, and latent-variable setting?
+- Which structural functions and causal queries are point identified, set identified, or not identified from the declared observed margin?
+- How much of the observed variation in fitted bounds comes from sampling, optimisation, and structural non-identification?
+- How robust are the fits to incorrect exogenous distributions, weak instruments, support violations, heavy tails, missing values, and architecture choices?
+- How should uncertainty be propagated through nonlinear interventions and partially identified sets?
+- How far can exact state enumeration and pairwise sample losses scale before a different inference strategy is needed?
+- Which implications of a proposed causal graph can be checked against data, and how sensitive are conclusions to alternative graphs or unmeasured confounding?
 
 ---
 
-## 5. Recommended development sequence
+## 5. Suggested order of work
 
-### Milestone 1 — trustworthy fitting core
+### First, make the current fitter trustworthy
 
 1. Fix and unit-test continuous energy distance.
 2. Define the ordered tabular schema and graph-generic observed-variable mapping.
@@ -465,25 +470,25 @@ Beyond engineering work, several research questions remain open:
 4. Test trainer, intervention, finite-state loss, potential outcomes, and ATE end to end.
 5. Make unsupported mixed graphs and objectives fail early with precise messages.
 
-**Exit criterion:** the package can fit one linear-Gaussian, one nonlinear continuous, and one finite-discrete example through a documented API, and each result is covered by an independently checkable test.
+A useful release checkpoint is one documented, independently tested fit for each supported regime: linear Gaussian, nonlinear continuous, and finite discrete.
 
-### Milestone 2 — reconcile and reproduce the research
+### Then make the research reproducible from the package
 
 1. Rebuild the Report 2 ICA likelihood and Sinkhorn RDD methods as package operators or mark them report-only.
 2. Turn each retained application into a deterministic script with data provenance, configuration, seeds, dependency lock, and numerical acceptance thresholds.
 3. Add a benchmark matrix against OLS/lavaan/FastICA/RDD references without claiming general superiority.
 4. Add the partial-identification sweep as a reusable experiment with multi-start and tolerance diagnostics.
 
-**Exit criterion:** every numerical claim selected for continued support can be regenerated from a clean checkout.
+At that point, every numerical claim the team intends to maintain should be reproducible from a clean checkout.
 
-### Milestone 3 — inference, scale, and public usability
+### Finally, add inference, scale, and a stable public interface
 
 1. Add standard errors/bootstrap or identified-set uncertainty appropriate to each regime.
 2. Add model checking, convergence, restart, and sensitivity reports.
 3. Improve discrete scaling and define mixed-model support.
 4. Replace README/DESIGN documentation, update notebooks, stabilise exports, and add CI/release metadata.
 
-**Exit criterion:** a new user can install SEM2, map a named table to a formula, fit a supported model, inspect diagnostics, and state exactly which observational and causal claims the result does and does not justify.
+The practical target is simple: a new user can install SEM2, map a named table to a formula, fit a supported model, inspect the diagnostics, and explain which observational and causal claims the result supports.
 
 ---
 
@@ -504,7 +509,7 @@ The warnings arise primarily because test helpers intentionally instantiate line
 
 ## 7. Source notes
 
-The review gives precedence to the inspected code for statements about current software behaviour. The reports and attached draft are treated as research context and are not assumed to describe shipped functionality unless a corresponding current implementation was found.
+For claims about current software behaviour, this review follows the inspected code. The reports and attached draft provide research context; they are not treated as shipped functionality unless the reviewed branch contains the corresponding implementation.
 
 Repository research sources:
 
@@ -513,3 +518,5 @@ Repository research sources:
 - Attached draft *Machine learning methods for structural equation models*, for the minimum-distance, energy-distance, and MMD setup. It was supplied with the review request and is not a repository artifact.
 
 The report intentionally does not import causal claims from the attached draft, which the request correctly describes as not addressing causality.
+
+The equations use [GitHub's supported math delimiters](https://docs.github.com/en/get-started/writing-on-github/working-with-advanced-formatting/writing-mathematical-expressions): `$...$` for inline expressions and `$$...$$` for display equations.
