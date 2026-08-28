@@ -1,10 +1,14 @@
-# SEM2 technical review: updated after the 2026-08-26 meeting
+# SEM2 project status and technical review
 
-**Review date:** 2026-08-26<br>
-**Updated:** 2026-08-27<br>
-**Author:** Peirce (Nous Research Hermes Agent)<br>
-**Repository state checked:** `main` at `cafcae6e7002e8b9809ef0c55bc061a4bc1d3117`<br>
-**Scope:** current `sem2/` source, tests and experiments; repository research reports; the earlier AI review; and the supplied meeting transcript and brief summary
+**Purpose:** current project memory for active development and research planning<br>
+**Technical review:** 2026-08-26<br>
+**Meeting update:** 2026-08-27<br>
+**Meeting convener:** Qingyuan Zhao<br>
+**Source baseline:** `main` at `cafcae6e7002e8b9809ef0c55bc061a4bc1d3117`<br>
+**Compiled by:** Peirce (Nous Research Hermes Agent)<br>
+**Scope:** `sem2/` source, tests and experiments; repository research reports; the earlier AI review; and the supplied meeting transcript and brief summary
+
+This file is the canonical record of current work, known limitations, and planned priorities. Update it when repository behavior or the agreed direction changes. Fresh source and test evidence takes precedence over this review.
 
 ## Executive assessment
 
@@ -25,7 +29,7 @@ The revised priorities are:
 5. develop uncertainty theory that distinguishes identification, regularity, and numerical error; and
 6. explore a bounded PFN extension, preferably for a supplied graph or a direct causal query rather than graph discovery.
 
-The full meeting record is summarized in [`2026-08-26-meeting.md`](./2026-08-26-meeting.md).
+The full meeting record is summarized in [`docs/meetings/2026-08-26-meeting.md`](docs/meetings/2026-08-26-meeting.md).
 
 ---
 
@@ -150,7 +154,7 @@ The parser-to-model part is more coherent than the final table-to-fit part.
 
 ### 2.2 Formula parser and DAG
 
-[`formula_parser.py`](../../sem2/model/construction/formula_parser.py) recognizes:
+[`formula_parser.py`](sem2/model/construction/formula_parser.py) recognizes:
 
 - exogenous distribution statements such as `u ~ Normal(0,1)`;
 - linear assignments such as `y <- x + 0.5*z`;
@@ -160,24 +164,24 @@ The parser-to-model part is more coherent than the final table-to-fit part.
 - `unobs(...)` declarations; and
 - comma expansion on the left-hand side.
 
-Typed syntax objects live in [`sem_ast.py`](../../sem2/model/construction/sem_ast.py), with semantic types in [`sem_types.py`](../../sem2/model/construction/sem_types.py). [`dag.py`](../../sem2/model/construction/dag.py) builds the node specifications, checks graph validity, derives a topological order, and classifies the model as linear Gaussian, linear non-Gaussian, nonlinear, discrete, or mixed.
+Typed syntax objects live in [`sem_ast.py`](sem2/model/construction/sem_ast.py), with semantic types in [`sem_types.py`](sem2/model/construction/sem_types.py). [`dag.py`](sem2/model/construction/dag.py) builds the node specifications, checks graph validity, derives a topological order, and classifies the model as linear Gaussian, linear non-Gaussian, nonlinear, discrete, or mixed.
 
 The formula is an effective low-dimensional interface. A high-dimensional system will need a programmatic constructor, schema tooling, or higher-level graph builder rather than one long string.
 
 ### 2.3 Runtime nodes
 
-[`nodes.py`](../../sem2/model/components/nodes.py) contains the executable mechanisms:
+[`nodes.py`](sem2/model/components/nodes.py) contains the executable mechanisms:
 
-- `NodeDistribution` wraps a PyTorch distribution and uses reparameterized sampling where available;
+- `NodeExogenous` wraps a PyTorch distribution and uses reparameterized sampling where available;
 - `NodeLinear` combines learned and fixed parent coefficients, with optional bias;
-- `NodeNN` wraps a multilayer perceptron;
+- `NodeMLP` wraps a multilayer perceptron;
 - `NodeMLPDiscrete` maps parent contexts to categorical probabilities.
 
 A continuous `sample(...)` call evaluates nodes in topological order and stores the values for that call. `set_nodes` can replace a selected node before its ordinary assignment is evaluated.
 
 ### 2.4 Model classes
 
-[`base.py`](../../sem2/model/models/base.py) defines the common `SEM2` constructor and continuous sampler. [`linear.py`](../../sem2/model/models/linear.py) adds coefficient, intercept, exogenous-moment, implied-mean, and implied-covariance calculations. [`discrete.py`](../../sem2/model/models/discrete.py) builds a Cartesian table of finite-node states, evaluates conditional probabilities, masks states ruled out by interventions, and returns probabilities after marginalizing latent dimensions.
+[`base.py`](sem2/model/models/base.py) defines the common `SEM2` constructor and continuous sampler. [`linear.py`](sem2/model/models/linear.py) adds coefficient, intercept, exogenous-moment, implied-mean, and implied-covariance calculations. [`discrete.py`](sem2/model/models/discrete.py) builds a Cartesian table of finite-node states, evaluates conditional probabilities, masks states ruled out by interventions, and returns probabilities after marginalizing latent dimensions.
 
 The supported import surface is currently:
 
@@ -185,17 +189,17 @@ The supported import surface is currently:
 from sem2.model import SEM2, SEM2Discrete, SEM2Linear, SEMType
 ```
 
-The package root [`sem2/__init__.py`](../../sem2/__init__.py) is empty. Notebooks that import these classes directly from `sem2` do not match the present API.
+The package root [`sem2/__init__.py`](sem2/__init__.py) is empty. Notebooks that import these classes directly from `sem2` do not match the present API.
 
 ### 2.5 Operators and trainers
 
-Operators separate structural sampling from scalar or vector queries. The strongest current fitting operators are in [`operators/linear.py`](../../sem2/operators/linear.py):
+Operators separate structural sampling from scalar or vector queries. The strongest current fitting operators are in [`operators/linear.py`](sem2/operators/linear.py):
 
 - `LogLikelihood` for exact linear-Gaussian likelihood, with a documented Gaussian pseudo-likelihood interpretation for other linear models;
 - `WeightedFrobeniusDistance` for covariance matching; and
 - a still-unimplemented `PathAnalysis` placeholder.
 
-[`operators/scalar_operators.py`](../../sem2/operators/scalar_operators.py) contains continuous/discrete energy wrappers, mean potential outcomes, ATE, and a compositional `SEM2Loss`. [`sem2trainer.py`](../../sem2/sem2trainer.py) and [`experiments/trainer.py`](../../experiments/trainer.py) provide overlapping training paths.
+[`operators/scalar_operators.py`](sem2/operators/scalar_operators.py) contains continuous/discrete energy wrappers, mean potential outcomes, ATE, and a compositional `SEM2Loss`. [`sem2trainer.py`](sem2/sem2trainer.py) and [`experiments/trainer.py`](experiments/trainer.py) provide overlapping training paths.
 
 The operator abstraction is a good place to express the meeting's model/data distinction. Some operators depend only on a model; others require a dataset view, query roles, and a regime.
 
@@ -272,7 +276,7 @@ E_\beta(P,Q)
 
 for $`0<\beta<2`$. The observed-observed term does not depend on $`\theta`$ and may be omitted during optimization.
 
-The current [`EnergyLoss`](../../sem2/operators/scalar_operators.py) remains experimental for two concrete reasons:
+The current [`EnergyLoss`](sem2/operators/scalar_operators.py) remains experimental for two concrete reasons:
 
 1. `_evaluate_continuous` concatenates nodes named `Z`, `X`, and `Y` instead of deriving the observed variables from a schema.
 2. `_energy_score` sets `m = preds.shape[1]`, which is the feature count, then uses $`m/(m-1)`$ as a correction for a generated-sample distance matrix. That correction should depend on the number of generated draws. In one feature the current expression divides by zero.
@@ -636,20 +640,15 @@ If continuous relaxations are added, they should not be described as exact discr
 
 ### 6.4 Repair documentation and package surface
 
-[`README.md`](../../README.md) still contains only a heading. [`DESIGN.md`](../../DESIGN.md) describes an older API, including imports and calls that no longer match the package. Several notebooks use stale module paths or undeclared dependencies.
+[`README.md`](README.md) now provides the stable project overview, supported import path, a minimal example, formula summary, architecture map, and capability boundaries. [`DESIGN.md`](DESIGN.md) remains a legacy description of an older API, including imports and calls that no longer match the package. Several notebooks also use stale module paths or undeclared dependencies.
 
-A useful first documentation release would include:
+The remaining documentation work is to add:
 
-- an installable minimal example using the actual import surface;
-- the structural formula grammar;
-- the table/schema contract;
+- the implemented table/schema contract once that API exists;
 - one supported fit per stable regime;
-- diagnostics and causal-interpretation warnings;
-- a current architecture diagram;
-- a capability matrix; and
-- CI that executes retained examples.
-
-The top-level exports, runtime versus development dependencies, license, contribution guidance, and placeholder APIs also need deliberate decisions.
+- optimizer diagnostics and fuller causal-interpretation guidance;
+- maintained examples that run in CI; and
+- deliberate decisions on top-level exports, runtime versus development dependencies, licensing, contribution guidance, and placeholder APIs.
 
 ---
 
@@ -801,10 +800,10 @@ The following statements are therefore kept distinct:
 
 Repository sources:
 
-- [`sem2/`](../../sem2/) and [`tests/`](../../tests/), for current behavior;
-- [`MPhilSC_BothReport_Srivathsan_Amruth_Report_2_Starts_at_Page_69.pdf`](../reports/MPhilSC_BothReport_Srivathsan_Amruth_Report_2_Starts_at_Page_69.pdf), for the research record around discrete estimation, linear fitting, and the Sinkhorn/RDD work;
-- [`AAAI_SEM2.pdf`](../reports/AAAI_SEM2.pdf), for early architecture and neural structural-equation framing; and
-- [`2026-08-26-ai-review.md`](./2026-08-26-ai-review.md), for the original code-backed review and earlier example outputs.
+- [`sem2/`](sem2/) and [`tests/`](tests/), for current behavior;
+- [`MPhilSC_BothReport_Srivathsan_Amruth_Report_2_Starts_at_Page_69.pdf`](docs/reports/MPhilSC_BothReport_Srivathsan_Amruth_Report_2_Starts_at_Page_69.pdf), for the research record around discrete estimation, linear fitting, and the Sinkhorn/RDD work;
+- [`AAAI_SEM2.pdf`](docs/reports/AAAI_SEM2.pdf), for early architecture and neural structural-equation framing; and
+- [`2026-08-26-ai-review.md`](docs/meetings/2026-08-26-ai-review.md), for the original code-backed review and earlier example outputs.
 
 Supplied sources:
 
