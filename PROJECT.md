@@ -1,8 +1,7 @@
 # SEM2 project status
 
 **Last updated:** 28 August 2026<br>
-**Evidence baseline:** `main` at `cafcae6e7002e8b9809ef0c55bc061a4bc1d3117`<br>
-**Meeting convener:** Qingyuan Zhao
+**Evidence baseline:** `main` at `cafcae6e7002e8b9809ef0c55bc061a4bc1d3117`
 
 This file records the current capabilities, limitations, decisions, and order of work. [`README.md`](README.md) is the stable user entry point, while [`AGENTS.md`](AGENTS.md) contains contributor guidance. Fresh source and test evidence takes precedence over this record.
 

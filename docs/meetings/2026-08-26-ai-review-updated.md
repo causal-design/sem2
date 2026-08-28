@@ -28,7 +28,7 @@ The revised priorities are:
 5. develop uncertainty theory that distinguishes identification, regularity, and numerical error; and
 6. explore a bounded PFN extension, preferably for a supplied graph or a direct causal query rather than graph discovery.
 
-The full meeting record is summarized in [`docs/meetings/2026-08-26-meeting.md`](./2026-08-26-meeting.md).
+The discussion is summarized in the [meeting notes](./2026-08-26-meeting.md).
 
 ---
 

@@ -60,7 +60,7 @@ Statements are separated by semicolons.
 | `y <- d(x,z)` | Use a finite discrete mechanism. |
 | `unobs(u)` | Mark variables as unobserved in the current API. |
 
-`unobs(...)` currently determines the model's observed-variable list. The agreed design direction is to move observation status into a separate dataset-to-model mapping, because the same variable may be observed in one dataset and absent from another.
+`unobs(...)` currently determines the model's observed-variable list. See [`PROJECT.md`](PROJECT.md) for the proposed separation between structural formulas and dataset-specific observation status.
 
 Node configuration is passed through `node_cfgs`, keyed by the variable on the left-hand side of the formula. Public node configurations live in [`sem2/default_configs.py`](sem2/default_configs.py).
 
@@ -106,6 +106,6 @@ When changing an estimator or causal operator, add tests for numerical values, g
 
 - [`PROJECT.md`](PROJECT.md) is the canonical record of current work, known limitations, and priorities.
 - [`AGENTS.md`](AGENTS.md) contains durable guidance for contributors and coding agents.
-- [`docs/meetings/2026-08-26-meeting.md`](docs/meetings/2026-08-26-meeting.md) is the concise meeting record convened by Qingyuan Zhao.
+- [`docs/meetings/2026-08-26-meeting.md`](docs/meetings/2026-08-26-meeting.md) is the concise meeting record.
 - [`docs/meetings/2026-08-26-ai-review-updated.md`](docs/meetings/2026-08-26-ai-review-updated.md) is the detailed review updated after that meeting.
 - [`docs/meetings/2026-08-26-ai-review.md`](docs/meetings/2026-08-26-ai-review.md) preserves the original review that preceded the meeting update.
