@@ -6,17 +6,7 @@ The project is designed around user-supplied causal structures rather than a fix
 
 ## Current status
 
-The strongest parts of the package are:
-
-- formula parsing and DAG construction;
-- continuous and linear structural sampling;
-- exact mean and covariance calculations for scalar linear SEMs;
-- Gaussian likelihood fitting for linear Gaussian models; and
-- finite-state probability calculations for small discrete models.
-
-Several paths remain experimental or incomplete. In particular, the generic energy-loss and trainer interfaces need repair and broader tests; mixed-model fitting is not supported end to end; MMD and PFN inference are not implemented; and the Sinkhorn and remaining discrete research code discussed by the team have not yet been integrated into the shared package.
-
-See [`PROJECT.md`](PROJECT.md) for the current technical review, capability matrix, limitations, and work plan.
+See [`PROJECT.md`](PROJECT.md) for the maintained capability matrix, known limitations, design decisions, and work plan.
 
 ## Installation
 
@@ -102,8 +92,6 @@ This computes the intervention implied by the specified structural model. It doe
 - [`docs/meetings/`](docs/meetings/) contains dated reviews and meeting records.
 - [`docs/reports/`](docs/reports/) contains the project research reports.
 
-[`DESIGN.md`](DESIGN.md) documents an earlier architecture and should be treated as historical until it is reconciled with the current package.
-
 ## Testing
 
 Run the full suite from the repository root:
@@ -119,4 +107,5 @@ When changing an estimator or causal operator, add tests for numerical values, g
 - [`PROJECT.md`](PROJECT.md) is the canonical record of current work, known limitations, and priorities.
 - [`AGENTS.md`](AGENTS.md) contains durable guidance for contributors and coding agents.
 - [`docs/meetings/2026-08-26-meeting.md`](docs/meetings/2026-08-26-meeting.md) is the concise meeting record convened by Qingyuan Zhao.
+- [`docs/meetings/2026-08-26-ai-review-updated.md`](docs/meetings/2026-08-26-ai-review-updated.md) is the detailed review updated after that meeting.
 - [`docs/meetings/2026-08-26-ai-review.md`](docs/meetings/2026-08-26-ai-review.md) preserves the original review that preceded the meeting update.

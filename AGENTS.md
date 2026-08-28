@@ -16,8 +16,6 @@ SEM2 is a research-stage PyTorch implementation of structural equation models. R
 - `tests/`: parser, construction, sampling, and linear-model tests.
 - `experiments/` and `notebooks/`: research code and demonstrations; some imports and dependencies are stale.
 
-`DESIGN.md` describes an older architecture. Use it as historical context, not as the current API specification.
-
 ## Current API conventions
 
 Use the supported model imports:
@@ -41,31 +39,15 @@ Call `model.sample(...)`; `forward(...)` deliberately raises `NotImplementedErro
 
 Pass node configurations through `node_cfgs`, keyed by the left-hand-side node name. Treat tensor column order as unsafe unless it is checked against named model variables.
 
-## Design direction
+## Design conformance
 
-Keep these distinctions explicit in new work:
+Before changing model, data, or operator boundaries, read the agreed design direction in [`PROJECT.md`](PROJECT.md). Preserve compatibility with existing formulas, require named variable mappings at data boundaries, and keep application-specific roles out of graph-generic components.
 
-- Exogenous or endogenous status belongs to the structural model.
-- Observed or latent status belongs to a dataset's view of that model.
-- Treatment, outcome, and intervention roles belong to a statistical or causal query.
-- A graph-generic operator must not silently encode binary-IV names or column positions.
+## Capability and claim discipline
 
-The current `unobs(...)` syntax combines structural and observation concerns for backward compatibility. New data-layer work should move toward an explicit dataset schema and named column-to-node mapping without silently breaking existing formulas.
+Consult [`PROJECT.md`](PROJECT.md) before describing what the package currently supports. Claims in code, documentation, and pull requests must match inspected behavior. When functionality is incomplete, fail early with a precise message or label it experimental. Do not broaden a capability claim from a notebook, meeting report, or unmerged branch.
 
-## Capability boundaries
-
-Claims in code, documentation, and pull requests must match inspected behavior:
-
-- Formula parsing, DAG construction, continuous sampling, linear moment algebra, Gaussian linear likelihood, and finite-state model probabilities are implemented.
-- The generic continuous energy path and package trainer are experimental and need direct end-to-end tests.
-- The finite discrete fitting workflow is specialized and incomplete.
-- Mixed discrete/continuous fitting is not supported end to end.
-- MMD and PFN posterior approximation are not implemented in the package.
-- Sinkhorn and remaining discrete research implementations discussed by the team are external until reviewed and merged.
-- `set_nodes` computes an intervention under the supplied model. It does not establish causal identification or validate the graph.
-- Numerical extrema from a partial-identification search are not sharp bounds without fit tolerances, restarts, diagnostics, and an identification argument or independent reference.
-
-When functionality is incomplete, fail early with a precise message or label it experimental. Do not broaden a capability claim from a notebook, meeting report, or unmerged branch.
+Keep two causal boundaries explicit: `set_nodes` computes an intervention under the supplied model, not evidence that the graph is valid or an effect is identified; and numerical extrema from a partial-identification search are not sharp bounds without fit tolerances, restarts, diagnostics, and an identification argument or independent reference.
 
 ## Development and verification
 
