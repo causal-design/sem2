@@ -6,7 +6,7 @@
 
 This document proposes what SEM2 should become and how to develop it. It begins with a consolidated feature inventory because the first team decision is not how to implement every idea, but which capabilities belong in the product and in what order.
 
-The inventory primarily reflects the [26 August meeting](meetings/2026-08-26-meeting.md), the [28 August meeting](meetings/2026-08-28-meeting.md), and current GitHub issues. The [updated technical review](meetings/2026-08-26-ai-review-updated.md) and research reports supply implementation evidence and additional candidates. Repository and paper evidence are used to clarify status; they do not turn an unconfirmed proposal into an agreed feature.
+The inventory primarily reflects the [26 August meeting](../2026-08-26-meeting.md), the [28 August meeting](../2026-08-28-meeting.md), and current GitHub issues. The [updated technical review](../2026-08-26-ai-review-updated.md) and research reports supply implementation evidence and additional candidates. Repository and paper evidence are used to clarify status; they do not turn an unconfirmed proposal into an agreed feature.
 
 ## 1. Desirable feature inventory for review
 
@@ -27,7 +27,7 @@ Source shorthand used below:
 - **M26:** 26 August meeting;
 - **M28:** 28 August meeting;
 - **TR:** updated technical review;
-- **R1/R2:** the two-part [MPhil report](reports/MPhilSC_BothReport_Srivathsan_Amruth_Report_2_Starts_at_Page_69.pdf);
+- **R1/R2:** the two-part [MPhil report](../../reports/MPhilSC_BothReport_Srivathsan_Amruth_Report_2_Starts_at_Page_69.pdf);
 - **GH:** linked GitHub issue.
 
 ### 1.2 Product, data, and API foundations
@@ -77,7 +77,7 @@ Source shorthand used below:
 |---|---|---:|---|---|
 | **F32** | Test intervention semantics directly | P0 | Verify equation replacement, named node selection, shapes, common-random-number comparisons where appropriate, and invariance of unaffected mechanisms. State that computation under a graph does not validate the graph. | M26, TR |
 | **F33** | Make assumptions and estimands inspectable | P1 | A query result should identify the supplied graph/model, intervention, observed margin, target population, contrast, and status of identification assumptions rather than returning an unqualified scalar. | M26, TR |
-| **F34** | Build a reusable partial-identification workflow | P1 | Add signed penalty sweeps or constrained alternatives, continuation, fit tolerances, multistart optimization, branch diagnostics, and checks that reported extrema remain observationally compatible. | M26, TR, R1, [AAAI report](reports/AAAI_SEM2.pdf) |
+| **F34** | Build a reusable partial-identification workflow | P1 | Add signed penalty sweeps or constrained alternatives, continuation, fit tolerances, multistart optimization, branch diagnostics, and checks that reported extrema remain observationally compatible. | M26, TR, R1, [AAAI report](../../reports/AAAI_SEM2.pdf) |
 | **F35** | Validate bounds against known references | P1 | Use binary IV and other small problems with analytical, linear-programming, or independently computed bounds. Numerical extrema are not “sharp bounds” without this evidence and an identification argument. | M26, TR, R1 |
 | **F36** | Distinguish kinds of uncertainty in results and APIs | P1 | Keep sampling uncertainty, Monte Carlo error, optimization/restart variation, model/graph sensitivity, and structural non-identification separate. Also distinguish confidence regions, posterior regions, identified sets, and numerical sensitivity ranges. | M26, M28, TR |
 | **F37** | Add linear-model uncertainty after the fit contract is stable | P2 | Evaluate Hessian/observed-information, delta-method, sandwich, and bootstrap routes against known linear-Gaussian behavior. The latest meeting places reliable point estimation first. | M28, TR, R2 |
@@ -443,10 +443,10 @@ The priority assignments, conceptual API, stages, and AI workflow are proposals 
 
 Key source links:
 
-- [26 August meeting](meetings/2026-08-26-meeting.md)
-- [28 August meeting](meetings/2026-08-28-meeting.md)
-- [Updated technical review](meetings/2026-08-26-ai-review-updated.md)
-- [Current project status](../PROJECT.md)
-- [MPhil reports](reports/MPhilSC_BothReport_Srivathsan_Amruth_Report_2_Starts_at_Page_69.pdf)
-- [Discrete partial-identification paper](reports/AAAI_SEM2.pdf)
+- [26 August meeting](../2026-08-26-meeting.md)
+- [28 August meeting](../2026-08-28-meeting.md)
+- [Updated technical review](../2026-08-26-ai-review-updated.md)
+- [Current project status](../../../PROJECT.md)
+- [MPhil reports](../../reports/MPhilSC_BothReport_Srivathsan_Amruth_Report_2_Starts_at_Page_69.pdf)
+- [Discrete partial-identification paper](../../reports/AAAI_SEM2.pdf)
 - GitHub issues [#19](https://github.com/causal-design/sem2/issues/19), [#33](https://github.com/causal-design/sem2/issues/33), [#38](https://github.com/causal-design/sem2/issues/38), [#40](https://github.com/causal-design/sem2/issues/40), [#41](https://github.com/causal-design/sem2/issues/41), [#42](https://github.com/causal-design/sem2/issues/42), and [#47](https://github.com/causal-design/sem2/issues/47)
