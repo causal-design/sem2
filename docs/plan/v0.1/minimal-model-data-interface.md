@@ -1,9 +1,9 @@
 # 1. Minimal model–data interface
 
-**F02/F03 handoff for the [v0.1 plan](../v0.1.md).** This records the agreed
-direction from Slack, with non-pandas input handling still under review. It is
-an implementation specification, not a claim that the new APIs or parser fixes
-already work.
+**Agreed F02/F03 handoff for the [v0.1 plan](../v0.1.md).** This records the agreed
+direction from Slack, including the requirement for user-supplied pandas DataFrames.
+It is an implementation specification, not a claim that the new APIs or parser
+fixes already work.
 
 **Review requested from:** Slack reviewers `U0AACS6EYJF` and `U0BEV10KU2X`.
 Please check that this captures the agreement and that the acceptance checks are
@@ -12,17 +12,21 @@ in the example are illustrative.
 
 ## Working direction
 
-- **Use pandas, with direct name matching.** Prepared DataFrame columns name model
-  variables. Users select the relevant raw columns; unexpected columns in the
-  prepared table are errors. No user-supplied model–column mapping or public
+- **Require a pandas DataFrame, with direct name matching.** The public fitting
+  data input must be a `pandas.DataFrame`. Reject other input types with a clear
+  `TypeError` explaining that the caller must convert them to a DataFrame first;
+  there is no automatic input-format conversion. Prepared DataFrame columns name
+  model variables. Users select the relevant raw columns; unexpected columns in
+  the prepared table are errors. No user-supplied model–column mapping or public
   binding object is needed.
 - **Use a thin preparation wrapper, not a new DataFrame system.** Ordinary users
   pass a pandas DataFrame directly to `fit`. Shared internal preparation performs
   conversion and validation without modifying the original DataFrame. It may use
   a private record for aligned data and provenance; neither `SEMData(df)` nor a
   separate `normalize_column_names` call is compulsory. Do not subclass pandas or
-  require a richer dataset schema for this work. DataFrame support is agreed;
-  rejecting versus automatically converting other tabular inputs is not yet decided.
+  require a richer dataset schema for this work. Automatic column-name conversion
+  and internal tensor preparation remain part of this layer, distinct from the
+  caller's conversion of other input formats to a DataFrame.
 - **Infer observation status jointly from model and data.** Supplied columns are
   observed; remaining user-declared model variables are unobserved. No separate
   `unobs(...)` or observed-variable declaration. Compiler-generated helpers are
@@ -130,8 +134,10 @@ are unobserved. This illustrates the interface, not an executed fit or recovery 
 
 ## Implementation and review checks
 
-1. **Data preparation:** implement the shared wrapper and reports. Test reordered
-   columns, valid-name preservation, punctuation/keywords/collisions, duplicate
+1. **Data preparation:** implement the shared wrapper and reports. Test DataFrame
+   acceptance and clear rejection of non-DataFrames (including dictionaries, lists
+   of records, and arrays) before optimization. Test reordered columns, valid-name
+   preservation, punctuation/keywords/collisions, duplicate
    labels, correct row counts, no complete rows, and no mutation of the input.
    A different observed subset must not change the structural model; unknown
    columns must fail rather than disappear through silent intersection.
@@ -153,7 +159,7 @@ are unobserved. This illustrates the interface, not an executed fit or recovery 
    roles in their separate interface work, not the generic data contract.
 
 Review the specification and acceptance checks for omissions or correctness
-issues, and settle the non-pandas input policy before implementing that boundary.
+issues. The input-format policy is now settled.
 Implementation PRs must include real test output and the completed
 construction → preparation → fitting example.
 Documentation/data checks and isolated parser probes are not full SEM2 fitting
