@@ -2,15 +2,39 @@
 # own method signatures) resolve lazily on Python < 3.14.
 from __future__ import annotations
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import Optional
 import torch
 import warnings
 from torch import nn
-from torch.distributions import Distribution
+from torch.distributions import Distribution, constraints
 
 from ..._compat import StrEnum
 from .nn_models import _LinearConfig, _LinearModel, _MLP
 from ...default_configs import LinearNodeConfig, MLPConfig
+
+# ── Support information ───────────────────────────────────────────────────────
+
+@dataclass
+class SupportInformation:
+    """Inspectable value domain, not a range estimated from sampled values.
+
+    constraint: PyTorch membership constraint, retaining its endpoint conventions;
+        None means unknown. Linear/MLP constraints apply elementwise.
+    values: Enumerated finite values, or None when not enumerated (not necessarily
+        infinite). Exogenous enumeration retains PyTorch's shape
+        [n_values, *batch_shape, *event_shape]; it does not form Cartesian products
+        across distribution batches or the node's repeated out_dim draws.
+    is_conservative: True when exact support has not been established. False is
+        reserved here for the declared finite states of a discrete mechanism.
+
+    This information describes the node, not its last sample, intervention value,
+    or probability-vector representation. It does not change sampling or fitting.
+    """
+    constraint: constraints.Constraint | None = None
+    values: torch.Tensor | None = None
+    is_conservative: bool = True
+
 
 # ── RandomVariable ────────────────────────────────────────────────────────────
 
@@ -21,6 +45,10 @@ class RandomVariable(ABC):
     endogenous nodes leave it as None.
     """
     dist: Optional[Distribution] = None
+
+    def get_support(self) -> SupportInformation:
+        """Return support information, defaulting to unknown for custom variables."""
+        return SupportInformation()
 
 
 # ── Base ──────────────────────────────────────────────────────────────────────
@@ -100,6 +128,24 @@ class NodeExogenous(SEM2Node):
         self.out_dim = out_dim
         self.dist = dist
 
+    def get_support(self) -> SupportInformation:
+        """Inspect the distribution without sampling or certifying its domain exact."""
+        try:
+            constraint = self.dist.support
+        except NotImplementedError:
+            constraint = None
+
+        values = None
+        if self.dist.has_enumerate_support:
+            try:
+                values = self.dist.enumerate_support()
+            except NotImplementedError:
+                # Some finite distributions cannot enumerate heterogeneous batches.
+                pass
+
+        # Backend domains can include zero-probability states.
+        return SupportInformation(constraint=constraint, values=values)
+
     def _forward_inner(self, x: list[torch.Tensor], batch_size: int = 1) -> torch.Tensor:
         return self.dist.sample([batch_size, self.out_dim])
 
@@ -170,6 +216,10 @@ class NodeLinear(NodeEndogenous):
         )
         self.linear = _LinearModel(internal_cfg, device=device)
 
+    def get_support(self) -> SupportInformation:
+        """Return a real-valued bound; do not infer the range from parents/weights."""
+        return SupportInformation(constraint=constraints.real)
+
     def _effective_weight(self) -> torch.Tensor:
         """Learned weights where free, fixed values where pinned."""
         return self.linear.weight * (~self.fix_weights) + self._fixed_vals * self.fix_weights
@@ -228,6 +278,10 @@ class NodeMLP(NodeNonlinear):
         self.mlp = _MLP(self.cfg, device=device)
         self.out_dim = self.cfg.output_dim
 
+    def get_support(self) -> SupportInformation:
+        """Return a real-valued bound; hidden activations do not bound the output."""
+        return SupportInformation(constraint=constraints.real)
+
     def _forward_inner(self, x: list[torch.Tensor], **kwargs) -> torch.Tensor:
         """ Input shape:
                 x: List[Tensor], shape = [n_predecessors][bs, output_dim]
@@ -262,6 +316,15 @@ class NodeMLPDiscrete(SEM2Node):
             raise ValueError(f"Invalid MLP configuration: \n{cfg}\n. Must be MLPConfig object, or None if default config is needed.")
 
         self.n_classes = cfg.output_dim
+
+    def get_support(self) -> SupportInformation:
+        """Return all declared category indices, independent of sampling mode."""
+        device = next(self.nn_module.parameters()).device
+        return SupportInformation(
+            constraint=constraints.integer_interval(0, self.n_classes - 1),
+            values=torch.arange(self.n_classes, device=device),
+            is_conservative=False,
+        )
 
     def _forward_inner(self, x: list[torch.Tensor], mode=DiscreteModes.SAMPLE, **kwargs) -> torch.Tensor:
         """ Input shape:
