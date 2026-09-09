@@ -1,13 +1,14 @@
 # 1. Minimal model–data interface
 
-**Agreed F02/F03 handoff for the [v0.1 plan](../v0.1.md).** The substantive
-direction below is agreed in the Slack discussion. This is an implementation
-specification, not a claim that the new APIs or parser fixes already work.
+**F02/F03 handoff for the [v0.1 plan](../v0.1.md).** This records the agreed
+direction from Slack, with non-pandas input handling still under review. It is
+an implementation specification, not a claim that the new APIs or parser fixes
+already work.
 
 **Review requested from:** Slack reviewers `U0AACS6EYJF` and `U0BEV10KU2X`.
 Please check that this captures the agreement and that the acceptance checks are
-sufficient for bounded implementation PRs. The API contract is agreed; import
-locations and keyword spellings in the example are illustrative.
+sufficient for bounded implementation PRs. Import locations and keyword spellings
+in the example are illustrative.
 
 ## Working direction
 
@@ -20,7 +21,8 @@ locations and keyword spellings in the example are illustrative.
   conversion and validation without modifying the original DataFrame. It may use
   a private record for aligned data and provenance; neither `SEMData(df)` nor a
   separate `normalize_column_names` call is compulsory. Do not subclass pandas or
-  require a richer dataset schema for this work.
+  require a richer dataset schema for this work. DataFrame support is agreed;
+  rejecting versus automatically converting other tabular inputs is not yet decided.
 - **Infer observation status jointly from model and data.** Supplied columns are
   observed; remaining user-declared model variables are unobserved. No separate
   `unobs(...)` or observed-variable declaration. Compiler-generated helpers are
@@ -53,13 +55,26 @@ locations and keyword spellings in the example are illustrative.
 
 ## Intercepts and internal helper names
 
-**Estimate linear-equation intercepts by default; a standalone `-1` removes one.**
+**Estimate linear-equation intercepts when no numeric constant term is supplied.**
+A standalone numeric constant fixes the intercept at that value, replacing the
+estimated intercept. In particular, a standalone `0` means no intercept (fixed
+at zero); `-1` means an intercept fixed at minus one, not intercept removal.
 Use “intercept,” not “bias,” publicly, without requiring a `node_cfgs` block.
-Default estimation is already [the linear-node behavior](../../../sem2/model/components/nodes.py#L134-L145);
-the new formula control still needs implementation. Distinguish `y <- x - 1`
-from `y <- -1*x`: the latter fixes a negative slope, not the intercept. This also
-governs the outer linear equation in a mixed expression; it must not silently
-disable offsets inside a neural network or introduce new neural centering rules.
+
+| Formula | Coefficient of `x` | Intercept |
+|---|---|---|
+| `y <- x` | Estimated | Estimated |
+| `y <- x + 0` | Estimated | Fixed at 0 |
+| `y <- x + 1` | Estimated | Fixed at 1 |
+| `y <- x - 1` | Estimated | Fixed at -1 |
+| `y <- -1*x` | Fixed at -1 | Estimated |
+| `y <- -1*x-1` | Fixed at -1 | Fixed at -1 |
+
+Whitespace does not change these meanings. Default estimation is already
+[the linear-node behavior](../../../sem2/model/components/nodes.py#L134-L145);
+numeric fixed-intercept syntax still needs implementation. This rule also governs
+the outer linear equation in a mixed expression; it must not silently disable
+offsets inside a neural network or introduce new neural centering rules.
 
 **Keep the existing expansion and correct its semantics.** Reuse the graph/node
 machinery rather than require composite mechanisms or user-written intermediates.
@@ -120,11 +135,12 @@ are unobserved. This illustrates the interface, not an executed fit or recovery 
    labels, correct row counts, no complete rows, and no mutation of the input.
    A different observed subset must not change the structural model; unknown
    columns must fail rather than disappear through silent intersection.
-2. **Parser and nodes:** implement fixed helper coefficients and `-1` control.
+2. **Parser and nodes:** implement fixed helper coefficients and numeric fixed intercepts.
    Test single, multiple, repeated, and nested nonlinear terms; collisions;
-   intercept defaults versus removal; and negative fixed slopes. Compare outputs
-   and gradients with direct evaluation using matched parameters and intercepts.
-   Verify that effective helper coefficients stay one during optimization while
+   estimated versus zero/positive/negative fixed intercepts; negative fixed slopes;
+   and whitespace variants. Compare outputs and gradients with direct evaluation
+   using matched parameters and intercepts. Verify that fixed intercepts do not
+   change and effective helper coefficients stay one during optimization while
    neural parameters still receive gradients, and helpers stay out of public views.
 3. **Trainer and objectives:** route `fit` and direct Trainer use through one
    implementation. Pass aligned names/data to every supported objective and remove
@@ -137,7 +153,8 @@ are unobserved. This illustrates the interface, not an executed fit or recovery 
    roles in their separate interface work, not the generic data contract.
 
 Review the specification and acceptance checks for omissions or correctness
-issues. Substantive choices are settled; implementation PRs must include real
-test output and the completed construction → preparation → fitting example.
+issues, and settle the non-pandas input policy before implementing that boundary.
+Implementation PRs must include real test output and the completed
+construction → preparation → fitting example.
 Documentation/data checks and isolated parser probes are not full SEM2 fitting
 or gradient tests. This handoff makes no implementation, merge, or release claim.
