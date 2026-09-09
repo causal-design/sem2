@@ -35,6 +35,23 @@ class SupportInformation:
     values: torch.Tensor | None = None
     is_conservative: bool = True
 
+    def __repr__(self) -> str:
+        """Show the domain and conservative flag without dumping large tensors."""
+        if self.values is None:
+            constraint = "unknown" if self.constraint is None else repr(self.constraint)
+            constraint = " ".join(constraint.split())
+            if len(constraint) > 80:
+                constraint = constraint[:77] + "..."
+            domain = f"constraint={constraint}"
+        elif self.values.numel() <= 8 and not self.values.is_meta:
+            domain = f"values={self.values.tolist()}"
+        else:
+            domain = (
+                f"values=Tensor(shape={tuple(self.values.shape)}, "
+                f"dtype={self.values.dtype}, device={self.values.device})"
+            )
+        return f"{type(self).__name__}({domain}, is_conservative={self.is_conservative})"
+
 
 # ── RandomVariable ────────────────────────────────────────────────────────────
 
