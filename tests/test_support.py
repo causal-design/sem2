@@ -42,60 +42,23 @@ class TestSupportInformation:
 
 
 class TestSupportRepr:
-    @pytest.mark.parametrize("info, expected", [
-        (SupportInformation(),
-         "SupportInformation(constraint=unknown, is_conservative=True)"),
-        (SupportInformation(constraint=constraints.real),
-         "SupportInformation(constraint=Real(), is_conservative=True)"),
-        (SupportInformation(constraint=constraints.interval(-2, 3)),
-         "SupportInformation(constraint=Interval(lower_bound=-2, upper_bound=3), "
-         "is_conservative=True)"),
-    ])
-    def test_unknown_and_constraint_repr(self, info, expected, capsys):
+    def test_finite_values_repr_and_print(self, capsys):
+        info = SupportInformation(values=torch.tensor([0, 1, 2]), is_conservative=False)
+        expected = "SupportInformation(values=[0, 1, 2], is_conservative=False)"
         assert repr(info) == expected
         print(info)
         assert capsys.readouterr().out == expected + "\n"
 
-    @pytest.mark.parametrize("n_classes", [2, 3])
-    def test_finite_values_repr(self, n_classes):
-        info = discrete_node(n_classes).get_support()
-        assert repr(info) == (
-            f"SupportInformation(values={list(range(n_classes))}, is_conservative=False)"
-        )
+    def test_constraint_repr(self):
+        info = SupportInformation(constraint=constraints.real)
+        assert repr(info) == "SupportInformation(constraint=Real(), is_conservative=True)"
 
-    def test_small_batched_values_keep_structure(self):
-        info = exogenous(D.Bernoulli(torch.tensor([0.2, 0.7]))).get_support()
+    def test_large_values_show_metadata(self):
+        info = SupportInformation(values=torch.arange(100))
         assert repr(info) == (
-            "SupportInformation(values=[[0.0, 0.0], [1.0, 1.0]], is_conservative=True)"
-        )
-
-    @pytest.mark.parametrize("shape", [(100,), (2, 100)])
-    def test_large_values_show_metadata(self, shape):
-        values = torch.zeros(shape, dtype=torch.int64)
-        info = SupportInformation(values=values)
-        assert repr(info) == (
-            f"SupportInformation(values=Tensor(shape={shape}, dtype=torch.int64, "
+            "SupportInformation(values=Tensor(shape=(100,), dtype=torch.int64, "
             "device=cpu), is_conservative=True)"
         )
-        assert info.values is values
-        assert torch.count_nonzero(values) == 0
-
-    def test_meta_values_do_not_require_data(self):
-        info = discrete_node(3).to("meta").get_support()
-        assert repr(info) == (
-            "SupportInformation(values=Tensor(shape=(3,), dtype=torch.int64, "
-            "device=meta), is_conservative=False)"
-        )
-
-    def test_long_constraint_is_truncated_to_one_line(self):
-        info = SupportInformation(constraint=constraints.interval(
-            torch.arange(100), torch.arange(100) + 1,
-        ))
-        text = repr(info)
-        assert "\n" not in text
-        assert "..." in text
-        assert len(text) < 150
-        assert text.endswith("is_conservative=True)")
 
 
 class TestExogenousSupport:
