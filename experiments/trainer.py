@@ -10,6 +10,7 @@ import logging
 import torch
 
 from sem2.dataloader import DummyDiscreteDataloader
+from sem2.data import NamedBatch
 from sem2.default_configs import TrainingConfig, MLPConfig
 from sem2.model import SEM2Discrete
 from sem2.operators.scalar_operators import EnergyLoss, ATE
@@ -48,10 +49,11 @@ def main():
     print("ATE after four demonstration updates (not converged):", effect.item())
 
     outcome = PotentialOutcome(model, "Y", variables=batch.variables)
+    intervention = NamedBatch(torch.ones(cfg.sample_bs, 1), batch.subset("X").variables)
     result, extra = outcome.evaluate(
-        batch_size=cfg.sample_bs, set_nodes={"X": torch.ones(cfg.sample_bs, 1)},
+        batch_size=cfg.sample_bs, set_nodes=intervention,
     )
-    print("Intervention:", tuple(extra["set_nodes"]))
+    print("Intervention:", extra["set_nodes"].names)
     print("Outcome metadata:", result.states.variables)
     print("Named outcome states:\n", result.states.values)
     print("Probability axes [exogenous draws, states]:", tuple(result.probabilities.shape))

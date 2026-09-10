@@ -5,10 +5,10 @@ import torch
 from sem2.data import NamedBatch, VariableInfo, FiniteDistribution
 from sem2.dataloader import DummyDiscreteDataloader
 from sem2.default_configs import LinearNodeConfig, MLPConfig, TrainingConfig
-from sem2.model import SEM2Linear, SEM2Discrete
+from sem2.model import SEM2, SEM2Linear, SEM2Discrete
 from sem2.operators.linear import LogLikelihood, WeightedFrobeniusDistance
 from sem2.operators.discrete_energy_loss import DiscreteEnergyLoss
-from sem2.operators.scalar_operators import EnergyLoss, MeanPotentialOutcome, ATE
+from sem2.operators.scalar_operators import EnergyLoss, MeanPotentialOutcome, ATE, SEM2Loss
 from sem2.operators.vector_operators import PotentialOutcome
 from sem2.sem2trainer import SEM2Trainer
 
@@ -72,9 +72,11 @@ def test_linear_operators_align_named_batches_and_preserve_gradients(operator):
     data = torch.tensor([[0., 1.], [1., 3.], [2., 4.], [-1., -3.]])
     batch = named(data, "x", "y")
     op = operator(model, ["x", "y"])
-    expected, _ = op.evaluate(data)
+    expected, _ = op.evaluate(batch)
     actual, _ = op.evaluate(batch.subset("y", "x"))
     torch.testing.assert_close(actual, expected)
+    with pytest.raises(TypeError, match="NamedBatch"):
+        op.evaluate(data)
     actual.backward()
     assert any(p.grad is not None and torch.isfinite(p.grad).all() for p in model.parameters())
 
@@ -87,7 +89,7 @@ def test_continuous_energy_aligns_names_with_unequal_sample_counts():
     actual, _ = op.evaluate(batch.subset("y", "x"))
     torch.manual_seed(17)
     samples, _ = model.sample(batch_size=5)
-    preds = torch.cat([samples[n] for n in batch.names], dim=1)
+    preds = samples.select(*batch.names)
     pair = torch.cdist(preds, preds)
     expected = torch.cdist(batch.values, preds).mean() - pair.sum() / (2 * 5 * 4)
     torch.testing.assert_close(actual, expected)
@@ -109,32 +111,46 @@ def test_finite_distribution_marginal_keeps_states_and_probabilities_aligned():
 def test_discrete_kernel_aligns_named_observations_and_uses_each_sample_count():
     states = named([[0, 0], [0, 1], [1, 0], [1, 1]], "x", "y")
     observations = named([[0, 0], [0, 1], [1, 1], [0, 1]], "x", "y")
-    logits = torch.randn(1, 3, 4, requires_grad=True)
+    logits = torch.randn(3, 4, requires_grad=True)
     p = logits.softmax(-1)
-    kernel = DiscreteEnergyLoss(1., states, "cpu")
-    actual, _ = kernel.energy_dist(p, x_true=observations.subset("y", "x"))
+    kernel = DiscreteEnergyLoss(1.)
+    predicted = FiniteDistribution(states, p)
+    actual, _ = kernel.energy_dist(observations.subset("y", "x"), predicted)
     distance = torch.cdist(states.values.float(), states.values.float())
     idx = torch.tensor([0, 1, 3, 1])
-    cross = (p[0] @ distance[:, idx]).mean()
-    pp = p[0] @ distance @ p[0].T
+    cross = (p @ distance[:, idx]).mean()
+    pp = p @ distance @ p.T
     tt = distance[idx][:, idx]
     expected = cross - (pp.sum() - pp.diag().sum()) / (2 * 3 * 2) - tt.sum() / (2 * 4 * 3)
     torch.testing.assert_close(actual, expected)
+    score, _ = kernel.energy_score(observations, predicted)
+    torch.testing.assert_close(score, cross - (pp.sum() - pp.diag().sum()) / (2 * 3 * 2))
+    order = [2, 0, 3, 1]
+    reordered = FiniteDistribution(states.rows(order).subset("y", "x"), p[:, order])
+    equivalent, _ = kernel.energy_dist(observations, reordered)
+    torch.testing.assert_close(equivalent, actual)
+    with pytest.raises(TypeError, match="FiniteDistribution"):
+        kernel.energy_dist(observations, p)
+    with pytest.raises(TypeError, match="NamedBatch"):
+        kernel.energy_dist(observations.values, predicted)
     actual.backward()
     assert torch.isfinite(logits.grad).all()
 
 
 @pytest.mark.parametrize("invalid", [0.5, 3.])
 def test_discrete_kernel_rejects_invalid_values_before_integer_coercion(invalid):
-    kernel = DiscreteEnergyLoss(1., named([[0], [1]], "y"), "cpu")
+    kernel = DiscreteEnergyLoss(1.)
+    predicted = FiniteDistribution(named([[0], [1]], "y"), torch.full((2, 2), .5))
     with pytest.raises(ValueError, match="state"):
-        kernel.energy_dist(torch.full((1, 2, 2), .5), x_true=named([[0.], [invalid]], "y"))
+        kernel.energy_dist(named([[0.], [invalid]], "y"), predicted)
     # The intervention adapter must reject the same values before the discrete
     # sampler's internal integer conversion, too.
     with pytest.raises(ValueError, match="state"):
         PotentialOutcome(discrete_model(), "Y").evaluate(
             batch_size=2, set_nodes=named([[0.], [invalid]], "X"),
         )
+    with pytest.raises(ValueError, match="state"):
+        discrete_model().sample(batch_size=2, set_nodes=named([[0.], [invalid]], "X"))
 
 
 def test_named_discrete_loss_is_invariant_to_column_order_and_node_renaming():
@@ -173,7 +189,8 @@ def test_potential_outcomes_return_named_samples_or_named_distributions():
     result, extra = PotentialOutcome(linear, "y").evaluate(batch_size=2, set_nodes=intervention)
     assert isinstance(result, NamedBatch)
     assert result.names == ("y",)
-    torch.testing.assert_close(extra["set_nodes"]["x"], intervention.values)
+    assert isinstance(extra["set_nodes"], NamedBatch)
+    torch.testing.assert_close(extra["set_nodes"].select("x"), intervention.values)
     cfg = TrainingConfig(device="cpu", sample_bs=4)
     torch.random.set_rng_state(rng)
     continuous_mean, _ = MeanPotentialOutcome("y", "x", cfg, linear).evaluate(intervention)
@@ -189,11 +206,61 @@ def test_potential_outcomes_return_named_samples_or_named_distributions():
     assert isinstance(result, FiniteDistribution)
     assert result.states.variables[0] is batch.variables[2]
     torch.testing.assert_close(result.probabilities.sum(-1), torch.ones(4))
-    mean, _ = MeanPotentialOutcome("Y", "X", cfg, model).evaluate(torch.ones(4, 1))
+    mean, _ = MeanPotentialOutcome("Y", "X", cfg, model).evaluate(named(torch.ones(4, 1), "X"))
     torch.testing.assert_close(mean, result.probabilities.mean(0) @ result.states.select("Y").flatten().float())
     effect, _ = ATE(cfg, model).evaluate()
     effect.backward()
     assert torch.isfinite(effect)
+
+
+@pytest.mark.parametrize("factory, intervention_name, outcome_name", [
+    (linear_model, "x", "y"), (discrete_model, "X", "Y"),
+])
+def test_sampling_and_queries_require_named_interventions(factory, intervention_name, outcome_name):
+    model = factory()
+    data = named(torch.ones(2, 1), intervention_name)
+    result, extra = model.sample(batch_size=2, set_nodes=data)
+    assert isinstance(extra["set_nodes"], NamedBatch)
+    assert extra["set_nodes"].variables is data.variables
+    if isinstance(result, FiniteDistribution):
+        assert result.states.names == tuple(model.state_node_names)
+        assert result.probabilities.shape == (2, len(result.states))
+        torch.testing.assert_close(result.probabilities.sum(-1), torch.ones(2))
+    else:
+        assert isinstance(result, NamedBatch)
+        assert result.names == tuple(model.topological_order)
+        torch.testing.assert_close(result.select(intervention_name), data.values)
+    with pytest.raises(TypeError, match="NamedBatch"):
+        model.sample(batch_size=2, set_nodes={intervention_name: data.values})
+    with pytest.raises(TypeError, match="NamedBatch"):
+        PotentialOutcome(model, outcome_name).evaluate(batch_size=2, set_nodes={intervention_name: data.values})
+    cfg = TrainingConfig(device="cpu", sample_bs=2)
+    with pytest.raises(TypeError, match="NamedBatch"):
+        MeanPotentialOutcome(outcome_name, intervention_name, cfg, model).evaluate(data.values)
+
+
+def test_vector_variables_keep_their_blocks_through_sampling_and_queries():
+    model = SEM2("u ~ Normal(0,1); y <- n(u)",
+                 node_cfgs={"u": 2, "y": MLPConfig(hidden_dims=[4], output_dim=3)})
+    intervention = NamedBatch(torch.zeros(3, 2), (VariableInfo("u", width=2),))
+    result, _ = model.sample(batch_size=3, set_nodes=intervention)
+    assert result.values.shape == (3, 5)
+    reordered = result.subset("y", "u").to(dtype=torch.float64).rows(0)
+    assert tuple(v.width for v in reordered.variables) == (3, 2)
+    torch.testing.assert_close(reordered.select("u"), torch.zeros(1, 2, dtype=torch.float64))
+    query, _ = PotentialOutcome(model, "y").evaluate(batch_size=3, set_nodes=intervention)
+    assert query.variables[0].width == 3
+    torch.testing.assert_close(query.values, result.select("y"))
+    query.values.sum().backward()
+    assert all(p.grad is not None for p in model.parameters())
+    with pytest.raises(ValueError, match="scalar"):
+        MeanPotentialOutcome("y", "u", TrainingConfig(device="cpu"), model)
+
+
+def test_model_only_objective_does_not_bypass_the_named_data_contract():
+    cfg = TrainingConfig(device="cpu", sample_bs=2, use_energy_score=False, use_ate=True)
+    with pytest.raises(TypeError, match="NamedBatch"):
+        SEM2Loss(cfg, discrete_model()).evaluate(torch.zeros(2, 3))
 
 
 def test_dummy_loader_trains_with_optional_ate_disabled():
