@@ -1,11 +1,14 @@
 import torch
 import torch.nn.functional as F
+from ..data import NamedBatch
 
 class DiscreteEnergyLoss:
-    def __init__(self, p: float, states: torch.Tensor, device, unbiased=True):
+    def __init__(self, p: float, states: torch.Tensor | NamedBatch, device, unbiased=True):
         """
         p: norm power
-        states: tensor of shape [num_states, state_dim] containing all possible states
+        states: NamedBatch or tensor [num_states, state_dim] of possible states.
+                Named observations are aligned to the named states; raw tensors
+                retain the existing explicitly ordered numerical-kernel API.
                 Example binary state: tensor([[0, 0],
                         [0, 1],
                         [1, 0],
@@ -13,12 +16,15 @@ class DiscreteEnergyLoss:
         unbiased: whether to use unbiased estimator for finite sample size correction. Unbiased can be negative.
         """
         self.unbiased = unbiased
+        self.state_names = states.names if isinstance(states, NamedBatch) else None
+        if isinstance(states, NamedBatch):
+            states = states.values
         self.states = states.to(device)
         self.num_states = states.shape[0]
 
         # Dynamically generate distance matrix D_mat
         # D_mat[i,j] = ||states[i] - states[j]||^p
-        self.D_mat = self._compute_distance_matrix(states, p, device)
+        self.D_mat = self._compute_distance_matrix(self.states, p, device)
 
     def _compute_distance_matrix(self, states, p, device):
         """Compute pairwise distance matrix between states."""
@@ -42,11 +48,18 @@ class DiscreteEnergyLoss:
                    where num_states = self.states.shape[0]
         """
         # Get dimensions
+        if isinstance(input_tensor, NamedBatch):
+            if self.state_names is None:
+                raise ValueError("Named observations require named states for alignment.")
+            input_tensor = input_tensor.select(*self.state_names).unsqueeze(0)
+        if input_tensor.ndim != 3 or input_tensor.shape[-1] != self.states.shape[-1]:
+            raise ValueError("Observations must have shape [bs, n_samples, state_dim].")
+        input_tensor = input_tensor.to(self.states.device)
         bs, n_samples, n_nodes = input_tensor.shape
         num_states = self.states.shape[0]
 
         # Flatten input for easier comparison
-        input_flat = input_tensor.view(-1, n_nodes)  # [bs*n_samples, n_nodes]
+        input_flat = input_tensor.reshape(-1, n_nodes)  # [bs*n_samples, n_nodes]
 
         # Vectorized comparison: find matching indices in self.states
         # Expand dimensions for broadcasting: input_flat [bs*n_samples, 1, n_nodes], states [1, num_states, n_nodes]
@@ -55,6 +68,8 @@ class DiscreteEnergyLoss:
 
         # Find exact matches for each configuration
         matches = (input_expanded == states_expanded).all(dim=2)  # [bs*n_samples, num_states]
+        if not (matches.sum(dim=1) == 1).all():
+            raise ValueError("Every observation must match exactly one declared state; invalid values are not coerced.")
 
         # Get the index of the matching state for each input configuration
         indices = torch.argmax(matches.float(), dim=1)  # [bs*n_samples]
@@ -72,18 +87,21 @@ class DiscreteEnergyLoss:
 
         Args:
             p_hat: [bs, n_samples, n_states]
-            x_true: [bs, n_samples, n_nodes] (optional, used if p_true_mean not given)
+            x_true: NamedBatch or [bs, n_samples, n_nodes] (optional)
             p_true_mean: [bs, n_states] (optional, precomputed)
         Returns:
             (pred_err, pair_pred_dist, p_true_mean, p_true)
                 p_true is None if p_true_mean was precomputed.
         """
         bs, n_samples, dim = p_hat.shape
+        if n_samples == 0 or (self.unbiased and n_samples < 2):
+            raise ValueError("Unbiased energy fitting needs at least two model samples.")
+        self.D_mat = self.D_mat.to(p_hat)
         precomputed = p_true_mean is not None
         p_true = None
 
         if not precomputed:
-            p_true = self.idx_to_onehot(x_true.long())
+            p_true = self.idx_to_onehot(x_true).to(p_hat)
             p_true_mean = p_true.mean(dim=1)
 
         p_hat_mean = p_hat.mean(dim=1)
@@ -141,7 +159,9 @@ class DiscreteEnergyLoss:
         pair_true_dist = (prob_mat * self.D_mat.unsqueeze(0)).mean(dim=0).sum()
 
         if self.unbiased and p_true is not None:
-            n_samples = p_hat.shape[1]
+            n_samples = p_true.shape[1]
+            if n_samples < 2:
+                raise ValueError("Unbiased energy distance needs at least two observations.")
             n_tot, n_corr = n_samples / (n_samples - 1), 1 / (n_samples * (n_samples - 1))
             correct_pred = torch.einsum("bni,ij,bnj->bn", p_true, self.D_mat, p_true)
             correct_pred = correct_pred.mean(dim=0).sum()

@@ -12,6 +12,7 @@ import torch
 from .operators_base import OperatorInput, OperatorOutput, SEM2Operator
 from ..model.construction import SEMType
 from ..model.models import SEM2Linear
+from ..data import NamedBatch
 
 
 class SEM2LinearModelOperator(SEM2Operator):
@@ -143,13 +144,16 @@ class LogLikelihood(SEM2LinearModelOperator):
             )
         return loc
 
-    def evaluate(self, observations: torch.Tensor, **kwargs) -> tuple[torch.Tensor, dict]:
+    def evaluate(self, observations: torch.Tensor | NamedBatch, **kwargs) -> tuple[torch.Tensor, dict]:
         """
         Args:
-            observations: [n, p] data, columns aligned to observed_vars.
+            observations: NamedBatch (aligned by name), or legacy [n, p] tensor
+                whose columns the caller explicitly aligns to observed_vars.
         Returns:
             (mean_log_likelihood, metrics)
         """
+        if isinstance(observations, NamedBatch):
+            observations = observations.select(*self.observed_vars)
         x = observations.to(self.device)
         _check_observation_shape(x, len(self.observed_vars), type(self).__name__)
 
@@ -202,13 +206,16 @@ class WeightedFrobeniusDistance(SEM2LinearModelOperator):
         super().__init__(model, observed_vars)
         self.weight = weight
 
-    def evaluate(self, observations: torch.Tensor, **kwargs) -> tuple[torch.Tensor, dict]:
+    def evaluate(self, observations: torch.Tensor | NamedBatch, **kwargs) -> tuple[torch.Tensor, dict]:
         """
         Args:
-            observations: [n, p] data, columns aligned to observed_vars.
+            observations: NamedBatch (aligned by name), or legacy [n, p] tensor
+                whose columns the caller explicitly aligns to observed_vars.
         Returns:
             (weighted_frobenius_distance, metrics)
         """
+        if isinstance(observations, NamedBatch):
+            observations = observations.select(*self.observed_vars)
         x = observations.to(self.device)
         _check_observation_shape(x, len(self.observed_vars), type(self).__name__)
         sample_cov = torch.cov(x.T)                              # [p, p]
