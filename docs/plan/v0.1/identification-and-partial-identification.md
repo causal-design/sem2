@@ -9,11 +9,17 @@ the historical records remain unchanged.
 before merging this plan. This is a Slack ID, not a verified GitHub username.
 Implementation and default-branch integration remain separate human decisions.
 
-**Only unresolved decision in this topic: IV extrapolation is undecided and
-blocked because its current implementation is absent from the inspected
-repository state.** Review Max's implementation before choosing the integration,
-extrapolation procedure, or initialization/warm-start policy. Do not assume the
-code must be written from scratch or silently choose a minimum number of starts.
+**Only unresolved topic: the detailed rules for automatic regression-window
+selection.** Approach 2 (exhaustive contiguous-window selection) is selected for
+v0.1. Its scoring, tolerance, ranking, and edge-case defaults await team discussion;
+the [selector review](automatic-regression-selection.md) records the exact current
+code behavior and a concrete recommended specification for that discussion.
+
+The extrapolation code is now available and has been inspected. Integration,
+fresh-start default with an explicit warm-start option, user-supplied penalties,
+and the general warning/unavailable policy are settled. This update replaces the
+earlier handoff's missing-code blocker; it does not reopen those decisions.[3]
+Implementation is paused pending a fresh request after team discussion.
 
 ## Graphical identification and numerical searches
 
@@ -134,38 +140,96 @@ assumptions and settings, not automatically as certified causal bounds or
 confidence intervals. Do not attach a fictitious fitted distribution to an
 extrapolated endpoint. No automatic good-fit threshold is selected here.
 
-## Blocked IV extrapolation and implementation handoff
+## Settled extrapolation integration
 
-The repository recheck found a fixed-weight IV training example, not an
-extrapolation runner.[1] The observational-plus-estimand loss composition is
-already present as a building block.[2] The recheck covered remote `main` at
-`75d370c`, the node-support checkout at `d9897a0`, notebook source cells,
-experiments, tests, and the two then-open PRs (#50 and #52). No penalty-setting
-sweep with endpoint extrapolation was located. This observation does not rule
-out an implementation in Max's local work, a fork, or another unreviewed branch.
+The supplied `estimate_ate_bound` branch contains
+`experiments/est_ate_bound.py`. Its current regression selector is an experimental
+building block, not the native v0.1 interface or the selected replacement
+algorithm.[1] Preserve the relevant computation while integrating it into the
+package architecture; do not copy the CSV-driven demo into the public workflow.
 
-The absence of the current implementation blocks review of **IV extrapolation**
-and its **initialization/warm-start policy**. Obtain the exact branch, file, or PR
-and inspect it before settling those choices. Do not invent a penalty schedule,
-extrapolation model, or minimum restart count. Extensive multistart/continuation
-machinery remains outside v0.1's agreed scope.
+### Two stages and native results
 
-Bounded implementation work can proceed on the settled parts after review:
+1. Run the explicitly requested query-specific training sweep through the
+   canonical fitting machinery. For every supplied penalty, retain the signed
+   penalty, ATE estimate, observational fitting discrepancy, total objective,
+   initialization information, and available training/failure diagnostics.
+2. Pass the resulting native, in-memory records to a separate postprocessor.
+   It selects a regression window on each sign side and estimates the zero
+   intercept. Postprocessing must not train models or generate additional points.
 
-1. Add the single-margin projection/ID check, its small result contract, and a
-   few reviewed identifiable, nonidentified, and unsupported-input cases.
-2. Correct IV-specific names/supports, selectable contrasts, categorical
-   provenance, state validation, and strict count checks. Reuse shared data
-   preparation and the canonical trainer rather than adding another fit loop.
+Use package-wide model/data/result conventions. CSV is an independent
+serialization option, not the exchange format between these stages. There is no
+requirement to support legacy result CSVs, fixed column layouts, or compatibility
+adapters. Public symbol names and field spellings are ordinary implementation
+choices within this contract, not additional unsettled product decisions.
+
+### Penalties and initialization
+
+- The user supplies all penalty points. Do not generate a grid, extend a range,
+  run an adaptive sweep, or introduce an active point-guidance interface.
+- Fit ATE against the **signed penalty**, not log penalty, and extrapolate to
+  penalty zero. Positive penalties favor smaller ATEs and supply the lower-end
+  search; negative penalties favor larger ATEs and supply the upper-end search.
+  Keep the two regressions separate.
+- Document the actual penalty points/ranges used by worked examples. They are
+  setup-specific examples, not a universal range recommendation or a default
+  grid.
+- **Fresh start is the default. Warm start remains an explicit option in v0.1.**
+  Both modes must be available. Fresh starts reset the trainable state for each
+  point rather than carrying over the preceding fit; warm starts reuse a preceding
+  fit within a sweep. Record the actual run order and initialization behavior so
+  results are interpretable. Do not silently drop a mode or add an extensive
+  multistart requirement.
+- No resumability, resume API, stop/continue prompt, or fit-only-new-points
+  workflow is required. This does not prevent calling a pure postprocessor on
+  an existing in-memory result; it must not imply resuming training.
+
+### Selection family and result interpretation
+
+Use **approach 2: exhaustive contiguous-window selection** for v0.1. It searches
+possible approximately linear regions rather than assuming that an extreme-end
+core is reliable. Among adequately supported, comparably good candidates, prefer
+proximity to zero. Do not revive inward growth from an arbitrary trusted core
+(approach 1), or require robust/consensus fitting (approach 3) as another v0.1
+implementation or comparison.
+
+A computable but unreliable endpoint is returned with a warning. An endpoint
+that cannot be computed is unavailable; do not invent a number. The detailed
+fallback ranking, selector metadata, and warning criteria belong to the one
+remaining selector discussion, not a reopening of this failure policy.
+
+An apparently linear window and a stable intercept are diagnostics, not a
+certificate of causal validity, sharpness, or global optimization. Retain the
+observational fit diagnostics for the underlying runs; the extrapolated endpoint
+does not itself correspond to a newly fitted distribution.
+
+## Implementation and review checklist
+
+After team discussion and a fresh implementation request:
+
+1. Add the single-margin projection/ID check and a few identifiable,
+   nonidentified, and unsupported-input cases.
+2. Generalize IV names/supports and contrasts; preserve categorical provenance;
+   validate states and strict instrument counts. Reuse shared data preparation
+   and the canonical trainer.
 3. Add the small binary/non-binary reference collection and both fit summaries.
-   Include essential regressions for a ternary treatment contrast, a category
-   encoding that must not bypass the outcome warning, and absent/singleton
-   instrument levels. Numerical quality stays a manual review item.
-4. Keep extrapolation marked blocked/undecided until its code can be reviewed.
-   Implementation PRs must report real test output. This documentation PR does
-   not establish new fitting, gradient, numerical-bound, or runtime ID behavior.
+   Include a ternary treatment contrast, categorical-outcome warning, and
+   absent/singleton instrument-level checks. Numerical bound-recovery quality
+   remains a manual review item.
+4. Connect the native sweep and postprocessor with both initialization modes,
+   fresh start by default, and only user-supplied penalties.
+5. Implement the selector only after resolving the recommendations in the
+   [automatic regression-selection review](automatic-regression-selection.md).
+   Verify selected points as well as intercepts using a small set of clean,
+   bent-end, flat, and weak-input cases.
+
+This PR records the plan and source audit only. The unchanged experimental
+postprocessor was exercised on synthetic numeric inputs for the companion
+review. No new selector, SEM2 training, gradient check, package-wide test run,
+merge, or deployment is claimed.
 
 ## Sources
 
-[1] [IV training example at the inspected revision](https://github.com/causal-design/sem2/blob/d9897a0d334a647a62c90685220470db13ca5330/experiments/trainer.py)
-[2] [SEM2Loss composition at the inspected revision](https://github.com/causal-design/sem2/blob/d9897a0d334a647a62c90685220470db13ca5330/sem2/operators/scalar_operators.py)
+[1] [Inspected estimate_ate_bound branch source: experiments/est_ate_bound.py](https://github.com/causal-design/sem2/blob/6143748181bcf6abbaf8d2cfe88c3ac323d3758a/experiments/est_ate_bound.py)
+[3] [Earlier identification handoff (PR #53)](https://github.com/causal-design/sem2/pull/53)
