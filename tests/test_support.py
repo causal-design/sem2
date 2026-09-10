@@ -8,7 +8,7 @@ import torch.distributions as D
 from sem2.default_configs import LinearNodeConfig, MLPConfig
 from sem2.model import SEM2Discrete
 from sem2.model.components import (
-    SupportInformation, RandomVariable, NodeExogenous,
+    RandomVariableSupport, RandomVariable, NodeExogenous,
     NodeLinear, NodeMLP, NodeMLPDiscrete, DiscreteModes,
 )
 
@@ -24,40 +24,45 @@ def discrete_node(n_classes):
     )
 
 
-class TestSupportInformation:
+class TestRandomVariableSupport:
     def test_unknown_defaults(self):
-        info = SupportInformation()
+        info = RandomVariableSupport()
         assert info.constraint is None
         assert info.values is None
-        assert info.is_conservative
+        assert set(vars(info)) == {"constraint", "values"}
 
-    def test_custom_variable_can_report_unknown_support(self):
+    def test_custom_variable_inherits_support(self):
         class CustomVariable(RandomVariable):
             pass
 
-        info = CustomVariable().get_support()
+        variable = CustomVariable()
+        info = variable.support
         assert info.constraint is None
         assert info.values is None
-        assert info.is_conservative
+
+        variable.dist = D.Categorical(probs=torch.tensor([0.2, 0.8]))
+        info = variable.support
+        assert info.values.tolist() == [0, 1]
+        assert info.constraint.check(info.values).all()
 
 
 class TestSupportRepr:
     def test_finite_values_repr_and_print(self, capsys):
-        info = SupportInformation(values=torch.tensor([0, 1, 2]), is_conservative=False)
-        expected = "SupportInformation(values=[0, 1, 2], is_conservative=False)"
+        info = RandomVariableSupport(values=torch.tensor([0, 1, 2]))
+        expected = "RandomVariableSupport(values=[0, 1, 2])"
         assert repr(info) == expected
         print(info)
         assert capsys.readouterr().out == expected + "\n"
 
     def test_constraint_repr(self):
-        info = SupportInformation(constraint=constraints.real)
-        assert repr(info) == "SupportInformation(constraint=Real(), is_conservative=True)"
+        info = RandomVariableSupport(constraint=constraints.real)
+        assert repr(info) == "RandomVariableSupport(constraint=Real())"
 
     def test_large_values_show_metadata(self):
-        info = SupportInformation(values=torch.arange(100))
+        info = RandomVariableSupport(values=torch.arange(100))
         assert repr(info) == (
-            "SupportInformation(values=Tensor(shape=(100,), dtype=torch.int64, "
-            "device=cpu), is_conservative=True)"
+            "RandomVariableSupport(values=Tensor(shape=(100,), dtype=torch.int64, "
+            "device=cpu))"
         )
 
 
@@ -69,13 +74,12 @@ class TestExogenousSupport:
         (D.Poisson(2), [-1.0, 0.0, 1.5, 2.0], [False, True, False, True]),
     ])
     def test_uses_distribution_constraint(self, dist, values, expected):
-        info = exogenous(dist).get_support()
-        assert isinstance(info, SupportInformation)
+        info = exogenous(dist).support
+        assert isinstance(info, RandomVariableSupport)
         torch.testing.assert_close(
             info.constraint.check(torch.tensor(values)), torch.tensor(expected),
         )
         assert info.values is None
-        assert info.is_conservative  # Backend domains are not certified exact supports.
 
     @pytest.mark.parametrize("dist, expected", [
         (D.Bernoulli(0.3), [0, 1]),
@@ -83,43 +87,39 @@ class TestExogenousSupport:
         (D.Binomial(total_count=3, probs=0.5), [0, 1, 2, 3]),
     ])
     def test_finite_values(self, dist, expected):
-        info = exogenous(dist).get_support()
+        info = exogenous(dist).support
         assert info.values.tolist() == expected
         assert info.constraint.check(info.values).all()
         assert info.values.device == dist.enumerate_support().device
 
-    def test_zero_probability_categories_are_conservative(self):
+    def test_declared_domain_keeps_zero_probability_categories(self):
         dist = D.Categorical(probs=torch.tensor([1.0, 0.0, 0.0]))
-        info = exogenous(dist).get_support()
+        info = exogenous(dist).support
         assert info.values.tolist() == [0, 1, 2]
-        assert info.is_conservative
 
     def test_keeps_native_enumeration_shape(self):
         dist = D.Bernoulli(torch.tensor([0.2, 0.7]))
-        info = exogenous(dist).get_support()
+        info = exogenous(dist).support
         assert info.values.shape == (2, 2)
         torch.testing.assert_close(info.values, dist.enumerate_support())
 
     def test_unsupported_enumeration_keeps_constraint(self):
         dist = D.Binomial(total_count=torch.tensor([1.0, 2.0]), probs=0.5)
-        info = exogenous(dist).get_support()
+        info = exogenous(dist).support
         assert info.values is None  # Finite, but PyTorch cannot enumerate this batch.
         assert info.constraint.check(torch.tensor([1.0, 2.0])).all()
-        assert info.is_conservative
 
     def test_unavailable_distribution_support(self):
-        info = exogenous(D.Distribution(validate_args=False)).get_support()
+        info = exogenous(D.Distribution(validate_args=False)).support
         assert info.constraint is None
         assert info.values is None
-        assert info.is_conservative
 
 
 class TestEndogenousSupport:
     @pytest.mark.parametrize("n_classes", [2, 3])
     def test_discrete_indices_and_membership(self, n_classes):
-        info = discrete_node(n_classes).get_support()
+        info = discrete_node(n_classes).support
         torch.testing.assert_close(info.values, torch.arange(n_classes))
-        assert not info.is_conservative
         torch.testing.assert_close(
             info.constraint.check(torch.tensor([-1.0, 0.0, 0.5, float(n_classes)])),
             torch.tensor([False, True, False, False]),
@@ -130,7 +130,7 @@ class TestEndogenousSupport:
         probs = node([torch.zeros(4, 1)], mode=DiscreteModes.SOFTMAX)
         rng = torch.random.get_rng_state().clone()
         state = {name: value.clone() for name, value in node.state_dict().items()}
-        info = node.get_support()
+        info = node.support
         assert info.values.shape == (3,)  # Category values, not a probability vector.
         assert node.get_value() is probs
         torch.testing.assert_close(torch.random.get_rng_state(), rng)
@@ -140,10 +140,10 @@ class TestEndogenousSupport:
 
     def test_discrete_values_follow_parameter_device(self):
         node = discrete_node(3).to("meta")
-        assert node.get_support().values.device.type == "meta"
+        assert node.support.values.device.type == "meta"
 
     @pytest.mark.parametrize("kind", ["linear", "mlp"])
-    def test_real_domain_is_only_a_conservative_bound(self, kind):
+    def test_real_domain_does_not_claim_exact_attainable_support(self, kind):
         parent = exogenous(D.Bernoulli(0.5))
         if kind == "linear":
             node = NodeLinear(
@@ -154,10 +154,9 @@ class TestEndogenousSupport:
                 "y", "n(u)", MLPConfig(hidden_dims=[4], activation="sigmoid"),
                 [parent],
             )
-        info = node.get_support()
+        info = node.support
         assert info.constraint is constraints.real
         assert info.values is None
-        assert info.is_conservative
         assert info.constraint.check(torch.tensor([-2.0, 2.0])).all()
 
     def test_model_exposes_support_before_sampling(self):
@@ -166,9 +165,9 @@ class TestEndogenousSupport:
             node_cfgs={"y": MLPConfig(hidden_dims=[4], output_dim=3)},
         )
         for node in model.node_dict.values():
-            assert isinstance(node.get_support(), SupportInformation)
+            assert isinstance(node.support, RandomVariableSupport)
             assert node.get_value() is None
-        info = model.node_dict["y"].get_support()
+        info = model.node_dict["y"].support
         probs, extra = model.sample(batch_size=4)
         assert torch.equal(extra["states"][:, 0], info.values)
         torch.testing.assert_close(probs.sum(dim=1), torch.ones(4))
