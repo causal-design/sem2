@@ -1,7 +1,7 @@
 """Small internal data records shared by loaders and operators.
 
 These are not a replacement for the planned DataFrame preparation layer. Each
-column currently represents one scalar variable. Metadata describes the stored
+variable occupies a contiguous block of columns. Metadata describes the stored
 representation, not the random variable's attainable support. Treat shared
 encodings as read-only; encoding category IDs does not assign numerical scores.
 """
@@ -27,30 +27,39 @@ class VariableInfo:
     categorical: bool | None = None
     discrete: bool | None = None
     encoding: Mapping[object, int] | None = None
+    width: int = 1
+
+    def __post_init__(self):
+        if not isinstance(self.width, int) or self.width < 1:
+            raise ValueError("Variable width must be a positive integer.")
 
 
 @dataclass(frozen=True)
 class NamedBatch:
-    """A [rows, variables] tensor and shared column metadata.
+    """A [rows, total width] tensor and shared variable metadata.
 
     ``select`` explicitly unwraps ordered columns for numerical kernels;
     ``subset`` retains their metadata. Tensor operations preserve autograd.
     """
     values: Tensor
     variables: tuple[VariableInfo, ...]
-    _index: dict[str, int] = field(init=False, repr=False, compare=False)
+    _index: dict[str, slice] = field(init=False, repr=False, compare=False)
 
     def __post_init__(self):
         variables = tuple(self.variables)
         object.__setattr__(self, "variables", variables)
         if not isinstance(self.values, Tensor) or self.values.ndim != 2:
-            raise ValueError("NamedBatch values must be a tensor with shape [rows, variables].")
-        if self.values.shape[1] != len(variables):
-            raise ValueError("Tensor width must match the number of named variables (scalar columns only).")
+            raise ValueError("NamedBatch values must be a tensor with shape [rows, total width].")
+        if self.values.shape[1] != sum(v.width for v in variables):
+            raise ValueError("Tensor width must match the sum of named variable widths.")
         names = tuple(v.name for v in variables)
         if any(not isinstance(n, str) or not n for n in names) or len(set(names)) != len(names):
             raise ValueError("Variable names must be nonempty, unique strings.")
-        object.__setattr__(self, "_index", {name: i for i, name in enumerate(names)})
+        index, start = {}, 0
+        for variable in variables:
+            index[variable.name] = slice(start, start + variable.width)
+            start += variable.width
+        object.__setattr__(self, "_index", index)
 
     @property
     def names(self) -> tuple[str, ...]:
@@ -63,11 +72,14 @@ class NamedBatch:
         missing = [name for name in names if name not in self._index]
         if missing:
             raise ValueError(f"Named batch is missing variables: {missing}")
-        return self.values[:, [self._index[name] for name in names]]
+        if not names:
+            return self.values[:, :0]
+        return torch.cat([self.values[:, self._index[name]] for name in names], dim=1)
 
     def subset(self, *names: str) -> NamedBatch:
         values = self.select(*names)
-        return NamedBatch(values, tuple(self.variables[self._index[n]] for n in names))
+        info = {v.name: v for v in self.variables}
+        return NamedBatch(values, tuple(info[n] for n in names))
 
     def rows(self, index) -> NamedBatch:
         values = self.values[index]
@@ -91,6 +103,8 @@ class FiniteDistribution:
     probabilities: Tensor
 
     def __post_init__(self):
+        if not isinstance(self.states, NamedBatch) or not isinstance(self.probabilities, Tensor):
+            raise TypeError("FiniteDistribution requires named states and a probability tensor.")
         if self.probabilities.ndim < 1 or self.probabilities.shape[-1] != len(self.states):
             raise ValueError("The final probability axis must match the number of states.")
         if self.probabilities.device != self.states.values.device:
