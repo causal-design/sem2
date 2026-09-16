@@ -43,6 +43,8 @@ Pass node configurations through `node_cfgs`, keyed by the left-hand-side node n
 
 Before changing model, data, or operator boundaries, read the agreed design direction in [`PROJECT.md`](PROJECT.md). Preserve compatibility with existing formulas, require named variable mappings at data boundaries, and keep application-specific roles out of graph-generic components.
 
+For v0.1 work, start with the [planning review](docs/plan/v0.1.md) and its linked support/data and trainer specifications. Distinguish target interfaces from inspected current behavior. Keep plan review separate from implementation review; the linked closed code PRs are unmerged examples, not approved dependencies. Do not infer a numeric-column default from storage dtype or existing arithmetic on state codes.
+
 ## Capability and claim discipline
 
 Consult [`PROJECT.md`](PROJECT.md) before describing what the package currently supports. Claims in code, documentation, and pull requests must match inspected behavior. When functionality is incomplete, fail early with a precise message or label it experimental. Do not broaden a capability claim from a notebook, meeting report, or unmerged branch.
