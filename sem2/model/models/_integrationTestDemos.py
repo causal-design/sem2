@@ -1,10 +1,10 @@
 """Runnable demos for the SEM2 model classes.
 
-Run with:  python -m sem2.model.models._integrationTestDemos
+Run with:  python -m sem2.model.models._demo
 (Slated to be folded into integration tests.)
 """
-from sem2.model import SEM2
-from sem2.default_configs import MLPConfig, LinearNodeConfig
+from ..models import SEM2, SEM2Discrete
+from ...default_configs import MLPConfig, LinearNodeConfig
 
 
 def main():

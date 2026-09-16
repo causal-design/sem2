@@ -20,7 +20,6 @@ torch.set_num_threads(1)
 
 from sem2.model import SEM2Linear, SEMType
 from sem2.operators.linear import LogLikelihood
-from sem2.data import NamedBatch, VariableInfo
 
 DATA = os.path.join(os.path.dirname(__file__), "..", "data", "PoliticalDemocracy.csv")
 LAVAAN = {"dem60~ind60": 1.483, "dem65~ind60": 0.572, "dem65~dem60": 0.837}
@@ -58,7 +57,7 @@ def _load_centered():
 def _fit(iters=2000, lr=0.05):
     torch.manual_seed(0)
     data, cols = _load_centered()
-    x = NamedBatch(data[:, [cols[v] for v in OBS]], tuple(VariableInfo(v) for v in OBS))
+    x = data[:, [cols[v] for v in OBS]]
     m = SEM2Linear(FORMULA)
     ll = LogLikelihood(m, centered=True)
     opt = torch.optim.Adam(m.parameters(), lr=lr)

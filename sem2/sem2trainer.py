@@ -7,7 +7,6 @@ import logging
 from .model.models import SEM2
 from .operators.scalar_operators import SEM2Loss
 from .default_configs import TrainingConfig
-from .data import NamedBatch
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +28,7 @@ class SEM2Trainer:
         Args:
             cfg: TrainingConfig object containing training configuration.
             sem: SEM2 model to train.
-            ds: Iterable yielding NamedBatch objects (e.g. DummyDiscreteDataloader).
+            ds: Iterable dataset to train on. Each element should be a batch of data.
         """
 
         self.cfg = cfg
@@ -62,17 +61,15 @@ class SEM2Trainer:
             average_loss = torch.stack(losses).mean().item()
             logger.info(f'{average_loss=:.4g}')
 
-    def _fit_batch(self, batch: NamedBatch):
+    def _fit_batch(self, batch):
         """ Fit model on a single batch.
             Includes making predictions, calculating gradients, and updating model parameters.
         """
         self.optim.zero_grad()
 
-        if not isinstance(batch, NamedBatch):
-            raise TypeError("SEM2Trainer expects NamedBatch objects from its dataloader.")
-        batch = batch.to(self.device)
+        Xs, targets = batch
         # Compute loss
-        loss, loss_metrics = self.loss_fn.evaluate(batch)
+        loss, loss_metrics = self.loss_fn.evaluate(targets)
         # Calculate gradients and update model parameters
         loss.backward()
         self.optim.step()
@@ -81,3 +78,22 @@ class SEM2Trainer:
         loss = loss.detach()
         loss_metrics = {k: v.detach() for k, v in loss_metrics.items()}
         return loss, loss_metrics
+
+
+def main():
+    torch.manual_seed(0)
+    logging.basicConfig(level=logging.INFO)
+    cfg = TrainingConfig()
+
+    formula1 = "u ~ Uniform(0,1); eps_d ~ Uniform(0,1); eps_y ~ Uniform(0,1); eps_z ~ Uniform(0,1);"
+    formula2 = "Z <- n(eps_z); D <- n(Z, u, eps_d); Y <- n(D, u, eps_y)"
+    model_formula = formula1 + formula2
+    sem_model = SEM2(model_formula, device=cfg.device)
+
+
+    trainer = SEM2Trainer(cfg, sem_model, [[0, 0]])
+    trainer.train()
+
+
+if __name__ == "__main__":
+    main()

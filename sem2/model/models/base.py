@@ -4,10 +4,10 @@ from __future__ import annotations
 import warnings
 import torch
 from torch import nn
+from torch import Tensor
 
 from ..components.nodes import NodeExogenous, NodeLinear, NodeMLP, NodeMLPDiscrete, SEM2Node
 from ..construction import _DAG, SEMType
-from ...data import NamedBatch, VariableInfo, FiniteDistribution
 
 
 # ════════════════════════════════════════════════════════════════════════════════════
@@ -130,74 +130,33 @@ class SEM2(_DAG, nn.Module):
 
         return name_to_node
 
-    def _variable_info(self, names, supplied=()) -> tuple[VariableInfo, ...]:
-        """Describe stored values without redefining the nodes' domains."""
-        info = {v.name: v for v in supplied}
-        result = []
-        for name in names:
-            node = self.node_dict[name]
-            if name in info:
-                if info[name].width != node.out_dim:
-                    raise ValueError(f"Variable {name!r} width does not match its model node.")
-                result.append(info[name])
-                continue
-            categorical = isinstance(node, NodeMLPDiscrete) or isinstance(node.dist, torch.distributions.Categorical)
-            discrete = True if categorical else (node.dist.support.is_discrete if node.dist is not None else None)
-            result.append(VariableInfo(name, True if categorical else None, discrete, width=node.out_dim))
-        return tuple(result)
+    def sample(self, batch_size: int = 1, set_nodes: dict[str, Tensor]|None = None) -> tuple[dict[str, Tensor], dict]:
+        """ Forward pass of a continuous SEM2 model. Nodes are sampled from their respective distributions.
 
-    def _interventions(self, batch_size: int, set_nodes: NamedBatch | None) -> NamedBatch | None:
-        """Validate named interventions before any node casts or sampling."""
-        if set_nodes is None:
-            return None
-        if not isinstance(set_nodes, NamedBatch):
-            raise TypeError("set_nodes must be a NamedBatch, not a tensor or dictionary.")
-        unknown = set(set_nodes.names) - set(self.node_dict)
-        if unknown:
-            raise ValueError(f"Interventions contain unknown nodes: {sorted(unknown)}")
-        set_nodes = set_nodes.to(self.device)
-        for name in set_nodes.names:
-            node = self.node_dict[name]
-            values = set_nodes.select(name)
-            if values.shape != (batch_size, node.out_dim):
-                raise ValueError(f"Intervention {name!r} must have shape [batch_size, out_dim].")
-            if isinstance(node, NodeMLPDiscrete):
-                valid = (values >= 0) & (values < node.n_classes)
-                if values.is_floating_point():
-                    valid = valid & (values == values.floor())
-                if not valid.all():
-                    raise ValueError(f"Intervention {name!r} contains an invalid discrete state.")
-            elif node.dist is not None and not node.dist.support.check(values).all():
-                raise ValueError(f"Intervention {name!r} is outside its declared domain.")
-        return set_nodes
-
-    def sample(self, batch_size: int = 1, set_nodes: NamedBatch | None = None) -> tuple[NamedBatch | FiniteDistribution, dict]:
-        """Return named draws in topological order and named intervention provenance.
-
-        ``set_nodes`` is a NamedBatch with ``batch_size`` rows. Each variable's
-        width must match its node's output dimension. Numerical node buffers
-        remain internal; there is no dictionary or positional-tensor data API.
+        Args:
+            batch_size: Number of samples to draw.
+            set_nodes: Optional dict of node name -> tensor to pin specific node
+                       values (e.g. for interventions). Shape: [batch_size, out_dim].
+        Return:
+            {node_name: tensor}.
+            {} Dummy dict, no metrics are generated.
         """
-        return self._sample_nodes(batch_size, set_nodes)
+        layer = self.node_dict
+        topological_order = self.topological_order
 
-    def _sample_nodes(self, batch_size, set_nodes, target_node=None):
-        """Shared sampling engine; causal queries may stop at their target."""
-        set_nodes = self._interventions(batch_size, set_nodes)
-        interventions = {} if set_nodes is None else {n: set_nodes.select(n) for n in set_nodes.names}
-        layer, names, values = self.node_dict, [], []
-        for name in self.topological_order:
-            node = layer[name]
-            if name in interventions:
-                node.set_value(interventions[name])
+        set_nodes = set_nodes if set_nodes is not None else {}
+        assert set(set_nodes.keys()).issubset(layer.keys()), \
+            f"set_nodes contains unknown nodes: {set(set_nodes.keys()) - set(layer.keys())}"
+
+        for node_name in topological_order:
+            v = layer[node_name]
+            if node_name in set_nodes:
+                v.set_value(set_nodes[node_name])
             else:
-                node([layer[p].get_value() for p in node.predecessors], batch_size)
-            names.append(name)
-            values.append(node.get_value())
-            if name == target_node:
-                break
-        supplied = () if set_nodes is None else set_nodes.variables
-        result = NamedBatch(torch.cat(values, dim=-1), self._variable_info(names, supplied))
-        return result, {"set_nodes": set_nodes}
+                pred_values = [layer[p].get_value() for p in v.predecessors]
+                v(pred_values, batch_size)
+
+        return {name: layer[name].get_value() for name in topological_order}, {}
 
     def forward(self, *args, **kwargs):
         raise NotImplementedError(f"call the sample() method instead of forward() or calling the model directly.")
