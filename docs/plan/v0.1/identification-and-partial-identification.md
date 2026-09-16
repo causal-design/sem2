@@ -1,277 +1,195 @@
 # 5. Identification checks and partial-identification results
 
-Agreed F33–F35 specification for the [v0.1 plan](../v0.1.md), from this topic's
-Slack discussion. This is a plan for implementation, not a claim that the package
-already meets these requirements. It refines the earlier meeting decisions;
-the historical records remain unchanged.
+Design plan for F33–F35 of the [v0.1 plan](../v0.1.md), including the general
+variable and estimand requirements discussed alongside them. **The only open
+topic is the detailed rule for automatic regression-window selection.** Its broad
+approach is agreed; recommendations below remain unapproved and unvalidated.
+Implementation is paused pending team discussion and a fresh request.
 
-**Review and merge hold:** obtain approval from Slack reviewer `U044USKH8HH`
-before merging this plan. This is a Slack ID, not a verified GitHub username.
-Implementation and default-branch integration remain separate human decisions.
-
-**Only unresolved topic: the detailed rules for automatic regression-window
-selection.** Approach 2 (exhaustive contiguous-window selection) is selected for
-v0.1. Its scoring, tolerance, ranking, and edge-case defaults await team discussion;
-the [selector discussion](automatic-regression-selection.md) explains the chosen
-approach and remaining questions. A linked [technical reference](automatic-regression-selection-technical.md)
-preserves the current-code evidence and detailed, unapproved recommendations.
-
-The extrapolation code is now available and has been inspected. Integration,
-fresh-start default with an explicit warm-start option, user-supplied penalties,
-and the general warning/unavailable policy are settled. This update replaces the
-earlier handoff's missing-code blocker; it does not reopen those decisions.[3]
-Implementation is paused pending a fresh request after team discussion.
+Obtain approval from Slack reviewer `U044USKH8HH` before merging this plan.
+This Slack ID is not a verified GitHub username. Plan approval, implementation,
+and integration into the default branch are separate decisions.
 
 ## General design requirements for variables and estimands
 
-These requirements apply throughout the package, including ordinary causal
-queries and numerical bound searches. They are not specific to the IV example.
+These apply throughout the package, not just to the IV example.
 
-<a id="categorical-outcomes"></a>
+- **Preserve what variables mean after numerical conversion.** Retain each
+  variable's original categorical status, labels, and mapping after both automatic
+  encoding and deliberate conversion. Record any numerical interpretation supplied
+  by the user. Any variable may later become an outcome; internal category codes
+  alone do not make its mean or ATE meaningful.
 
-### Original variable meaning after numerical conversion
+  For an originally categorical outcome without a numerical interpretation, warn
+  that ATE is not well-defined and suggest a contrast in category probabilities
+  or deliberate conversion to meaningful numerical values. A genuinely numerical
+  outcome with finite support does not trigger this warning. Preserve category
+  identities for treatments and covariates too; this preserves query meaning,
+  not necessarily numerical fits under different encodings. Coordinate with the
+  [model–data plan](minimal-model-data-interface.md) and F12/F28 conversion work;
+  exact conversion rules and naming are outside this discussion.
 
-- **Does numerical conversion erase a variable's categorical origin?**
-
-  **Action (agreed):** Preserve its original categorical status, labels, and
-  mapping to numerical values, including after deliberate conversion.
-
-  **Alternative considered:** Treating internal category codes as meaningful
-  numerical outcome values; this is not allowed.
-
-Retain each variable's original categorical status, category labels, and encoding
-map through internal numerical preparation. Any variable may later be selected
-as the outcome. An automatic internal code does not supply meaningful numerical
-outcome values.
-
-Keep this provenance after both automatic encoding and a user's deliberate
-categorical-to-numerical conversion. Record the user's chosen numerical values
-so that the package can distinguish an explicit numerical interpretation from
-codes assigned only for computation.
-
-For a numerical-value-dependent estimand such as ATE on an originally categorical
-outcome without a supplied numerical interpretation, warn:
-
-> ATE is not well-defined for a categorical outcome without a numerical
-> interpretation. Choose a distributional estimand, such as a contrast in
-> category probabilities, or explicitly convert the outcome to numerical values.
-
-Do not silently compute an ATE from category codes. Distinguish automatic
-encoding from a user's deliberate numerical conversion, and use meaningful
-outcome values when computing means. A genuinely numerical outcome can have
-finite support without triggering this warning. Encoding categorical treatments,
-instruments, or covariates preserves fixed-level query meaning when category
-identities are retained; this does not promise encoding-invariant numerical fits.
-
-Coordinate this provenance requirement with the
-[model–data handoff](minimal-model-data-interface.md) and F12/F28 conversion work.
-This plan does not choose the conversion helper's exact API or mapping rules.
-
-### User-selected treatment contrasts
-
-- **Which treatment levels should an estimand compare?**
-
-  **Action (agreed):** Let the user choose the treatment levels and contrast
-  direction, for example level `2` versus level `0` for ATE.
-
-  **Alternative considered:** Fixing every contrast to `1` versus `0`; this is
-  not the general design.
-
-For ATE, `2` versus `0` means the mean outcome under treatment level `2` minus
-the mean outcome under level `0`, in the stated target population. It does not
-mean comparing the corresponding observational groups. The chosen contrast must
-be used consistently in ordinary evaluation, any requested numerical search,
-reference comparisons, and reporting, whether or not the model is an IV model.
-Treatment and outcome roles are named by the query, not fixed by example names
-or column positions. Support for a contrast does not establish its identification.
-
-Reject invalid states and intervention values before lossy integer conversion.
-Match category identities through their encoding map rather than treating a
-failed match as the first state.
+- **Let users choose treatment levels and contrast direction.** For ATE, `2`
+  versus `0` means the population mean outcome under treatment level `2` minus
+  that under level `0`, not the difference between observed groups. Use that
+  contrast consistently in ordinary queries, numerical searches, and reporting.
+  Name treatment and outcome roles explicitly rather than fixing column positions
+  or example names. Validate intervention values before numerical coercion and
+  match categories through their mapping; never silently substitute another state.
 
 ## Graphical identification and numerical searches
 
-- Project the supplied DAG onto the observed variables as an ADMG and apply ID
-  for one observational margin. Data fusion, latent-variable targets, and
-  identification from additional parametric or proxy assumptions are outside
-  this check's v0.1 scope.
-- Return a Boolean for a supported identification problem. `True` means the
-  checked target is identified; `False` means it is not identified within that
-  graphical problem. Unsupported inputs must raise an explicit error, not return
-  `False`. An identification formula is not required.
-- Make clear which interventional distribution the check concerns. Identification
-  of that distribution supports its means and contrasts; failure to identify a
-  whole distribution is not automatically a proof that every scalar functional
-  is nonidentified. Do not overstate the Boolean's scope.
-- If ID succeeds, do not run a lower/upper search by default. Estimating the
-  identified target can still require fitting. If ID fails, warn that the
-  checked target is not point identified, may be partially identified, and that
-  the user can explicitly request a query-specific numerical search.
-- Keep ordinary query evaluation separate from training. A numerical search adds
-  the chosen estimand, with the appropriate sign, to the fitting objective;
-  changing an ordinary evaluation query must not secretly start a bound search.
-  Nearly coincident numerical endpoints do not establish identification.
+- **Return a clear identification verdict.** Project the supplied DAG onto the
+  observed variables as an acyclic directed mixed graph and apply ID for one
+  observational margin. Return `True` or `False` for supported problems and an
+  explicit error for unsupported inputs; an identification formula is not required.
+  Data fusion, latent-variable targets, and identification from extra parametric
+  or proxy assumptions are outside this check's scope.
+- **State what was checked.** Identification of an interventional distribution
+  supports its means and contrasts. Failure to identify the whole distribution
+  does not automatically establish nonidentification of every scalar contrast.
+- **Keep bound searches explicit.** If ID succeeds, do not search for lower and
+  upper values by default, although estimation may still require fitting. If it
+  fails, warn and offer an explicitly requested, estimand-specific numerical
+  search. Such a search adds the signed estimand to the fitting objective;
+  changing an ordinary evaluation query must not start training. Nearly equal
+  numerical endpoints do not prove identification.
 
-## Discrete IV assumptions, supports, and estimands
+## Discrete IV example
 
-Use the standard discrete-IV model: an exogenous/randomized instrument,
-exclusion of a direct instrument effect on the outcome, consistency, and
-possible unobserved treatment–outcome confounding. Do not silently add
-monotonicity/no-defiers, linearity, or restrictions on that confounding. The ATE
-is the population contrast for the selected treatment values, not a complier
-average effect. Interpretation is conditional on the supplied graph and these
-assumptions; observational fit does not validate them.
+Use an exogenous/randomized instrument, exclusion of a direct instrument effect
+on the outcome, consistency, and possible unobserved treatment–outcome
+confounding. Do not add monotonicity/no-defiers or linearity. ATE remains the
+population contrast for the selected treatment levels, not a complier effect.
+Observational fit does not validate these assumptions.
 
-Generalize the binary/example-specific restrictions throughout the IV workflow:
-use named instrument, treatment, and outcome roles; declared finite supports;
-and correctly aligned observed margins, marginalizing unobserved variables.
-Do not assume names `Z`, `X`, `Y`, fixed column positions, or instrument levels
-`0` and `1`. Apply the [general variable and estimand requirements](#general-design-requirements-for-variables-and-estimands)
-above, including the user's chosen treatment contrast and category provenance.
-Preserve the distinction between an IV-specific fitting objective and a general
-finite-state sampler.
+Support named instrument, treatment, and outcome roles and declared finite
+supports, including nonbinary treatments and instruments. Compare the same
+observed margins, marginalizing unobserved variables. Reuse the general variable
+and query rules above; keep IV-specific fitting separate from general sampling.
 
-### Strict instrument-level eligibility
+Require **at least two retained observations per declared instrument level**
+after complete-case filtering across the selected observed variables. Otherwise,
+stop before fitting and report affected levels, counts, and the minimum. Do not
+drop levels, merge categories, or add pseudo-counts. Check the retained dataset;
+batching must separately avoid invalid loss calculations. This is a fitting
+requirement, not an identification or reliability guarantee.
 
-Require **at least two retained observations per declared instrument level**,
-after complete-case filtering across the selected observed variables. If a level
-is absent or has only one observation, stop before fitting and warn with the
-affected levels, their counts, and the required minimum.
+## Numerical results and checks
 
-Do not silently drop levels, merge categories, or add pseudo-counts. Check the
-retained dataset, not an individual minibatch; batching must separately avoid
-invalid loss evaluations. This minimum makes the chosen loss usable, not the
-bounds statistically reliable. It is an IV fitting rule, not an ID verdict.
+Keep both fit summaries, separately for lower and upper searches:
 
-## Reference checks and diagnostic reporting
+- The observational fitting discrepancy, separate from the signed estimand term,
+  alongside total objective and estimand history. Its scale depends on encoding
+  and distance; a negative unbiased discrepancy estimate is not better-than-perfect fit.
+- For discrete IV, each instrument level's retained count, total-variation distance
+  between model and data conditional probability tables, and largest absolute
+  cell-probability error. Compare identical observed margins and category mappings.
 
-Use independent finite-IV response-function linear-programming bounds in tests,
-with Balke–Pearl bounds as a binary-IV reference. Match the numerical search and
-reference to the same observed probability table, assumptions, treatment
-contrast, and numerical outcome values. A population reference and the bounds
-for a sampled empirical table are different comparisons.
+Use independent finite-IV linear-programming bounds **in tests only**, with
+Balke–Pearl bounds as the binary reference. Include a small binary/nonbinary
+collection, with a treatment contrast such as `2` versus `0`. Match the observed
+probability table, assumptions, contrast, and numerical outcome values; population
+bounds and bounds for a sampled table are different references. Report endpoint
+errors, range width, any missed reference interval, and available simulation truth
+for manual review. Logical checks are pass/fail; no numerical bound-recovery
+accuracy threshold or automatic good-fit threshold is agreed for v0.1.
 
-**LP/reference solvers are test-only, not a runtime package bounds backend.**
-Use a small collection of reference cases, including binary IV and a
-ternary-treatment case with a selected contrast such as `2` versus `0`. Keep logical
-correctness checks pass/fail, but do not prescribe a numerical bound-recovery
-accuracy threshold in v0.1. Report endpoint errors, range width, any missed part
-of the reference interval, and available simulation truth for manual judgment.
-These are development diagnostics, not confidence-interval coverage guarantees.
+Report numerical search estimates, not automatically sharp bounds or confidence
+intervals. Good fit, a narrow range, or a straight regression does not certify
+causal validity, global optimality, an enclosing identified set, or sampling
+coverage. An extrapolated endpoint has no newly fitted distribution attached to it.
 
-Keep both agreed fit summaries, separately for the lower and upper search fits:
+## Fitting and extrapolation: agreed workflow
 
-- Training diagnostics retain the observational discrepancy without the signed
-  estimand term, alongside the overall objective and estimand history. Its scale
-  depends on the encoding/distance; a negative unbiased discrepancy estimate
-  does not mean better-than-perfect fit.
-- The user-facing discrete summary reports each instrument level's retained
-  count, total-variation distance between model and data conditional probability
-  tables, and largest absolute cell-probability error. Total variation is half
-  the sum of absolute cell differences. Compare the same observed margin and
-  category mapping on both sides.
+1. **Fit at the user's supplied penalties.** Use the package's common fitting
+   machinery. Retain each signed penalty, ATE, observational discrepancy, total
+   objective, initialization/run order, and available training or failure information.
+2. **Select a region and extrapolate using those results.** This separate
+   calculation uses in-memory results, without training again or adding penalties.
+   Positive penalties supply the lower estimate; negative penalties supply the
+   upper estimate. Regress on signed penalty, not log penalty, and predict at zero.
 
-Use these summaries in synthetic tests too. Simulation truth and independently
-known bounds are additional test information, unavailable with ordinary real
-data. Neither a small fit discrepancy nor a narrow searched range certifies
-sharpness, global optimality, an enclosing identified set, or sampling coverage.
-Report lower and upper values as numerical search estimates under the stated
-assumptions and settings, not automatically as certified causal bounds or
-confidence intervals. Do not attach a fictitious fitted distribution to an
-extrapolated endpoint. No automatic good-fit threshold is selected here.
+**Fresh start is the default; warm start remains an explicit option.** Fresh
+starts reset the trainable state for each penalty; warm starts reuse a preceding
+fit. No extensive multistart requirement is added. Do not generate or extend grids,
+recommend a universal penalty range, or require resumable training. Worked examples
+should state their actual penalties. File export is separate; no legacy CSV
+compatibility is required.
 
-## Settled extrapolation integration
+Return a computable but unreliable endpoint with a warning. Mark an uncomputable
+endpoint unavailable; one available endpoint does not make a complete interval.
 
-The supplied `estimate_ate_bound` branch contains
-`experiments/est_ate_bound.py`. Its current regression selector is an experimental
-building block, not the native v0.1 interface or the selected replacement
-algorithm.[1] Preserve the relevant computation while integrating it into the
-package architecture; do not copy the CSV-driven demo into the public workflow.
+## Automatic regression selection
 
-### Two stages and native results
+- **Decision:** Which fitted penalty points should determine the line extrapolated
+  to zero?
+- **Chosen approach 2:** Search all eligible consecutive stretches of points
+  (*windows*) for an approximately linear region. Among adequately supported,
+  comparably good fits, prefer proximity to zero. The usable region can be in
+  the middle: fits very close to zero may be poor, while larger penalties may
+  lie beyond the approximately linear region.
 
-1. Run the explicitly requested query-specific training sweep through the
-   canonical fitting machinery. For every supplied penalty, retain the signed
-   penalty, ATE estimate, observational fitting discrepancy, total objective,
-   initialization information, and available training/failure diagnostics.
-2. Pass the resulting native, in-memory records to a separate postprocessor.
-   It selects a regression window on each sign side and estimates the zero
-   intercept. Postprocessing must not train models or generate additional points.
+The [existing experimental method](https://github.com/causal-design/sem2/blob/6143748181bcf6abbaf8d2cfe88c3ac323d3758a/experiments/est_ate_bound.py)
+grows from an unchecked starting group and assesses each added point using a line
+that already includes it. Earlier synthetic checks showed this could accept a
+large bend. That motivates replacing the selection rule, not merely adjusting its
+threshold; it does not validate the replacement. Robust/consensus fitting was
+also considered but is not selected for v0.1.
 
-Use package-wide model/data/result conventions. CSV is an independent
-serialization option, not the exchange format between these stages. There is no
-requirement to support legacy result CSVs, fixed column layouts, or compatibility
-adapters. Public symbol names and field spellings are ordinary implementation
-choices within this contract, not additional unsettled product decisions.
+### High-level algorithm
 
-### Penalties and initialization
+The search family is agreed; the following scoring and ranking details are proposed.
 
-- The user supplies all penalty points. Do not generate a grid, extend a range,
-  run an adaptive sweep, or introduce an active point-guidance interface.
-- Fit ATE against the **signed penalty**, not log penalty, and extrapolate to
-  penalty zero. Positive penalties favor smaller ATEs and supply the lower-end
-  search; negative penalties favor larger ATEs and supply the upper-end search.
-  Keep the two regressions separate.
-- Document the actual penalty points/ranges used by worked examples. They are
-  setup-specific examples, not a universal range recommendation or a default
-  grid.
-- **Fresh start is the default. Warm start remains an explicit option in v0.1.**
-  Both modes must be available. Fresh starts reset the trainable state for each
-  point rather than carrying over the preceding fit; warm starts reuse a preceding
-  fit within a sweep. Record the actual run order and initialization behavior so
-  results are interpretable. Do not silently drop a mode or add an extensive
-  multistart requirement.
-- No resumability, resume API, stop/continue prompt, or fit-only-new-points
-  workflow is required. This does not prevent calling a pure postprocessor on
-  an existing in-memory result; it must not imply resuming training.
+1. Separate positive and negative penalties and order each side by distance from zero.
+2. Examine every eligible window, allowing either end of the curve to be excluded
+   but no skipped usable interior point.
+3. Fit an ordinary unweighted straight line. Assess prediction error by leaving
+   out each point in turn and predicting it from the remaining points.
+4. Compare errors against a common scatter estimate for that side to identify
+   acceptable and similarly good fits.
+5. Among comparable fits, prefer a window nearer zero, then one with more points.
+6. Extrapolate the chosen line to zero and report the selected points and warnings,
+   following the agreed computable/unavailable policy above.
 
-### Selection family and result interpretation
+## Checks before implementation is accepted
 
-Use **approach 2: exhaustive contiguous-window selection** for v0.1. It searches
-possible approximately linear regions rather than assuming that an extreme-end
-core is reliable. Among adequately supported, comparably good candidates, prefer
-proximity to zero. Do not revive inward growth from an arbitrary trusted core
-(approach 1), or require robust/consensus fitting (approach 3) as another v0.1
-implementation or comparison.
+After agreement and a fresh implementation request, check ID results and unsupported
+inputs; general categorical meaning and chosen contrasts in a non-IV case; absent
+or singleton instrument levels; the IV reference cases and both fit summaries; and
+both initialization modes. For selection, check chosen points and intercepts on a
+few straight, flat, curved-end, sparse/failed-fit, and rescaled examples, including
+narrow distant windows and crossed endpoints. Earlier executions concerned only
+the old selector, not the proposed replacement or fitted SEM2 trajectories.
 
-A computable but unreliable endpoint is returned with a warning. An endpoint
-that cannot be computed is unavailable; do not invent a number. The detailed
-fallback ranking, selector metadata, and warning criteria belong to the one
-remaining selector discussion, not a reopening of this failure policy.
+## Open questions: selector details
 
-An apparently linear window and a stable intercept are diagnostics, not a
-certificate of causal validity, sharpness, or global optimization. Retain the
-observational fit diagnostics for the underlying runs; the extrapolated endpoint
-does not itself correspond to a newly fitted distribution.
+These recommendations are **not approved defaults**. Exact formulas, cutoffs,
+and tie-breakers still need agreement; they are not statistical guarantees.
 
-## Implementation and review checklist
-
-After team discussion and a fresh implementation request:
-
-1. Add the single-margin projection/ID check and a few identifiable,
-   nonidentified, and unsupported-input cases.
-2. Apply categorical-provenance and treatment-contrast requirements across the
-   package. Include a non-IV query check, provenance after both kinds of numerical
-   conversion, and a user-selected contrast such as `2` versus `0`.
-3. Generalize IV names/supports and validate strict instrument counts, reusing
-   the shared variable/query rules, data preparation, and canonical trainer.
-4. Add the small binary/non-binary reference collection and both fit summaries.
-   Include a ternary treatment contrast, categorical-outcome warning, and
-   absent/singleton instrument-level checks. Numerical bound-recovery quality
-   remains a manual review item.
-5. Connect the native sweep and postprocessor with both initialization modes,
-   fresh start by default, and only user-supplied penalties.
-6. Implement the selector only after resolving the recommendations in the
-   [automatic regression-selection review](automatic-regression-selection.md).
-   Verify selected points as well as intercepts using a small set of clean,
-   bent-end, flat, and weak-input cases.
-
-This PR records the plan and source audit only. The unchanged experimental
-postprocessor was exercised on synthetic numeric inputs for the companion
-review. No new selector, SEM2 training, gradient check, package-wide test run,
-merge, or deployment is claimed.
-
-## Sources
-
-[1] [Inspected estimate_ate_bound branch source: experiments/est_ate_bound.py](https://github.com/causal-design/sem2/blob/6143748181bcf6abbaf8d2cfe88c3ac323d3758a/experiments/est_ate_bound.py)
-[3] [Earlier identification handoff (PR #53)](https://github.com/causal-design/sem2/pull/53)
+- **Which points are eligible?** Recommend at least three distinct penalties,
+  warning when only three support the selected line; two points are a warned
+  fallback and cannot assess linearity. Keep zero for diagnostics, reject duplicate
+  specifications, and omit failed/non-finite results while retaining their reasons.
+  A window may span an omitted run with a warning, but must include every usable
+  interior point. Finite results with training warnings remain usable and flagged.
+- **What counts as sufficiently linear?** Recommend leave-one-out prediction error
+  and one shared scatter estimate per side, estimated after removing local linear
+  trends from adjacent triples. With few points, noise and curvature are hard to
+  distinguish; warm starts can also create dependence. The scale estimate,
+  numerical safeguards, and acceptable/comparable-error thresholds remain open,
+  especially for nearly noiseless data. These are not significance tests or
+  tolerances users should have to tune in ordinary use.
+- **How should fit quality, proximity, and support compete?** Recommend quality
+  first, then the nearest edge to zero, then more points among comparably good
+  windows. The comparison band and final tie-breakers remain open.
+- **When should we warn, and which unreliable estimate should we return?** Recommend
+  using the change in intercept after removing either boundary point as a warning,
+  rather than another selection score. Warn about a narrow window far from zero,
+  unavailable sensitivity calculations, and crossed endpoints; do not silently
+  swap or repair endpoints. If no window passes, prefer the best prediction score;
+  if none can be scored, prefer a computable window with the most points, at least
+  two distinct penalties. Warning thresholds and fallback ordering remain open.
+- **What should accompany the estimate?** Recommend the selected points, fitted
+  line, fit quality, sensitivity, warnings, and selection or unavailable reason.
+  The precise contents remain to be agreed.
