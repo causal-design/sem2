@@ -12,14 +12,82 @@ Implementation and default-branch integration remain separate human decisions.
 **Only unresolved topic: the detailed rules for automatic regression-window
 selection.** Approach 2 (exhaustive contiguous-window selection) is selected for
 v0.1. Its scoring, tolerance, ranking, and edge-case defaults await team discussion;
-the [selector review](automatic-regression-selection.md) records the exact current
-code behavior and a concrete recommended specification for that discussion.
+the [selector discussion](automatic-regression-selection.md) explains the chosen
+approach and remaining questions. A linked [technical reference](automatic-regression-selection-technical.md)
+preserves the current-code evidence and detailed, unapproved recommendations.
 
 The extrapolation code is now available and has been inspected. Integration,
 fresh-start default with an explicit warm-start option, user-supplied penalties,
 and the general warning/unavailable policy are settled. This update replaces the
 earlier handoff's missing-code blocker; it does not reopen those decisions.[3]
 Implementation is paused pending a fresh request after team discussion.
+
+## General design requirements for variables and estimands
+
+These requirements apply throughout the package, including ordinary causal
+queries and numerical bound searches. They are not specific to the IV example.
+
+<a id="categorical-outcomes"></a>
+
+### Original variable meaning after numerical conversion
+
+- **Does numerical conversion erase a variable's categorical origin?**
+
+  **Action (agreed):** Preserve its original categorical status, labels, and
+  mapping to numerical values, including after deliberate conversion.
+
+  **Alternative considered:** Treating internal category codes as meaningful
+  numerical outcome values; this is not allowed.
+
+Retain each variable's original categorical status, category labels, and encoding
+map through internal numerical preparation. Any variable may later be selected
+as the outcome. An automatic internal code does not supply meaningful numerical
+outcome values.
+
+Keep this provenance after both automatic encoding and a user's deliberate
+categorical-to-numerical conversion. Record the user's chosen numerical values
+so that the package can distinguish an explicit numerical interpretation from
+codes assigned only for computation.
+
+For a numerical-value-dependent estimand such as ATE on an originally categorical
+outcome without a supplied numerical interpretation, warn:
+
+> ATE is not well-defined for a categorical outcome without a numerical
+> interpretation. Choose a distributional estimand, such as a contrast in
+> category probabilities, or explicitly convert the outcome to numerical values.
+
+Do not silently compute an ATE from category codes. Distinguish automatic
+encoding from a user's deliberate numerical conversion, and use meaningful
+outcome values when computing means. A genuinely numerical outcome can have
+finite support without triggering this warning. Encoding categorical treatments,
+instruments, or covariates preserves fixed-level query meaning when category
+identities are retained; this does not promise encoding-invariant numerical fits.
+
+Coordinate this provenance requirement with the
+[model–data handoff](minimal-model-data-interface.md) and F12/F28 conversion work.
+This plan does not choose the conversion helper's exact API or mapping rules.
+
+### User-selected treatment contrasts
+
+- **Which treatment levels should an estimand compare?**
+
+  **Action (agreed):** Let the user choose the treatment levels and contrast
+  direction, for example level `2` versus level `0` for ATE.
+
+  **Alternative considered:** Fixing every contrast to `1` versus `0`; this is
+  not the general design.
+
+For ATE, `2` versus `0` means the mean outcome under treatment level `2` minus
+the mean outcome under level `0`, in the stated target population. It does not
+mean comparing the corresponding observational groups. The chosen contrast must
+be used consistently in ordinary evaluation, any requested numerical search,
+reference comparisons, and reporting, whether or not the model is an IV model.
+Treatment and outcome roles are named by the query, not fixed by example names
+or column positions. Support for a contrast does not establish its identification.
+
+Reject invalid states and intervention values before lossy integer conversion.
+Match category identities through their encoding map rather than treating a
+failed match as the first state.
 
 ## Graphical identification and numerical searches
 
@@ -58,38 +126,10 @@ Generalize the binary/example-specific restrictions throughout the IV workflow:
 use named instrument, treatment, and outcome roles; declared finite supports;
 and correctly aligned observed margins, marginalizing unobserved variables.
 Do not assume names `Z`, `X`, `Y`, fixed column positions, or instrument levels
-`0` and `1`. Support user-selected treatment contrasts such as level `2` versus
-level `0`, with the requested direction. Preserve the distinction between an
-IV-specific fitting objective and a general finite-state sampler.
-
-Reject invalid states and intervention values before lossy integer conversion.
-Match category identities through their encoding map rather than treating a
-failed match as the first state.
-
-### Categorical outcomes
-
-Retain each variable's original categorical status, category labels, and encoding
-map through internal numerical preparation. Any variable may later be selected
-as the outcome. An automatic internal code does not supply meaningful numerical
-outcome values.
-
-For a numerical-value-dependent estimand such as ATE on an originally categorical
-outcome without a supplied numerical interpretation, warn:
-
-> ATE is not well-defined for a categorical outcome without a numerical
-> interpretation. Choose a distributional estimand, such as a contrast in
-> category probabilities, or explicitly convert the outcome to numerical values.
-
-Do not silently compute an ATE from category codes. Distinguish automatic
-encoding from a user's deliberate numerical conversion, and use meaningful
-outcome values when computing means. A genuinely numerical outcome can have
-finite support without triggering this warning. Encoding categorical treatments,
-instruments, or covariates preserves fixed-level query meaning when category
-identities are retained; this does not promise encoding-invariant numerical fits.
-
-Coordinate this provenance requirement with the
-[model–data handoff](minimal-model-data-interface.md) and F12/F28 conversion work.
-This plan does not choose the conversion helper's exact API or mapping rules.
+`0` and `1`. Apply the [general variable and estimand requirements](#general-design-requirements-for-variables-and-estimands)
+above, including the user's chosen treatment contrast and category provenance.
+Preserve the distinction between an IV-specific fitting objective and a general
+finite-state sampler.
 
 ### Strict instrument-level eligibility
 
@@ -210,16 +250,18 @@ After team discussion and a fresh implementation request:
 
 1. Add the single-margin projection/ID check and a few identifiable,
    nonidentified, and unsupported-input cases.
-2. Generalize IV names/supports and contrasts; preserve categorical provenance;
-   validate states and strict instrument counts. Reuse shared data preparation
-   and the canonical trainer.
-3. Add the small binary/non-binary reference collection and both fit summaries.
+2. Apply categorical-provenance and treatment-contrast requirements across the
+   package. Include a non-IV query check, provenance after both kinds of numerical
+   conversion, and a user-selected contrast such as `2` versus `0`.
+3. Generalize IV names/supports and validate strict instrument counts, reusing
+   the shared variable/query rules, data preparation, and canonical trainer.
+4. Add the small binary/non-binary reference collection and both fit summaries.
    Include a ternary treatment contrast, categorical-outcome warning, and
    absent/singleton instrument-level checks. Numerical bound-recovery quality
    remains a manual review item.
-4. Connect the native sweep and postprocessor with both initialization modes,
+5. Connect the native sweep and postprocessor with both initialization modes,
    fresh start by default, and only user-supplied penalties.
-5. Implement the selector only after resolving the recommendations in the
+6. Implement the selector only after resolving the recommendations in the
    [automatic regression-selection review](automatic-regression-selection.md).
    Verify selected points as well as intercepts using a small set of clean,
    bent-end, flat, and weak-input cases.
