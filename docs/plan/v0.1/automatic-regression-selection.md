@@ -14,7 +14,21 @@ user-supplied penalties only, signed-penalty extrapolation to zero, fresh start 
 default with warm start available, no resumability, and estimates with warnings
 when unreliable but computable. The main handoff records the full contract.
 
+Each decision starts with a question, a short action summary, and any alternatives
+considered, followed by the full explanation. **Agreed** and **proposed** actions
+remain distinct; this reorganization does not approve any pending selector rule.
+
 ## 1. What the current code does
+
+- **Which selection approach should replace the current code?**
+
+  **Action (agreed):** Use exhaustive contiguous-window search (approach 2),
+  preferring proximity to zero among comparably good windows.
+
+  **Alternatives considered:** Inward growth from a trusted core (approach 1,
+  rejected); robust/consensus fitting (approach 3, not selected for v0.1).
+
+**Detailed explanation and current-code evidence**
 
 Inspected source: `experiments/est_ate_bound.py` on `estimate_ate_bound`, commit
 `6143748181bcf6abbaf8d2cfe88c3ac323d3758a`. The remote branch tip was rechecked for
@@ -97,6 +111,16 @@ let the team review an explicit algorithm, rather than phrases such as
 
 ### A. Prepare each endpoint's points
 
+- **Which points are eligible, and what does contiguity mean when runs fail?**
+
+  **Action:** Split by sign (**agreed**). Exclude zero, reject duplicate penalties,
+  and allow warned failed-run gaps but no skipped usable interior points (**proposed**).
+
+  **Alternatives considered:** Averaging repeated fits or deleting isolated usable
+  points; neither is recommended in the draft.
+
+**Detailed explanation**
+
 - Use positive penalties for the lower endpoint and negative penalties for the
   upper endpoint. Sort each side by increasing absolute penalty, while retaining
   the original signed x values for every regression.
@@ -115,6 +139,16 @@ This sorting is postprocessing only. It must not silently change the recorded
 training order or the meaning of an explicitly chosen warm start.
 
 ### B. Enumerate and fit all eligible windows
+
+- **How much support is needed, and how should windows be fitted and scored?**
+
+  **Action (proposed):** Require three distinct penalties; use unweighted OLS and
+  leave-one-out prediction error; record intercept sensitivity and window geometry.
+
+  **Alternatives considered:** A trusted initial core, the old internal
+  studentized-residual check, and pure R-squared ranking; none is selected.
+
+**Detailed explanation**
 
 For each side, enumerate every contiguous window containing at least **three
 distinct penalties**. No initial window is trusted, and either end of the curve
@@ -139,6 +173,16 @@ weak support and receive a warning if selected. Boundary-deleted two-point fits
 can provide a sensitivity diagnostic, not evidence of linearity on their own.
 
 ### C. Use one detrended scale per sign side
+
+- **How should scatter and numerical tolerances be estimated?**
+
+  **Action (proposed):** Use one adjacent-triple detrended scale per sign side,
+  with a numerical floor and weak-scale warnings; the formula remains uncalibrated.
+
+  **Alternatives considered:** Separate noise allowances for each window or an
+  ordinary user-specified tolerance; neither is recommended.
+
+**Detailed explanation**
 
 Recommended starting convention: estimate scatter once from adjacent usable
 triples on that side, and use the **same scale for all its candidate windows**.
@@ -175,6 +219,16 @@ calibrated solution to the noise-versus-curvature problem.
 
 ### D. Decide which windows are comparable, then choose one
 
+- **What is good enough, how do proximity and support compete, and when should stability warn?**
+
+  **Action (proposed):** Apply quality/comparability thresholds, then prefer
+  proximity and support; use intercept sensitivity for warnings, not selection.
+
+  **Alternatives considered:** Pure R-squared ranking or a weighted score combining
+  quality, proximity, support, and stability; neither is recommended.
+
+**Detailed explanation**
+
 Recommended initial constants and deterministic ordering:
 
 1. Call a scorable window provisionally adequate when `E <= 3*tau`.
@@ -197,6 +251,16 @@ recommended; a flat linear region is eligible.
 
 ### E. Apply the agreed failure policy with explicit fallback rules
 
+- **Which unreliable fit should be returned, and when is an endpoint unavailable?**
+
+  **Action:** Retain computable estimates with warnings (**agreed**); use the
+  score-first, then support-first fallback ordering below (**proposed**).
+
+  **Alternatives considered:** Switching fitting families, silently repairing crossed
+  endpoints, or generating more training points; none is recommended or in scope.
+
+**Detailed explanation**
+
 - If no window is provisionally adequate but some have finite `E`, choose the
   smallest `E`, breaking ties by the same gap/support/span/index preferences.
   Return its intercept with a no-adequate-window warning and other applicable
@@ -214,6 +278,25 @@ recommended; a flat linear region is eligible.
   and warn. Do not silently swap, clip, or repair them.
 
 No failure triggers automatic new training points or a resume prompt.
+
+### F. Return the endpoint and its diagnostics
+
+- **What should the selector return?**
+
+  **Action (proposed fields):** Return the endpoint or unavailable reason, selected
+  points, fit diagnostics, warnings, and the selection/fallback reason.
+
+  **Alternative considered:** A legacy CSV-shaped interface; native in-memory
+  results are already agreed, with serialization separate.
+
+**Detailed explanation**
+
+The proposed result contains the endpoint or unavailable reason; selected point
+identities and values; slope and intercept; prediction error, shared scale,
+stability, gap and span diagnostics; warnings; and the selection or fallback
+reason. These are the fields proposed in the review table below, not an approved
+result schema. Use the package's native result conventions rather than a CSV
+schema. Sections B–E specify the calculations and warning behavior under review.
 
 ## 3. Open questions and recommended answers
 
@@ -234,6 +317,16 @@ modes, estimand meaning, and general failure policy are not open again.
 | What does the selector return? | Endpoint or unavailable reason; selected point identities/values; slope/intercept; prediction error, shared scale, stability/gap/span diagnostics; warnings and selection/fallback reason. Use native result conventions, not a CSV schema. |
 
 ## 4. Small implementation check set after agreement
+
+- **What should be checked once the selector rules are agreed?**
+
+  **Action (proposed):** Run a small set of checks covering selected points,
+  intercepts, weak inputs, ranking, rescaling, and warnings.
+
+  **Alternatives:** No separate test strategy is recorded here. The old-code probes
+  above are evidence about that code, not validation of its replacement.
+
+**Detailed explanation**
 
 Check the selected points and intercept, not just a fit score:
 
