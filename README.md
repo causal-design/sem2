@@ -36,8 +36,8 @@ model = SEM2Linear(
 )
 
 samples, _ = model.sample(batch_size=100)
-print(samples["x"].shape)
-print(samples["y"].shape)
+print(samples.select("x").shape)
+print(samples.select("y").shape)
 print(model.cov_matrix(nodes=model.observed_vars))
 ```
 
@@ -46,6 +46,28 @@ A model is sampled through `sample(...)`; calling the model directly is not part
 ```python
 from sem2.model import SEM2, SEM2Discrete, SEM2Linear, SEMType
 ```
+
+## Named data and sampling results
+
+- **Which format carries observations, interventions, and sampling results?**
+
+  **Chosen action:** Use `NamedBatch` for data rows and `FiniteDistribution` for finite-state probability results.
+
+  **Alternative considered:** Retain positional tensors and dictionary data interfaces. These are no longer accepted at the implemented data boundaries.
+
+  **Explanation:** `SEM2.sample` and `SEM2Linear.sample` return `(NamedBatch, auxiliary)`. A batch pairs its `.values` tensor with `.variables` metadata and `.names`. Use `select("x", "y")` to obtain tensor columns in that order, or `subset("x", "y")` to retain a named batch. A variable can occupy several contiguous columns, recorded by `VariableInfo.width`.
+
+  `SEM2Discrete.sample` instead returns `(FiniteDistribution, auxiliary)`. Its `.states` is a `NamedBatch`, and `.probabilities` has axes `[exogenous draws, states]`. `marginal(...)` combines state probabilities for selected variables; averaging over exogenous draws is a separate operation. Both sampler paths accept a `NamedBatch` for `set_nodes` and record it in `auxiliary["set_nodes"]` (or `None` when there is no intervention).
+
+  These records are the current low-level interface, not the planned DataFrame preparation API. Metadata distinguishes category labels, stored state codes, and quantitative meaning; integer dtype alone does not establish meaningful scores. The [decision note](docs/plan/v0.1/named-data-batches.md) retains the implementation explanation and ends with the unresolved numeric-column policy.
+
+The [Dummy training example](experiments/trainer.py) uses the canonical package trainer:
+
+```bash
+python -m experiments.trainer
+```
+
+Its short run demonstrates named-data integration, not convergence or validated causal bounds.
 
 ## Formula language
 
@@ -70,12 +92,15 @@ Node configuration is passed through `node_cfgs`, keyed by the variable on the l
 
 ```python
 import torch
+from sem2.data import NamedBatch
 
 n = 100
+intervention = NamedBatch(torch.ones(n, 1), samples.subset("x").variables)
 samples_do_x1, _ = model.sample(
     batch_size=n,
-    set_nodes={"x": torch.ones(n, 1)},
+    set_nodes=intervention,
 )
+torch.testing.assert_close(samples_do_x1.select("x"), torch.ones(n, 1))
 ```
 
 This computes the intervention implied by the specified structural model. It does not validate the graph, exogenous assumptions, identification, or transportability. Causal results should state those assumptions and distinguish model calculations from conclusions supported by observed data.
@@ -85,8 +110,9 @@ This computes the intervention implied by the specified structural model. It doe
 - [`sem2/model/construction/`](sem2/model/construction/) contains the formula parser, typed syntax, DAG construction, and model classification.
 - [`sem2/model/components/`](sem2/model/components/) contains executable node and neural-network modules.
 - [`sem2/model/models/`](sem2/model/models/) contains the general, linear, and finite discrete model classes.
+- [`sem2/data.py`](sem2/data.py) contains the named data and finite-distribution records; [`sem2/dataloader.py`](sem2/dataloader.py) supplies the synthetic Dummy loader.
 - [`sem2/operators/`](sem2/operators/) contains likelihood, distributional-loss, and causal-query operators.
-- [`sem2/sem2trainer.py`](sem2/sem2trainer.py) contains the current package trainer; it remains experimental.
+- [`sem2/sem2trainer.py`](sem2/sem2trainer.py) contains the canonical trainer used by the named-data example; fitting remains experimental.
 - [`tests/`](tests/) contains the pytest suite.
 - [`experiments/`](experiments/) and [`notebooks/`](notebooks/) contain research and demonstration code, some of which uses older APIs.
 - [`docs/meetings/`](docs/meetings/) contains dated reviews and meeting records.
