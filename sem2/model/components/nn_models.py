@@ -113,4 +113,6 @@ class _MLP(nn.Module):
         self.to(device)
 
     def forward(self, x: Tensor) -> Tensor:
-        return self.net(x)
+        # Discrete parents can supply only integer state IDs. Convert at the
+        # neural-kernel boundary, without changing their external representation.
+        return self.net(x.to(next(self.net.parameters())))
