@@ -8,6 +8,8 @@ The project is designed around user-supplied causal structures rather than a fix
 
 See [`PROJECT.md`](PROJECT.md) for the maintained capability matrix, known limitations, design decisions, and work plan.
 
+Start with the [v0.1 planning review](docs/plan/v0.1.md), which links the model–data, support/named-data, fitting/diagnostics, and identification specifications. These describe intended interfaces, not capabilities added to this checkout. The closed code PRs linked there are unmerged examples; implementation requires separate review.
+
 ## Installation
 
 SEM2 requires Python 3.10 or later.
