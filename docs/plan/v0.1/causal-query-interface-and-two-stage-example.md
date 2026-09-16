@@ -28,6 +28,11 @@ is needed. Omitted variables follow their equations, an empty dictionary denotes
 the natural model regime, and an explicit zero means zero. Never infer a
 reference value or copy missing assignments from the other regime.
 
+These dictionaries belong to the public query constructor. Validate and convert
+them at that boundary into the [named-data contract](named-data-batches.md#named-data-contract)
+used by the sampler. The low-level rejection of legacy dictionary interventions
+does not prohibit these agreed user-facing calls.
+
 For a contrast, evaluate the **alternative mean minus the reference mean**.
 Allow user-selected levels, including nonbinary comparisons such as `2` versus
 `0`; do not hard-code the original 1-versus-0 comparison. Both dictionaries
@@ -42,6 +47,11 @@ internal state codes alone do not supply a meaningful numerical outcome. Warn
 and suggest a distributional estimand or deliberate numerical conversion when a
 categorical outcome lacks that interpretation. This handoff does not settle the
 separate conversion-helper design.
+
+The [meeting-decision list](../v0.1.md#next-steps-and-review-decisions) records the
+remaining failure/result behavior for an unscored categorical mean and the scope
+of the suggested probability contrasts. Do not infer a numeric-code fallback or
+an additional query family from this warning requirement.
 
 Keep `(value, info)` as the small result convention:
 
@@ -227,10 +237,12 @@ regime result tables, ratios/quantiles, a new result hierarchy, and general
 uncertainty estimation are not prerequisites for F04/F32. They are not assigned
 to a subsequent numbered release by this agreement.
 
-No additional substantive choice is needed to prepare this documentation handoff.
-Reviewers should check fidelity, scientific assumptions, and test coverage;
-exact API spellings and numerical fitting tolerances remain for implementation
-review. The separate identification-selector discussion is unchanged. This PR
-does not authorize implementation, integration of either PR, deployment, or a
-release. Original meeting records remain historical evidence; the accepted
-interface and example above are the current thread's decision.
+The interface family and two-stage example are settled. Reviewers should check
+fidelity, scientific assumptions, and test coverage; exact API spellings and
+numerical fitting tolerances remain for implementation review. Cross-document
+questions about categorical scoring and failure behavior are collected in the
+[parent plan's meeting list](../v0.1.md#next-steps-and-review-decisions), without
+reopening the agreed interface or generator. The separate identification-selector
+discussion is unchanged. This documentation does not authorize implementation,
+merge, deployment, or release. Original meeting records remain historical
+evidence; the accepted interface and example above remain the agreed direction.
