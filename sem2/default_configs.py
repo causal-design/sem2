@@ -84,6 +84,9 @@ class TrainingConfig(BaseModel):
     use_energy_score: bool = True
     energy_score_weight: float = 1.
     energy_score_beta: float = 1.
+    # Opt in to the existing IV-specific discrete objective. None fits a joint
+    # observed endogenous margin instead; roles are never inferred from columns.
+    instrument_node: Optional[str] = None
 
     # ATE loss
     use_ate: bool = False

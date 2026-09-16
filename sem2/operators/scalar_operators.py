@@ -1,246 +1,201 @@
-# Defer annotation evaluation so TYPE_CHECKING-only type hints (SEM2, TrainingConfig, ...)
-# do not crash at runtime on Python < 3.14.
+# Keep TYPE_CHECKING-only annotations usable on Python < 3.14.
 from __future__ import annotations
 from typing import TYPE_CHECKING
+
 import torch
+
 from .operators_base import OperatorInput, OperatorOutput, SEM2Operator
 from .vector_operators import PotentialOutcome
-from ..model.construction import SEMType
 from .discrete_energy_loss import DiscreteEnergyLoss
+from ..data import NamedBatch, FiniteDistribution
+from ..model.construction import SEMType
 
 if TYPE_CHECKING:
-    from ..model.models import SEM2, SEM2Discrete
+    from ..model.models import SEM2
     from ..default_configs import TrainingConfig
 
 
 class EnergyLoss(SEM2Operator):
-    """" Energy score loss function. Sample from our model and compute the energy score between our sample and the true sample.
-    """
+    """Energy fitting with explicit variable alignment.
 
-    input_type = OperatorInput.SELF
+    With instrument_node=None, fit the observed joint distribution (marginalizing
+    unobserved endogenous states in a discrete model). Setting instrument_node
+    explicitly opts into the existing IV-specific discrete objective: compare
+    groups with draws under do(instrument=level). This assumes an exogenous
+    instrument in the supplied causal model; it is not general conditioning.
+    Distances still use stored numerical values, not inferred category scores.
+    """
+    input_type = OperatorInput.DATA
     output_type = OperatorOutput.SCALAR
 
     def __init__(self, cfg: TrainingConfig, model: SEM2):
         self.model = model
-        self.device = cfg.device
         self.bs = cfg.sample_bs
         self.beta = cfg.energy_score_beta
+        self.instrument_node = cfg.instrument_node
+        if self.bs < 2:
+            raise ValueError("Unbiased energy fitting needs sample_bs >= 2.")
+        if not (SEMType.is_continuous(model.sem_type) or SEMType.is_discrete(model.sem_type)):
+            raise NotImplementedError(f"Energy score is not implemented for {model.sem_type}.")
+        if self.instrument_node is not None:
+            node = model.node_dict[self.instrument_node] if self.instrument_node in model.node_dict else None
+            if (not SEMType.is_discrete(model.sem_type) or node is None
+                    or node.dist is None or not node.dist.support.is_discrete):
+                raise ValueError("instrument_node requires an exogenous discrete node in a discrete model.")
 
-        # Select the correct forward method based on the SEM type
-        sem_type = self.model.sem_type
-        if SEMType.is_continuous(sem_type):
-            self.evaluate = self._evaluate_continuous
-        elif SEMType.is_discrete(sem_type):
-            self.evaluate = self._evaluate_discrete
-            self.discrete_loss = DiscreteEnergyLoss(self.beta, model.all_states, self.device)
-        else:
-            raise NotImplementedError(f"Energy score is not implemented for this SEM type: {sem_type}")
+    def evaluate(self, observations: NamedBatch, **kwargs) -> tuple[torch.Tensor, dict]:
+        if not isinstance(observations, NamedBatch):
+            raise TypeError("EnergyLoss expects a NamedBatch; provide explicit variable metadata.")
+        if not len(observations) or not observations.names:
+            raise ValueError("Energy fitting requires nonempty observations and variables.")
+        observations = observations.to(self.model.device)
+        if SEMType.is_discrete(self.model.sem_type):
+            return self._evaluate_discrete(observations)
+        return self._evaluate_continuous(observations)
 
-    def _evaluate_discrete(self, observations, **kwargs) -> tuple[torch.Tensor, dict]:
-        """ Discrete energy loss. Currently hard coded for the binary IV problem. """
-        batch_size = observations.shape[0]
+    def _discrete_group(self, observations: NamedBatch, set_nodes=None):
+        if not observations.names:
+            raise ValueError("No fitting variables remain after selecting the instrument.")
+        result, _ = self.model.sample(batch_size=self.bs, set_nodes=set_nodes)
+        result = result.marginal(*observations.names)
+        return DiscreteEnergyLoss(self.beta).energy_dist(observations, result)
 
-        # Split apart Z from X and Y
-        z = observations[:, 0]
-        xy = observations[:, 1:]
-        # Observations
-        set_nodes = {"Z": z.unsqueeze(-1)}
-        p_all_hat, _ = self.model.sample(batch_size=batch_size, set_nodes=set_nodes)     # shape = [bs, n_states]
+    def _evaluate_discrete(self, observations: NamedBatch):
+        if self.instrument_node is None:
+            return self._discrete_group(observations)
+        instrument = observations.select(self.instrument_node).squeeze(-1)
+        instrument_batch = self.model._interventions(len(observations), observations.subset(self.instrument_node))
+        fit_names = tuple(n for n in observations.names if n != self.instrument_node)
+        fitting = observations.subset(*fit_names)
+        loss = observations.values.new_zeros((), dtype=torch.float32)
+        metrics = {}
+        # Only observed levels: absent levels need not be fabricated, and level
+        # counts are not assumed binary. Each unbiased group needs >= 2 rows.
+        for level in torch.unique(instrument):
+            mask = instrument == level
+            group = fitting.rows(mask)
+            if len(group) < 2:
+                raise ValueError("Unbiased IV energy distance needs at least two observations per instrument level.")
+            set_nodes = NamedBatch(level.expand(self.bs, 1), instrument_batch.variables)
+            value, extra = self._discrete_group(group, set_nodes)
+            weight = mask.float().mean()
+            loss = loss + weight * value
+            for name, statistic in extra.items():
+                metrics[name] = metrics.get(name, 0) + weight * statistic
+        return loss, metrics
 
-        loss_tot = torch.tensor(0.0, device=self.model.device)
-        L_extra = []
-        for i in range(2):
-            z_mask = (z.squeeze(-1) == i)
-            es, extra = self.discrete_loss.energy_dist(p_all_hat[z_mask].unsqueeze(0), x_true=xy[z_mask].unsqueeze(0))
-            loss_tot += es * z_mask.sum() / z_mask.numel()
-            L_extra.append(extra)
-
-        # Average stats over all Z
-        L_extra_mean = {}
-        for extra in L_extra:
-            for k, v in extra.items():
-                if k not in L_extra_mean:
-                    L_extra_mean[k] = []
-                L_extra_mean[k].append(v)
-        for k, v in L_extra_mean.items():
-            L_extra_mean[k] = torch.stack(v).mean(dim=0)
-
-        return loss_tot, L_extra_mean
-
-    def _evaluate_continuous(self, observations, **kwargs) -> tuple[torch.Tensor, dict]:
-        # Draw sample from the model
+    def _evaluate_continuous(self, observations: NamedBatch):
+        unknown = set(observations.names) - set(self.model.node_dict)
+        if unknown:
+            raise ValueError(f"Observations contain unknown model variables: {sorted(unknown)}")
+        self.model._variable_info(observations.names, observations.variables)
         all_preds, _ = self.model.sample(batch_size=self.bs)
+        preds = all_preds.subset(*observations.names)
+        return self._energy_score(observations.values.to(preds.values), preds.values)
 
-        # Filter out nodes for energy score
-        # TODO: once graph is specified, dynamically set observed nodes here.
-        preds = torch.cat([all_preds[node_name] for node_name in ["Z", "X", "Y"]], dim=-1)  # shape = [BS, n_nodes]
-
-        # Compute energy score between predictions and sample.
-        return self._energy_score(observations, preds, **kwargs)
-
-    def evaluate(self, observations, **kwargs) -> tuple[torch.Tensor, dict]:
-        """ This is a placeholder that gets replaced by the appropriate method in __init__ based on the SEM type. """
-        raise NotImplementedError("Energy score is not implemented for this SEM type.")
-
-    def _energy_score(self, targets, preds, **kwargs) -> tuple[torch.Tensor, dict]:
-        """Loss function based on the energy score.
-
-        Args:
-            targets (torch.Tensor): iid samples from the true distribution of. Shape = [bs, ...]
-            preds (torch.Tensor): Predicted. shape = [bs, ...]
-        Returns:
-            loss (torch.Tensor): energy loss.
-            metrics (dict): dictionary of useful metrics.
-        """
-        m = preds.shape[1]
-        s1 = torch.linalg.vector_norm(preds - targets, 2, dim=-1) ** self.beta
-        s2 = (torch.cdist(preds, preds, 2) ** self.beta) * m / (m - 1)
-
-        energy_score = (s1 - s2 / 2).mean()
-        return energy_score, {"energy_score": energy_score, "estimated-true distance": s1.mean(), "estimated-estimated distance": s2.mean()}
+    def _energy_score(self, targets, preds, **kwargs):
+        # Independent observation and model sample counts; all cross-pairs.
+        m = preds.shape[0]
+        cross = (torch.cdist(targets, preds) ** self.beta).mean()
+        pair = torch.cdist(preds, preds) ** self.beta
+        within = (pair.sum() - pair.diagonal().sum()) / (m * (m - 1))
+        score = cross - within / 2
+        return score, {"energy_score": score, "estimated-true distance": cross,
+                       "estimated-estimated distance": within}
 
     def __repr__(self):
         return "EnergyLoss"
 
+
 class MeanPotentialOutcome(SEM2Operator):
-    """ Expected potential outcome:
-            E[target_node | do(intervene_node = set_value)]
+    """E[target | do(intervene=value)], using named outcomes.
+
+    As before, discrete means use the numerical state values. This does not
+    assign meaningful scores to arbitrary categorical labels; F28 is separate.
     """
     input_type = OperatorInput.DATA
     output_type = OperatorOutput.SCALAR
 
     def __init__(self, target_node: str, intervene_node: str, cfg: TrainingConfig, model: SEM2):
-        self.device = cfg.device
-        self.intervene_node = intervene_node
         self.model = model
+        self.target_node = target_node
+        self.intervene_node = intervene_node
+        if intervene_node not in model.node_dict:
+            raise ValueError(f"Unknown intervention node: {intervene_node!r}")
+        self.sampler = PotentialOutcome(model, target_node)
+        if model.node_dict[target_node].out_dim != 1 or model.node_dict[intervene_node].out_dim != 1:
+            raise ValueError("MeanPotentialOutcome requires scalar target and intervention nodes.")
 
-        # Select the correct forward method based on the SEM type
-        sem_type = self.model.sem_type
-        if SEMType.is_continuous(sem_type):
-            self.evaluate = self._evaluate_continuous
-            self.sampler = PotentialOutcome(model, target_node)
-
-        elif SEMType.is_discrete(sem_type):
-            self.evaluate = self._evaluate_discrete
-            # In the discrete case, mean marginal outcome is sum_a(p(y=a|T) * a)
-            # Model outputs look like:
-            #         [[0, 0], [0, 1], [1, 0], [1, 1]], shape = [n_conf, n_nodes]
-            # Need to find the target value corresponding to each outcome.
-            target_id = model.state_node_names.index(target_node)   # Position of target_node in the output index
-            self.target_value = model.all_states[:, target_id]      # Value corresponding to target_node. Shape = [n_conf]
-        else:
-            raise NotImplementedError(f"Mean Potential Outcome is not implemented for this SEM type: {sem_type}")
-
-    def _evaluate_discrete(self, set_value: torch.Tensor, **kwargs) -> tuple[torch.Tensor, dict]:
-        """ Get the marginal probability of target_node. """
-        # Type hint to specific SEM type, for syntax highlighting.
-        model: SEM2Discrete = self.model
-        bs = set_value.shape[0]
-
-        set_nodes = {self.intervene_node: set_value}
-
-        preds_all, _ = model.sample(batch_size=bs, set_nodes=set_nodes)  # shape = [BS, n_conf]
-        preds_all = preds_all.mean(dim=0)  # shape = [n_conf]
-        # Marginal outcome is sum_a(p(x=a) * a)
-        mean_outcome = preds_all * self.target_value
-        mean_outcome = mean_outcome.sum()
-        return mean_outcome, {}
-
-
-    def _evaluate_continuous(self, set_value: torch.Tensor, **kwargs) -> tuple[torch.Tensor, dict]:
-        """ Get the potential outcome, setting 'set_node' equal to 'set_value'.
-                E[target_node | do(intervene_node = set_value)]
-
-            Args:
-                set_value: the value to set the node to. Shape = [BS, 1]
-        """
-        bs = set_value.shape[0]
-        set_nodes = {self.intervene_node: set_value}
-        target_outcome, _ = self.sampler.evaluate(batch_size=bs, set_nodes=set_nodes)
-        mean_target_outcome = target_outcome.mean()
-        return mean_target_outcome, {}
-
-    def evaluate(self, set_value: torch.Tensor, **kwargs) -> tuple[torch.Tensor, dict]:
-        """ This is a placeholder that gets replaced by the appropriate method in __init__ based on the SEM type. """
-        raise NotImplementedError("Mean Potential Outcome is not implemented for this SEM type.")
+    def evaluate(self, set_value: NamedBatch, **kwargs) -> tuple[torch.Tensor, dict]:
+        if not isinstance(set_value, NamedBatch):
+            raise TypeError("MeanPotentialOutcome expects a NamedBatch.")
+        if set_value.names != (self.intervene_node,):
+            raise ValueError(f"MeanPotentialOutcome requires only the intervention variable {self.intervene_node!r}.")
+        outcome, _ = self.sampler.evaluate(
+            batch_size=len(set_value), set_nodes=set_value,
+        )
+        if isinstance(outcome, FiniteDistribution):
+            probabilities = outcome.probabilities.mean(0)  # integrate exogenous draws explicitly
+            values = outcome.states.select(self.target_node).squeeze(-1).to(probabilities)
+            return (probabilities * values).sum(), {}
+        values = outcome.select(self.target_node)
+        if not values.is_floating_point():
+            values = values.float()
+        return values.mean(), {}
 
 
 class ATE(SEM2Operator):
-    """ Compute ATE from the model. """
+    """E[Y | do(T=1)] - E[Y | do(T=0)], with roles selected from config."""
     input_type = OperatorInput.SELF
     output_type = OperatorOutput.SCALAR
 
     def __init__(self, cfg: TrainingConfig, model: SEM2):
-        """
-        Compute the average treatment effect from the model. Treatment and Target nodes are selected from the config.
-            ATE = E[Y | do(T=1)] - E[Y | do(T=0)]
-        Args:
-            cfg: TrainingConfig.
-            model: The SEM2 model to evaluate ATE on. Must have methods to generate eps_y and eps_u, and a forward() method that can take set_nodes.
-        """
-        self.device = cfg.device
+        self.device = model.device
         self.bs = cfg.sample_bs
         self.model = model
-        # Set up potential outcome
-        T_node, Y_node = cfg.T_node, cfg.Y_node       # This might be changed when graph setup is finalized.
-        self.treat_pot_out = MeanPotentialOutcome(Y_node, T_node, cfg, model)
+        self.treat_pot_out = MeanPotentialOutcome(cfg.Y_node, cfg.T_node, cfg, model)
 
     def evaluate(self, *args, **kwargs) -> tuple[torch.Tensor, dict]:
-        """ Evaluate ATE by intervening on the treatment node in the model.
-            Works for both continuous and discrete SEM2 models.
-        """
-
-        t0 = torch.zeros([self.bs, 1], device=self.device, dtype=torch.long)
-        t1 = torch.ones([self.bs, 1], device=self.device, dtype=torch.long)
-
-        # Preds for Y | T=0
+        # Float values also work for discrete nodes, after exact validation, and
+        # avoid feeding integer inputs into continuous linear/MLP mechanisms.
+        variables = self.model._variable_info((self.treat_pot_out.intervene_node,))
+        t0 = NamedBatch(torch.zeros([self.bs, 1], device=self.device), variables)
+        t1 = NamedBatch(torch.ones([self.bs, 1], device=self.device), variables)
         pot_out_t0, _ = self.treat_pot_out.evaluate(t0)
-        # Preds for Y | T=1
         pot_out_t1, _ = self.treat_pot_out.evaluate(t1)
-
-        # ATE = E[Y | T=1] - E[Y | T=0]
-        ATE = pot_out_t1 - pot_out_t0
-        return ATE, {}
+        return pot_out_t1 - pot_out_t0, {}
 
     def __repr__(self):
         return "ATE"
 
 
 class SEM2Loss(SEM2Operator):
-    """ Computes the loss from overall loss from observations, with the ability to combine multiple losses together.
-        The Overall loss is:
-            L = sum_i(weight_i * loss_componenet_i)
-        Loss components call the model to get predictions and compute the loss.
-    """
+    """Weighted scalar objectives over a named batch, plus model-only queries."""
     input_type = OperatorInput.DATA
     output_type = OperatorOutput.SCALAR
 
-    loss_components: list[tuple[SEM2Operator, float]]
-
     def __init__(self, cfg: TrainingConfig, model: SEM2):
-        self.device = cfg.device
-        loss_components = []
+        self.device = model.device
+        components = []
         if cfg.use_energy_score:
-            loss_components.append((EnergyLoss(cfg, model), cfg.energy_score_weight))
+            components.append((EnergyLoss(cfg, model), cfg.energy_score_weight))
         if cfg.use_ate:
-            loss_components.append((ATE(cfg, model), cfg.ate_weight))
+            components.append((ATE(cfg, model), cfg.ate_weight))
         if cfg.use_mmd:
             raise NotImplementedError("MMD loss not implemented yet.")
+        if not components:
+            raise ValueError("Enable at least one training objective.")
+        self.loss_components = components
 
-        # Check components are all scalar
-        for loss_comp, weight in loss_components:
-            assert loss_comp.output_type == OperatorOutput.SCALAR, "Loss components must be scalar."
-        self.loss_components = loss_components
-
-    def evaluate(self, observations, **kwargs) -> tuple[torch.Tensor, dict]:
-        """ Compute the combined loss. """
+    def evaluate(self, observations: NamedBatch, **kwargs) -> tuple[torch.Tensor, dict]:
+        if not isinstance(observations, NamedBatch):
+            raise TypeError("SEM2Loss expects a NamedBatch.")
         total_loss = torch.tensor(0.0, device=self.device)
         metrics = {}
-        # Weighted sum of sub losses
-        for loss_comp, weight in self.loss_components:
-            loss_comp_value, sub_metrics = loss_comp.evaluate(observations, **kwargs)
-            total_loss += weight * loss_comp_value
-            metrics.update(sub_metrics)         # Potential collisions here.
-            metrics[str(loss_comp)] = loss_comp_value.detach()
-
+        for component, weight in self.loss_components:
+            args = (observations,) if component.input_type == OperatorInput.DATA else ()
+            value, sub_metrics = component.evaluate(*args, **kwargs)
+            total_loss = total_loss + weight * value
+            metrics.update(sub_metrics)
+            metrics[str(component)] = value.detach()
         return total_loss, metrics
