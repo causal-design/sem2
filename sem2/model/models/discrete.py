@@ -4,12 +4,12 @@ from __future__ import annotations
 import logging
 import torch
 from torch import nn
+from torch import Tensor
 from collections import defaultdict
 
 from ..components.nodes import NodeMLPDiscrete, SEM2Node, DiscreteModes
 from ..construction import SEMType
 from .base import SEM2
-from ...data import NamedBatch, FiniteDistribution
 
 
 class SEM2Discrete(SEM2):
@@ -80,22 +80,18 @@ class SEM2Discrete(SEM2):
                     else:
                         self.cont_parents[node_name].append(pn)
 
-    def sample(self, batch_size=1, set_nodes: NamedBatch | None = None) -> tuple[FiniteDistribution, dict]:
+    def sample(self, batch_size=1, set_nodes: dict[str, torch.Tensor] = None) -> tuple[Tensor, dict]:
         """ Discrete sampling: Sample every possible discrete outcome.
             This involves sampling continuous variables, and computing every permutation of discrete variables.
 
             Args:
-                batch_size: Number of exogenous draws (probability rows).
-                set_nodes: NamedBatch of interventions with batch_size rows.
-            Returns:
-                FiniteDistribution pairing named states with probabilities
-                [exogenous draws, states], and named intervention provenance.
+                batch_size: Number of samples to draw.
+                set_nodes: Optional dict of node name -> tensor to pin specific node
+                           values (e.g. for interventions). Shape: [batch_size, out_dim].
         """
 
-        named_interventions = self._interventions(batch_size, set_nodes)
-        set_nodes = {} if named_interventions is None else {
-            n: named_interventions.select(n) for n in named_interventions.names
-        }
+        set_nodes = set_nodes if set_nodes is not None else {}
+        assert set(set_nodes.keys()).issubset(self.node_dict.keys()), f"Invalid nodes given: {set_nodes.keys()}"
 
         device = self.device
         all_states = self.all_states  # [N_conf, N_discrete_nodes]
@@ -184,6 +180,7 @@ class SEM2Discrete(SEM2):
             #     print("Warning: All probabilities are zero. Check for underflow or incorrect model specification.")
         probs = torch.exp(log_probs)
 
-        supplied = () if named_interventions is None else named_interventions.variables
-        states = NamedBatch(all_states, self._variable_info(self.state_node_names, supplied))
-        return FiniteDistribution(states, probs), {"set_nodes": named_interventions}
+        # Return extra info
+        extra_dict = {"states": all_states}
+        extra_dict["full_state"] = {node: self.node_dict[node].get_value() for node in self.topological_order}
+        return probs, extra_dict

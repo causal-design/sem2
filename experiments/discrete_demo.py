@@ -3,7 +3,6 @@ import logging
 
 from sem2.model.models import SEM2, SEM2Discrete
 from sem2.default_configs import MLPConfig
-from sem2.data import NamedBatch, VariableInfo
 
 logging.basicConfig(level=logging.INFO)
 
@@ -19,10 +18,9 @@ print("===== Test SEM2 Continuous =====")
 model = SEM2(formula1 + formula2, node_cfgs=node_cfgs, device="cpu")
 model.eval()
 
-set_nodes = NamedBatch(
-    torch.tensor([[1, 1], [0, 0], [2, 0]]),
-    (VariableInfo("Z", True, True), VariableInfo("D", True, True)),
-)
+set_nodes = {"Z": torch.tensor([[1.], [0.], [100.]], device="cpu"),
+"D": torch.tensor([[1], [0], [0]], device="cpu"),
+}
 all_states, _ = model.sample(3, set_nodes=set_nodes)
 print(f'{all_states = }')
 
@@ -38,10 +36,9 @@ print(node_cfgs)
 model = SEM2Discrete(formula1 + formula2, node_cfgs=node_cfgs, device="cpu")
 model.eval()
 
-set_nodes = NamedBatch(
-    torch.tensor([[1, 1], [0, 0], [2, 0]]),
-    (VariableInfo("Z", True, True), VariableInfo("D", True, True)),
-)
+set_nodes = {"Z": torch.tensor([[1.], [0.], [100.]], device="cpu"),
+"D": torch.tensor([[1], [0], [0]], device="cpu"),
+}
 all_states, _ = model.sample(3, set_nodes=set_nodes)
 print("===== Test SEM2 =====")
 print(f'{all_states = }')
