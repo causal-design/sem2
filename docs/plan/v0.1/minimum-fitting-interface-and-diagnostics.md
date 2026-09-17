@@ -105,3 +105,79 @@ The [package trainer](../../../sem2/sem2trainer.py#L42-L80) and
 and supplied batches. They log epoch losses but do not return the training record
 specified above, split folds, run a validation loop, or apply convergence-based
 stopping criteria. This is source inspection, not a new training run.
+
+## Questions for review
+
+The agreed requirements above remain unchanged. The first two categories concern
+v0.1; only the third is deferred beyond it. Questions identify choices, not
+approved defaults or requirements to make every option configurable.
+
+### 1. Objective decisions needed for v0.1
+
+These belong to the separate objective review, not a later release; see items
+4–6 of the [parent meeting agenda](../v0.1.md#next-steps-and-review-decisions).
+
+- **Which continuous energy estimator should we use?** Specify the distance and
+  its exponent, variable scaling, and overall normalization. Decide whether to
+  compare all observation–simulation pairs or paired draws, and how to handle
+  within-sample self-pairs; observation and simulation counts may differ.
+- **How should finite-discrete fitting compare categories?** Specify the
+  discrepancy, normalization, and distance for categories without numerical
+  scores, including how variable scales enter. State when relabeling should
+  preserve the fit; preserving category meaning alone does not guarantee this,
+  and categorical likelihood is not a new prerequisite.
+- **How should IV fitting weight instrument levels and form valid batches?**
+  Decide whether conditional discrepancies use observed-frequency weights and
+  specify their normalization relative to the signed estimand penalty. Full-data
+  eligibility remains at least two retained observations per declared instrument level;
+  choose full-data evaluation or batches that also make the estimator valid.
+
+**Recommendation for the meeting:** settle these mathematical choices and the IV
+batching rule before implementation, while assigning routine trainer details below
+to implementation review.
+
+### 2. Trainer details to settle during implementation review
+
+These details are unspecified, not explicitly postponed beyond v0.1. A small
+proposal can resolve them; bring back choices that change statistical meaning or
+agreed user-visible behavior rather than treating every detail as a meeting blocker.
+
+- **Should Gaussian fitting minimize negative mean log-likelihood?** Confirm the
+  sign and averaging over retained observations for the observed-data likelihood.
+  The agreed intercept and observed-variable rules remain unchanged.
+- **How does the caller select the objective?** Choose a name or supplied object
+  and document the accepted form. `fit` and direct trainer use must share it;
+  this does not require a new objective hierarchy.
+- **What state changes during and between fits?** State whether fitting mutates
+  the supplied model and whether another call resets or retains optimizer state.
+  Preserve the sweep's agreed fresh-start default and explicit warm-start option.
+- **How are randomness and sample counts controlled?** Document fitting/simulation
+  seeds, observation batch size, and simulation count. The caller supplies an
+  initialized model; distinguish its initialization from randomness during fitting,
+  and apply the objective-specific IV batching rule above.
+- **How often are histories recorded?** Choose per-update, per-epoch, or configurable
+  recording, with clear indexing and aggregation. Recording loss and raw L2
+  gradient-norm histories is already required; their inclusion is not open.
+- **What data and draws feed the final evaluation?** Specify the retained
+  observations and simulation draws used with the final fitted parameters.
+  State when the required IV counts, conditional-table total variation, and
+  largest cell-probability error are computed, separately for lower/upper searches.
+- **How does a failed fit reach the caller?** Choose an exception or explicitly
+  failed result, and specify how settings and available partial history are retained.
+  A sweep must retain failure information without treating the run as successful;
+  preserve the existing [sweep records and endpoint policy](identification-and-partial-identification.md#fitting-and-extrapolation-agreed-workflow).
+
+### 3. Questions deferred beyond v0.1
+
+These concern the [unscheduled extensions above](#possible-future-extensions--unscheduled),
+not missing v0.1 decisions. No release or implementation is assigned to them.
+
+- **How would held-out validation be monitored?** Later review would choose the
+  supplied validation data, evaluation frequency, and comparable loss settings.
+- **When would training stop automatically, and which iterate would be returned?**
+  Monitoring criteria, patience/tolerances, and best-iterate restoration are deferred.
+- **Which estimators need cross-fitting?** Fold construction and out-of-fold
+  evaluation await a specific estimator; ordinary minibatching is not cross-fitting.
+- **Is a public custom-loop API needed?** Reconsider trainer `step`/`evaluate`
+  primitives only for a justified advanced use case; required final loss evaluation
+  and the agreed query/operator `.evaluate()` interface are not deferred.
