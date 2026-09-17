@@ -1,6 +1,6 @@
 # 3. Minimum fitting interface and diagnostics
 
-**Agreed trainer/diagnostics boundary for F15–F18/F25 in the [v0.1 plan](../v0.1.md).**
+**Agreed trainer/diagnostics boundary for F15–F18/F25 in the [v0.1 plan](README.md).**
 This handoff records the decisions from the fitting-interface discussion, including
 its [decision note on PR #50](https://github.com/causal-design/sem2/pull/50#issuecomment-5633054241).
 It is a specification for review and subsequent implementation, not a claim that
@@ -115,7 +115,7 @@ approved defaults or requirements to make every option configurable.
 ### 1. Objective decisions needed for v0.1
 
 These belong to the separate objective review, not a later release; see items
-4–6 of the [parent meeting agenda](../v0.1.md#next-steps-and-review-decisions).
+4–6 of the [parent meeting agenda](README.md#next-steps-and-review-decisions).
 
 - **Which continuous energy estimator should we use?** Specify the distance and
   its exponent, variable scaling, and overall normalization. Decide whether to
@@ -136,11 +136,15 @@ These belong to the separate objective review, not a later release; see items
 batching rule before implementation, while assigning routine trainer details below
 to implementation review.
 
-### 2. Trainer details to settle during implementation review
+<a id="step-6-technical-review-before-implementation"></a>
 
-These details are unspecified, not explicitly postponed beyond v0.1. A small
-proposal can resolve them; bring back choices that change statistical meaning or
-agreed user-visible behavior rather than treating every detail as a meeting blocker.
+### 2. Step 6 technical review before implementation
+
+The September 17 discussion separates step 6 from preparatory steps 1–5 in the
+[implementation plan](../v0.1.md). Settle the choices below in a bounded technical
+review before implementing the trainer. Completing preparation is not permission
+to choose these silently. The agreed minimum behavior above remains unchanged;
+no new trainer/result hierarchy, public loop API or automatic stopping is implied.
 
 - **Should Gaussian fitting minimize negative mean log-likelihood?** Confirm the
   sign and averaging over retained observations for the observed-data likelihood.
@@ -166,6 +170,11 @@ agreed user-visible behavior rather than treating every detail as a meeting bloc
   failed result, and specify how settings and available partial history are retained.
   A sweep must retain failure information without treating the run as successful;
   preserve the existing [sweep records and endpoint policy](identification-and-partial-identification.md#fitting-and-extrapolation-agreed-workflow).
+
+- **What is the smallest result and plotting interface?** Prefer an existing/simple
+  record; a `FitResult` class is not required. Choose an optional loss-plot entry
+  point without building a diagnostics framework. Justify each new class/method
+  against an existing method or a small function/record.
 
 ### 3. Questions deferred beyond v0.1
 

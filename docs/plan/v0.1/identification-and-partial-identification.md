@@ -1,8 +1,8 @@
 # 5. Identification checks and partial-identification results
 
-Design plan for F33–F35 of the [v0.1 plan](../v0.1.md), including the general
-variable and estimand requirements discussed alongside them. **The only open
-topic is the detailed rule for automatic regression-window selection.** Its broad
+Design plan for F33–F35 of the [v0.1 plan](README.md), including the general
+variable and estimand requirements discussed alongside them. **Within the F33–F35
+method discussion, the remaining open topic is the detailed rule for automatic regression-window selection.** Its broad
 approach is agreed; recommendations below remain unapproved and unvalidated.
 Implementation is paused pending team discussion and a fresh request.
 
@@ -13,6 +13,15 @@ and integration into the default branch are separate decisions.
 ## General design requirements for variables and estimands
 
 These apply throughout the package, not just to the IV example.
+
+The September 17 [implementation plan](../v0.1.md) makes steps 1–5 preparatory,
+with new classes/methods justified against simpler reuse, and step 6 a separate
+trainer technical review. v0.1 variables are scalar. Deliberate category-to-numeric
+scoring is separate preprocessing before training, not automatic internal encoding.
+The Kang–Schafer example targets ATT in the factual-treated population; its bounded
+adaptation/averaging review is in the [query handoff](causal-query-interface-and-two-stage-example.md#kangschafer-att-example-additional-bounded-target).
+The population ATE IV searches below and the single-margin ID contract are unchanged;
+neither automatically supplies an ATT estimator or verdict under additional assumptions.
 
 - **Preserve what variables mean after numerical conversion.** Retain each
   variable's original categorical status, labels, and mapping after both automatic

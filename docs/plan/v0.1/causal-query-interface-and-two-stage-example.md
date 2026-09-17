@@ -1,12 +1,18 @@
 # 4. Causal-query interface and the two-stage example
 
-**Agreed F04/F32 direction for the [v0.1 plan](../v0.1.md).** The thread selected
+**Agreed F04/F32 direction for the [v0.1 plan](README.md).** The thread selected
 Option B (extend the existing small query operators) and confirmed the two-stage
 example below. Review this handoff for fidelity and acceptance coverage, not to
 choose again between the earlier alternatives. This is documentation only; the
 new signatures, sampler fixes, and fitting example are not implemented here.
 
 ## Agreed interface
+
+The [implementation plan](../v0.1.md) separates preparatory changes from the
+trainer's technical review and later query implementation. Reuse existing small
+operators; proposed names are not permission to add unnecessary classes/methods.
+v0.1 fitting and examples are scalar-only. Deliberate categorical scoring happens
+in separate preprocessing before training, not inside queries.
 
 Build on `MeanPotentialOutcome` and `ATE`, keeping the target separate from
 training configuration. A query names its outcome and interventions and holds a
@@ -39,7 +45,7 @@ Allow user-selected levels, including nonbinary comparisons such as `2` versus
 specify complete regimes by the omission rule above. For the fixed two-stage
 comparison, explicitly name both treatments in both dictionaries.
 
-Start with means and additive mean contrasts over the fitted model's implied
+For the ordinary operators below, use means and additive mean contrasts over the fitted model's implied
 population, not implicit training-row averaging. For a binary endpoint explicitly
 interpreted as an event indicator, the mean is a risk and the contrast is a risk
 difference. Preserve the [general categorical-meaning requirements](identification-and-partial-identification.md#general-design-requirements-for-variables-and-estimands):
@@ -48,7 +54,7 @@ and suggest a distributional estimand or deliberate numerical conversion when a
 categorical outcome lacks that interpretation. This handoff does not settle the
 separate conversion-helper design.
 
-The [meeting-decision list](../v0.1.md#next-steps-and-review-decisions) records the
+The [meeting-decision list](README.md#next-steps-and-review-decisions) records the
 remaining failure/result behavior for an unscored categorical mean and the scope
 of the suggested probability contrasts. Do not infer a numeric-code fallback or
 an additional query family from this warning requirement.
@@ -64,6 +70,29 @@ weights outcome values by state probabilities and integrates over any remaining
 exogenous draws; a probability table is not a batch of outcome samples. State
 when integration remains Monte Carlo. A point query does not automatically return
 a confidence interval, an identification verdict, or sharp bounds.
+
+### Kang–Schafer ATT example: additional bounded target
+
+The September 17 decision selects a Kang–Schafer adaptation for **ATT**, the
+average treatment effect on the factually treated, with observed factual outcomes.
+There is no separate missing-data case study. Ordinary `ATE` remains a population
+contrast; its existing averaging must not be silently redefined.
+
+Before [example 9b](../v0.1.md#9b-kangschafer-adapted-to-att), specify the adapted
+potential-outcome generator, observed adjustment covariates and overlap assumptions,
+the treated target distribution, and an independent reference for that same target.
+Decide explicitly whether averaging uses observed treated covariates or a fitted
+treated-population law. Conditioning on factual treatment is not intervention;
+conditioning after setting treatment to treated does not recover ATT. Fitting only
+treated rows is not a substitute for confounder adjustment using both arms.
+
+Prefer a small example-local evaluation function; extend existing operators only
+if the reviewed estimator genuinely needs it. No `ATT` class, arbitrary conditioning
+API, general empirical-distribution system or counterfactual framework is authorized
+by the example choice. Include a reviewed heterogeneous-effect check that separates
+ATT from ATE; a constant-effect example alone cannot establish correct averaging.
+Keep generator-only potential outcomes out of fitting. This is a target and review
+boundary, not an implemented estimator or approval of a particular adaptation.
 
 ### Ordinary fitted-model calls
 
@@ -241,7 +270,7 @@ The interface family and two-stage example are settled. Reviewers should check
 fidelity, scientific assumptions, and test coverage; exact API spellings and
 numerical fitting tolerances remain for implementation review. Cross-document
 questions about categorical scoring and failure behavior are collected in the
-[parent plan's meeting list](../v0.1.md#next-steps-and-review-decisions), without
+[parent plan's meeting list](README.md#next-steps-and-review-decisions), without
 reopening the agreed interface or generator. The separate identification-selector
 discussion is unchanged. This documentation does not authorize implementation,
 merge, deployment, or release. Original meeting records remain historical

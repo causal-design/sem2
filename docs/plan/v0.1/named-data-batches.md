@@ -1,10 +1,10 @@
-# Variable support and named data: implementation plan
+# Variable support and named data: specification
 
-**Documentation only.** This specification carries forward [PR #54](https://github.com/causal-design/sem2/pull/54)'s variable-support and categorical-to-numeric-conversion decisions into the combined [v0.1 planning review](../v0.1.md) for [PR #50](https://github.com/causal-design/sem2/pull/50). Source code is unchanged relative to that review base.
+**Documentation only.** This specification carries forward [PR #54](https://github.com/causal-design/sem2/pull/54)'s variable-support and categorical-to-numeric-conversion decisions into the combined [v0.1 planning review](README.md) for [PR #50](https://github.com/causal-design/sem2/pull/50). Source code is unchanged relative to that review base.
 
 The closed [named-data PR #57](https://github.com/causal-design/sem2/pull/57) and [support PR #52](https://github.com/causal-design/sem2/pull/52) are **unmerged implementation examples**, not approved implementations or dependencies of this plan. For concrete illustrations, see the [named-data change summary](https://github.com/causal-design/sem2/blob/e43d22854f18a116f382a3d30160290a267146a3/docs/implementation/named-data-changes.md) and [node-support implementation](https://github.com/causal-design/sem2/blob/d9897a0d334a647a62c90685220470db13ca5330/sem2/model/components/nodes.py) at their preserved revisions. Their code is not included here. API names below describe intended interfaces; implementation needs separate authorization and review.
 
-Each item gives the question or decision, a brief chosen action and considered alternative, then the detailed explanation. The unresolved numeric-column question is last. The [minimal model–data interface](minimal-model-data-interface.md) remains the specification for broader DataFrame preparation; this note does not replace it.
+Each item gives the question or decision, a brief chosen action and considered alternative, then the explanation. The September 17 preprocessing decision and remaining declaration details are last. The [minimal model–data interface](minimal-model-data-interface.md) governs broader DataFrame preparation; the [implementation plan](../v0.1.md) governs ordered reviews. Its steps 1–5 are preparatory. Every new class/method must justify its role against simpler reuse of existing code; this specification is not permission to add surrounding frameworks.
 
 ## Variable support and preparation
 
@@ -24,7 +24,7 @@ Each item gives the question or decision, a brief chosen action and considered a
 
   **Explanation:** The agreed public fitting direction is a pandas DataFrame passed directly to the fitting interface, with shared preparation for direct Trainer use. Preparation handles column-name conversion and reporting, name matching, validation, complete-case selection with input/retained/dropped counts, and internal tensor conversion without modifying the caller's DataFrame. It must not repeat this work in each batch or operator. Follow the linked minimal-interface plan for the exact input and missing-data rules.
 
-  The Dummy loader is the initial integration example, not a production DataFrame parser. Internal `VariableInfo` and `NamedBatch` records can preserve aligned names and representation metadata without becoming a mandatory public wrapper. Full preparation and category-to-score conversion remain later implementation work; they are not supplied by adding named records alone.
+  The Dummy loader is the initial integration example, not a production DataFrame parser. Internal `VariableInfo` and `NamedBatch` records preserve aligned names and representation metadata without becoming a mandatory public wrapper. Full preparation remains separate implementation work. Deliberate category-to-score conversion is upstream preprocessing, not an automatic task of preparation or fitting. Neither operation is supplied by adding named records alone; do not require another `PreparedData` class just to combine a record and a report.
 
 ## Named-data contract
 
@@ -48,13 +48,13 @@ Each item gives the question or decision, a brief chosen action and considered a
 
   `PotentialOutcome` should use the same sampler results, with continuous queries still stopping at the target. Existing descriptors may preserve external-label encodings. State marginalization sums probability mass; integration over exogenous draws is a separate mean. Merely selecting state columns without combining the corresponding probabilities is not marginalization. The closed code example uses the existing `set_nodes` name; the v0.1 user-facing name remains `do_intervention`, as specified in the minimal-interface plan.
 
-- **How should the named format retain existing vector-valued nodes?**
+- **What does scalar-only v0.1 mean for existing vector-valued nodes?**
 
-  **Chosen action:** Record each variable's contiguous column width.
+  **Chosen action:** v0.1 fitting and examples use scalar variables only. Add no vector-valued DataFrame cells or multi-column binding interface.
 
-  **Alternative considered:** Keep the initial scalar-column-only record. That would lose existing supported node dimensions.
+  **Earlier alternative:** Preserve low-level vector widths during migration. Retain that information only where necessary to avoid an unrelated regression, not as a reason to extend v0.1 scope.
 
-  **Explanation:** Use `VariableInfo.width` to retain the contiguous columns of existing vector-valued nodes. Scalar mean/ATE queries must explicitly require scalar roles. This is a small extension of the named record, not a new general tensor-valued data framework. `select(...)` should return the requested tensor blocks in named order; `subset(...)` should retain their metadata as a `NamedBatch`. Names determine alignment rather than merely labelling a positional calculation. This internal width contract does not specify a public DataFrame representation for vector observations; that boundary is listed in the [meeting decisions](../v0.1.md#next-steps-and-review-decisions).
+  **Explanation:** Named selection returns columns in the requested order and named subsetting retains their metadata. A scalar categorical variable can have several levels; its probability vector is not a vector-valued observation. Existing `VariableInfo.width`-style information may retain low-level tensor blocks, but the public scalar boundary is settled, not an open vector-representation decision. Avoid new width-related convenience methods without a real caller.
 
 ## Fitting and numerical meaning
 
@@ -80,11 +80,11 @@ Each item gives the question or decision, a brief chosen action and considered a
 
   **Chosen action:** Keep category labels, internal state codes, and deliberate numeric scores distinct.
 
-  **Alternative considered:** A numeric default versus an explicit declaration or mapping remains open; discuss it at the end rather than adopt it here.
+  **September 17 clarification:** Categorical `0, 1, 2` and quantitative `0, 1, 2` are not formally the same. Deliberate conversion is separate preprocessing before training; the minimal declaration/provenance carrier remains an implementation-review detail.
 
   **Explanation:** Existing distance and mean calculations use stored values, but a category ID alone does not make arithmetic meaningful. `VariableInfo.encoding` records external labels and their stored integer state codes; it is not a category-to-score conversion policy. Finite or discrete variables need not be categorical, and dtype alone does not establish the variable's meaning. Node-level support remains authoritative.
 
-  Deliberate scores can make arithmetic meaningful without turning finite-discrete fitting into a continuous approximation. Preserve the finite-state engine's internal codes and the distinction between coding and scoring. The present numerical operators' use of stored values must not be treated as an agreed default for ambiguous columns in future preparation. Neither this plan nor the scoped named-data implementation settles that policy or supplies a full conversion layer.
+  Deliberate scores can make arithmetic meaningful without turning finite-discrete fitting into a continuous approximation. Preserve the finite-state engine's internal codes and the distinction between coding and scoring. The present numerical operators' use of stored values must not be treated as an agreed default. Preparation validates supplied meaning and encodes identities; it does not choose quantitative scores or call the separate scoring helper automatically.
 
   Follow the [general variable and estimand requirements](identification-and-partial-identification.md#general-design-requirements-for-variables-and-estimands): retain original categorical status, labels, mappings, and any user-supplied numerical interpretation after both encoding and deliberate conversion. For categorical outcomes without that interpretation, warn and suggest category-probability contrasts or deliberate scoring instead of silently using codes as ATE values. The remaining numeric-column question concerns ambiguous inputs, not permission to discard known categorical meaning.
 
@@ -96,9 +96,9 @@ Each item gives the question or decision, a brief chosen action and considered a
 
   **Alternative considered:** Keep a separate experimental optimization loop. Delegate the example to `SEM2Trainer` instead.
 
-  **Explanation:** Implement the records first, pass them through the Dummy loader and trainer, migrate sampler and operator boundaries together, then update tests and runnable examples. Preserve unaffected numerical behavior while checking the explicit boundary changes; this is not approval of known loss defects or of distances between arbitrary category codes. The remaining objective and scoring choices are in the [meeting decisions](../v0.1.md#next-steps-and-review-decisions). The demonstration should display metadata, assert equivalence under column reordering, perform a short optimization run, and show named intervention outcomes. A few optimizer updates demonstrate integration, not convergence or validated causal bounds.
+  **Explanation:** Follow preparatory steps 1–5 of the implementation plan, migrating producers and consumers together. Touch the current trainer only enough to keep that migration runnable. Step 6's trainer consolidation requires its separate technical review; an integration demonstration must not preempt it. Preserve unaffected numerical behavior, not known loss defects or arithmetic on arbitrary codes. The demonstration should display metadata, check column reordering, perform a short existing-loop run, and show named interventions. A few optimizer updates demonstrate integration, not convergence or validated bounds.
 
-  The closed named-data example provides `python -m experiments.trainer` (with `python -m experiments.train` as its equivalent entry point); these commands refer to that example's revision, not an implementation supplied by this plan. For a future implementation, check named alignment and renaming, numerical references, gradients, invalid states, absent/singleton declared instrument levels, rejection of legacy inputs, vector blocks, result axes, and Dummy training. Run the full suite and the discrete/model integration demos; report dependency and whitespace checks, warnings, and the devices actually tested. These are acceptance requirements, not test results for code introduced by this documentation PR. Execution evidence belongs with the future implementation review.
+  The closed named-data example provides `python -m experiments.trainer` (with `python -m experiments.train` as its equivalent entry point); these commands refer to that example's revision, not an implementation supplied by this plan. For a future implementation, check named alignment and renaming, numerical references, gradients, invalid states, absent/singleton declared instrument levels, rejection of legacy inputs, scalar public inputs (plus preserved low-level vector behavior only where needed to avoid regressions), result axes, and Dummy training. Run the full suite and the discrete/model integration demos; report dependency and whitespace checks, warnings, and the devices actually tested. These are acceptance requirements, not test results for code introduced by this documentation PR. Execution evidence belongs with the future implementation review.
 
 - **What belongs in each review?**
 
@@ -110,14 +110,14 @@ Each item gives the question or decision, a brief chosen action and considered a
 
   Do not import code, add dependencies, or choose a category-to-score default as part of this consolidation. Full DataFrame preparation and deliberate conversion remain v0.1 implementation work under their respective specifications; the closed examples do not supply them. Plan approval, implementation approval, merge, and release remain separate decisions.
 
-## Discussion: ambiguous numeric columns
+<a id="discussion-ambiguous-numeric-columns"></a>
 
-- **When a numeric column could contain either quantitative values or category codes, what should preparation assume?**
+## Separate preprocessing and remaining declaration details
 
-  **Chosen action:** Leave the default undecided for team discussion; implement neither policy as part of this planning review.
+- **Settled:** numerical storage does not equate categories with quantities. Deliberate scoring is separate preprocessing before the data are ready for training. Internal encoding only represents identities.
 
-  **Alternatives to discuss:** Treat numeric values as quantitative by default, or require an explicit declaration or mapping before using ambiguous values quantitatively.
+- **Remaining review:** the smallest way to carry supplied categorical status, original labels, explicit scores and mappings with DataFrame-based fitting; how missing/unknown score labels fail; and the helper's name/placement. Do not add a richer dataset schema, automatic ordinal scores or a second public data wrapper.
 
-  **Explanation:** A column stored as numbers may represent measurements, deliberate scores, or category labels encoded as integers. Storage dtype alone does not resolve that distinction. The discussion should decide what evidence preparation requires before values are used in means, distances, or other arithmetic, and what the user must supply when their meaning is ambiguous.
+- **Implementation:** review the small [separate preprocessing unit](../v0.1.md#p-separate-categorical-to-numeric-preprocessing) independently of the trainer. Ordinary pandas operations with a documented provenance convention are a smaller alternative to consider before adding a helper module. No helper is called automatically by `fit`.
 
-  Keep the settled distinctions intact: category identity is separate from its internal code and from an optional score; node-level support remains authoritative; and a score mapping does not by itself change finite-discrete fitting into continuous fitting. This is a question for the future preparation/conversion policy, not permission to add an implicit default to the named-data implementation.
+The node owns its support. Finite/discrete does not necessarily mean categorical, scoring does not select the model engine, and lost external provenance cannot be reconstructed from dtype alone. The categorical-query failure/event-scoring detail and category distance remain in the product agenda; they are not silently settled by moving conversion upstream.

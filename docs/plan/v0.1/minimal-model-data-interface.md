@@ -1,6 +1,6 @@
 # 1. Minimal model–data interface
 
-**Agreed F02/F03 handoff for the [v0.1 plan](../v0.1.md).** This records the agreed
+**Agreed F02/F03 handoff for the [v0.1 plan](README.md).** This records the agreed
 direction from Slack, including the requirement for user-supplied pandas DataFrames.
 It is an implementation specification, not a claim that the new APIs or parser
 fixes already work.
@@ -12,6 +12,19 @@ in the example are illustrative.
 
 ## Working direction
 
+- **Preparatory work, not a new class hierarchy.** Steps 1–5 of the
+  [implementation plan](../v0.1.md) are reviewed one at a time. Prefer existing
+  methods and small records/functions; each additional class or method needs a
+  concrete caller and a reason a simpler change would not suffice. Step 6's
+  trainer implementation is separate and needs its technical decisions first.
+- **Scalar variables only for v0.1.** Reject vector-valued fitting observations;
+  add no vector-cell convention or multi-column binding. Scalar categorical
+  variables may have multiple levels. Preserving existing low-level widths to
+  avoid unrelated regressions does not expand the public scope.
+- **Deliberate scoring is separate preprocessing.** Categorical labels `0, 1, 2`
+  are not quantitative values `0, 1, 2`. Convert deliberately before training;
+  preparation may encode identities but must not choose scores. Preserve supplied
+  labels/mappings/numerical meaning through the reviewed minimal metadata contract.
 - **Require a pandas DataFrame, with direct name matching.** The public fitting
   data input must be a `pandas.DataFrame`. Reject other input types with a clear
   `TypeError` explaining that the caller must convert them to a DataFrame first;
