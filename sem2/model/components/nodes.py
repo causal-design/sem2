@@ -2,17 +2,31 @@
 # own method signatures) resolve lazily on Python < 3.14.
 from __future__ import annotations
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import Optional
 import torch
 import warnings
 from torch import nn
-from torch.distributions import Distribution
+from torch.distributions import Distribution, constraints
 
 from ..._compat import StrEnum
 from .nn_models import _LinearConfig, _LinearModel, _MLP
 from ...default_configs import LinearNodeConfig, MLPConfig
 
 # ── RandomVariable ────────────────────────────────────────────────────────────
+
+@dataclass
+class RandomVariableSupport:
+    """Declared domain, not necessarily every attainable value.
+
+    constraint is a PyTorch membership constraint, or None if unknown.
+    values is an enumeration with native batch/event dimensions when available;
+    None means unenumerated, not necessarily infinite. These are not observations
+    or numerical scores assigned to categories.
+    """
+    constraint: constraints.Constraint | None = None
+    values: torch.Tensor | None = None
+
 
 class RandomVariable(ABC):
     """Abstract base for any node that is conceptually a random variable.
@@ -21,6 +35,24 @@ class RandomVariable(ABC):
     endogenous nodes leave it as None.
     """
     dist: Optional[Distribution] = None
+    _support_constraint: constraints.Constraint | None = None
+
+    @property
+    def support(self) -> RandomVariableSupport:
+        """Inspect the declared domain without sampling or changing node state."""
+        constraint = self._support_constraint
+        values = None
+        if self.dist is not None:
+            try:
+                constraint = self.dist.support
+            except NotImplementedError:
+                pass
+            if self.dist.has_enumerate_support:
+                try:
+                    values = self.dist.enumerate_support()
+                except NotImplementedError:
+                    pass  # Some finite batched distributions cannot be enumerated.
+        return RandomVariableSupport(constraint=constraint, values=values)
 
 
 # ── Base ──────────────────────────────────────────────────────────────────────
@@ -131,6 +163,7 @@ class NodeLinear(NodeEndogenous):
     correctly with model.to(device) and are not counted as learnable parameters.
     An explicit intercept is also a buffer and takes precedence over cfg.use_bias.
     """
+    _support_constraint = constraints.real  # Domain bound, not propagated parent support.
 
     def __init__(
         self,
@@ -218,6 +251,7 @@ class NodeMLP(NodeNonlinear):
     """Default nonlinear node — MLP as the linking function.
     Predecessors are parsed upstream in DAG (rhs is flat n(a,b,...) post-expansion).
     """
+    _support_constraint = constraints.real  # The final network layer is unrestricted.
 
     def __init__(
         self,
@@ -268,6 +302,14 @@ class NodeMLPDiscrete(SEM2Node):
             raise ValueError(f"Invalid MLP configuration: \n{cfg}\n. Must be MLPConfig object, or None if default config is needed.")
 
         self.n_classes = cfg.output_dim
+
+    @property
+    def support(self) -> RandomVariableSupport:
+        """Declared state IDs, independent of the sampling representation."""
+        return RandomVariableSupport(
+            constraint=constraints.integer_interval(0, self.n_classes - 1),
+            values=torch.arange(self.n_classes, device=next(self.parameters()).device),
+        )
 
     def _forward_inner(self, x: list[torch.Tensor], mode=DiscreteModes.SAMPLE, **kwargs) -> torch.Tensor:
         """ Input shape:
