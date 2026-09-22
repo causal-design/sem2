@@ -145,9 +145,9 @@ class NodeLinear(NodeEndogenous):
         super().__init__(name, rhs, predecessor_nodes, device=device)
         self.out_dim = cfg.output_dim if cfg is not None else 1
         self.use_bias = cfg.use_bias if cfg is not None else True
-        self.register_buffer(
-            "_fixed_intercept",
-            torch.full((self.out_dim,), float(intercept), device=device) if intercept is not None else None,
+        self._fixed_intercept = (
+            nn.parameter.Buffer(torch.full((self.out_dim,), float(intercept), device=device))
+            if intercept is not None else None
         )
 
         input_dim = sum(p.out_dim for p in predecessor_nodes)
