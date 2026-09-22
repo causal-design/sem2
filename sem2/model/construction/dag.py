@@ -31,7 +31,7 @@ class _DAG:
         input_node:        Set of node names that appear on any LHS.
         statements:        The parsed AST (list of Statement) for downstream tooling.
         unobserved_vars:   Ordered node names declared by unobs(...), if any.
-        observed_vars:     Topological node order excluding unobserved_vars when
+        observed_vars:     Topological node order excluding helpers and unobserved_vars when
                            unobs(...) is declared; empty otherwise.
         node_specs:        Dict of node_name -> NodeSpec. Single source of
                            truth for graph structure : built once, read by SEM2.
@@ -83,7 +83,10 @@ class _DAG:
 
         if self._unobserved_declared:
             hidden = set(self.unobserved_vars)
-            self.observed_vars = [n for n in self.topological_order if n not in hidden]
+            self.observed_vars = [
+                n for n in self.topological_order
+                if n not in hidden and not self.node_specs[n].is_helper
+            ]
         else:
             self.observed_vars = []
 

@@ -95,6 +95,8 @@ class SEM2(_DAG, nn.Module):
 
         for node_name in self.topological_order:
             ns = self.node_specs[node_name]
+            if ns.is_helper and node_name in node_cfgs:
+                raise ValueError(f"Cannot configure internal helper node: {node_name!r}")
             cfg = node_cfgs.pop(node_name, None)
             predecessor_nodes = [name_to_node[p] for p in ns.predecessors]
 
@@ -120,7 +122,8 @@ class SEM2(_DAG, nn.Module):
 
             elif ns.node_type == "linear":
                 node = NodeLinear(
-                    node_name, ns.rhs, ns.coefficients, cfg, predecessor_nodes, device=device
+                    node_name, ns.rhs, ns.coefficients, cfg, predecessor_nodes,
+                    device=device, intercept=ns.intercept,
                 )
 
             else:
@@ -138,15 +141,15 @@ class SEM2(_DAG, nn.Module):
             set_nodes: Optional dict of node name -> tensor to pin specific node
                        values (e.g. for interventions). Shape: [batch_size, out_dim].
         Return:
-            {node_name: tensor}.
+            {node_name: tensor} for user-declared nodes, excluding internal helpers.
             {} Dummy dict, no metrics are generated.
         """
         layer = self.node_dict
         topological_order = self.topological_order
 
         set_nodes = set_nodes if set_nodes is not None else {}
-        assert set(set_nodes.keys()).issubset(layer.keys()), \
-            f"set_nodes contains unknown nodes: {set(set_nodes.keys()) - set(layer.keys())}"
+        assert set(set_nodes.keys()).issubset(self.input_node), \
+            f"set_nodes contains unknown or internal nodes: {set(set_nodes.keys()) - self.input_node}"
 
         for node_name in topological_order:
             v = layer[node_name]
@@ -156,7 +159,10 @@ class SEM2(_DAG, nn.Module):
                 pred_values = [layer[p].get_value() for p in v.predecessors]
                 v(pred_values, batch_size)
 
-        return {name: layer[name].get_value() for name in topological_order}, {}
+        return {
+            name: layer[name].get_value() for name in topological_order
+            if not self.node_specs[name].is_helper
+        }, {}
 
     def forward(self, *args, **kwargs):
         raise NotImplementedError(f"call the sample() method instead of forward() or calling the model directly.")

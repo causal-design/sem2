@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 import ast
 import difflib
+import keyword
 
 from .sem_ast import (
     Distribution,
@@ -83,6 +84,7 @@ class DistributionRegistry:
 
 # Shared across parser instances; building the name set touches torch once.
 _DISTRIBUTIONS = DistributionRegistry()
+_NUMBER = r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -131,24 +133,34 @@ class FormulaParser:
 
         if "<-" in formula:
             lhs, rhs = formula.split("<-")
+            is_helper = ":" in lhs
             if rhs.startswith("n("):
                 # Continuous neural network node
                 parents = rhs[2:-1].split(",")
                 return EndogenousDecl(
                     name=lhs, rhs=rhs, node_type="mlp",
                     mechanism=MechanismTerm(kind="mlp", parents=parents),
+                    is_helper=is_helper,
                 )
             if rhs.startswith("d("):
                 parents = rhs[2:-1].split(",")
                 return EndogenousDecl(
                     name=lhs, rhs=rhs, node_type="discrete",
                     mechanism=MechanismTerm(kind="discrete", parents=parents),
+                    is_helper=is_helper,
                 )
             # Linear node: parse coefficients and predecessors
-            terms = [self._parse_linear_term(t) for t in rhs.split("+")]
+            terms = []
+            intercept = None
+            for term in self._split_rhs(rhs, "+"):
+                if re.fullmatch(_NUMBER, term):
+                    intercept = (intercept if intercept is not None else 0.0) + float(term)
+                else:
+                    coeff, parent = self._parse_linear_term(term)
+                    terms.append(LinearTerm(coeff=coeff, parent=parent))
             return EndogenousDecl(
                 name=lhs, rhs=rhs, node_type="linear",
-                terms=[LinearTerm(coeff=c, parent=p) for c, p in terms],
+                terms=terms, intercept=intercept, is_helper=is_helper,
             )
 
         raise ValueError(f"Formula must contain '~' or '<-': {formula!r}")
@@ -168,11 +180,13 @@ class FormulaParser:
                 name=st.name, rhs=st.rhs, node_type="linear",
                 predecessors=[t.parent for t in st.terms],
                 coefficients=[t.coeff for t in st.terms],
+                intercept=st.intercept, is_helper=st.is_helper,
             )
         # mlp / discrete mechanism
         return NodeSpec(
             name=st.name, rhs=st.rhs, node_type=st.node_type,
             predecessors=list(st.mechanism.parents),
+            is_helper=st.is_helper,
         )
 
     # ── Exogenous rhs parsing (with error handling) ───────────────────────────
@@ -253,7 +267,7 @@ class FormulaParser:
             '0.5*x'  -> (0.5,   'x')
             '-0.5*x' -> (-0.5,  'x')
         """
-        match = re.match(r'^(-?[0-9]*\.?[0-9]+)\*(.+)$', term)
+        match = re.fullmatch(rf'({_NUMBER})\*(.+)', term)
         if match:
             return float(match.group(1)), match.group(2)
         return None, term
@@ -261,16 +275,23 @@ class FormulaParser:
     # ── Formula parsing ───────────────────────────────────────────────────────
 
     def _parse_formula(self, model_formula: str):
-        formula_list = model_formula.replace(" ", "").split(";")
+        formula_list = re.sub(r"\s+", "", model_formula).split(";")
 
         expanded_list = []
         input_node = set()
         for formula in formula_list:
+            if ":" in formula:
+                raise ValueError("':' is reserved for internal helper names.")
             if formula.startswith("unobs("):
                 self._parse_unobserved_statement(formula)
                 continue
             vars_, formulas = self._expand_lhs(formula)
-            input_node.update(vars_)
+            for name in vars_:
+                if not name.isidentifier() or keyword.iskeyword(name):
+                    raise ValueError(f"Invalid node name: {name!r}")
+                if name in input_node:
+                    raise ValueError(f"Duplicate node definition: {name!r}")
+                input_node.add(name)
             expanded_list.extend(formulas)
 
         formula_list = []
@@ -322,13 +343,19 @@ class FormulaParser:
         return variables, [var + sep + rhs for var in variables]
 
     def _split_rhs(self, rhs: str, sep: str):
-        """Split by sep but ignore separators inside parentheses."""
+        """Split outside parentheses, retaining minus signs in additive terms."""
         rhs = rhs.replace(" ", "")
         terms, current, depth = [], "", 0
         for ch in rhs:
-            if ch == sep and depth == 0:
+            # Signs after an operator or in a numeric exponent are not separators.
+            exponent_sign = current.endswith(("e", "E")) and re.fullmatch(_NUMBER, current[:-1])
+            additive_sep = (
+                sep == "+" and ch in "+-" and current
+                and current[-1] not in "+-*" and not exponent_sign
+            )
+            if depth == 0 and (additive_sep or (sep != "+" and ch == sep)):
                 terms.append(current)
-                current = ""
+                current = "-" if ch == "-" else ""
             else:
                 if ch == "(":
                     depth += 1
@@ -353,7 +380,9 @@ class FormulaParser:
             return [formula]
 
         plus_terms = self._split_rhs(rhs, "+")
-        if len(plus_terms) == 1 and rhs.startswith("n(") and rhs.count("n(") == 1:
+        if len(plus_terms) == 1 and rhs.startswith("n(") and all(
+            term.isidentifier() for term in self._split_rhs(rhs[2:-1], ",")
+        ):
             return [formula]  # single flat nonlinear term, nothing to expand
 
         expanded = []
@@ -362,7 +391,7 @@ class FormulaParser:
             new_formula = lhs + "<-n("
             comma_terms = self._split_rhs(rhs[2:-1], ",")
             for i, term in enumerate(comma_terms):
-                if term.startswith("n(") or "+" in term:
+                if not term.isidentifier():
                     new_rv = lhs + ":" + str(i)
                     expanded.extend(self._expand_rhs(new_rv + "<-" + term))
                     new_formula += new_rv
@@ -375,10 +404,11 @@ class FormulaParser:
             # Mix of linear and nonlinear plus-terms
             new_formula = lhs + "<-"
             for i, term in enumerate(plus_terms):
-                if term.startswith("n("):
+                coeff, expression = self._parse_linear_term(term)
+                if expression.startswith("n("):
                     new_rv = lhs + ":" + str(i)
-                    expanded.extend(self._expand_rhs(new_rv + "<-" + term))
-                    new_formula += new_rv
+                    expanded.extend(self._expand_rhs(new_rv + "<-" + expression))
+                    new_formula += f"{coeff if coeff is not None else 1}*{new_rv}"
                 else:
                     new_formula += term
                 if i < len(plus_terms) - 1:

@@ -129,6 +129,7 @@ class NodeLinear(NodeEndogenous):
 
     fix_weights, _fixed_vals, and _ones are registered as buffers so they move
     correctly with model.to(device) and are not counted as learnable parameters.
+    An explicit intercept is also a buffer and takes precedence over cfg.use_bias.
     """
 
     def __init__(
@@ -139,10 +140,15 @@ class NodeLinear(NodeEndogenous):
         cfg: LinearNodeConfig | None,
         predecessor_nodes: list[SEM2Node],
         device="cpu",
+        intercept: float | None = None,
     ):
         super().__init__(name, rhs, predecessor_nodes, device=device)
         self.out_dim = cfg.output_dim if cfg is not None else 1
         self.use_bias = cfg.use_bias if cfg is not None else True
+        self.register_buffer(
+            "_fixed_intercept",
+            torch.full((self.out_dim,), float(intercept), device=device) if intercept is not None else None,
+        )
 
         input_dim = sum(p.out_dim for p in predecessor_nodes)
 
@@ -166,7 +172,7 @@ class NodeLinear(NodeEndogenous):
         internal_cfg = _LinearConfig(
             input_dim=input_dim,
             output_dim=self.out_dim,
-            use_bias=self.use_bias,
+            use_bias=self.use_bias and intercept is None,
         )
         self.linear = _LinearModel(internal_cfg, device=device)
 
@@ -183,12 +189,12 @@ class NodeLinear(NodeEndogenous):
         return self._effective_weight()
 
     def bias(self) -> torch.Tensor | None:
-        """The node's bias vector [out_dim], or None if the node has no bias."""
-        return self.linear.bias
+        """Effective fixed or learned intercept [out_dim], or None if absent."""
+        return self._fixed_intercept if self._fixed_intercept is not None else self.linear.bias
 
     def _forward_inner(self, x: list[torch.Tensor], batch_size: int = 1) -> torch.Tensor:
-        x_cat = self._collate_fn(x)
-        return torch.nn.functional.linear(x_cat, self._effective_weight(), self.linear.bias)
+        x_cat = self._collate_fn(x) if x else self.linear.weight.new_empty(batch_size, 0)
+        return torch.nn.functional.linear(x_cat, self._effective_weight(), self.bias())
 
 
 # ── Nonlinear (abstract) ──────────────────────────────────────────────────────
