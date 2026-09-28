@@ -12,6 +12,7 @@ import torch
 from .operators_base import OperatorInput, OperatorOutput, SEM2Operator
 from ..model.construction import SEMType
 from ..model.models import SEM2Linear
+from ..data import DataBatch, ScalarResult
 
 
 class SEM2LinearModelOperator(SEM2Operator):
@@ -143,14 +144,17 @@ class LogLikelihood(SEM2LinearModelOperator):
             )
         return loc
 
-    def evaluate(self, observations: torch.Tensor, **kwargs) -> tuple[torch.Tensor, dict]:
+    def evaluate(self, observations: DataBatch, **kwargs) -> tuple[ScalarResult, dict]:
         """
         Args:
-            observations: [n, p] data, columns aligned to observed_vars.
+            observations: named data, selected in observed_vars order.
         Returns:
             (mean_log_likelihood, metrics)
         """
-        x = observations.to(self.device)
+        if not isinstance(observations, DataBatch):
+            raise TypeError("observations must be a DataBatch.")
+        batch = observations.subset(self.observed_vars)
+        x = batch.values.to(self.device)
         _check_observation_shape(x, len(self.observed_vars), type(self).__name__)
 
         sigma = self.model.cov_matrix(self.observed_vars)        # [p, p]
@@ -179,7 +183,9 @@ class LogLikelihood(SEM2LinearModelOperator):
 
         log_probs = -0.5 * (k * math.log(2 * math.pi) + maha) - half_log_det  # [n]
         ll = log_probs.mean()
-        return ll, {"log_likelihood": ll.detach(), "log_likelihood_sum": log_probs.sum().detach()}
+        return ScalarResult(ll, "log_likelihood", batch.variables), {
+            "log_likelihood": ll.detach(), "log_likelihood_sum": log_probs.sum().detach()
+        }
 
     def __repr__(self):
         return "LogLikelihood"
@@ -202,24 +208,29 @@ class WeightedFrobeniusDistance(SEM2LinearModelOperator):
         super().__init__(model, observed_vars)
         self.weight = weight
 
-    def evaluate(self, observations: torch.Tensor, **kwargs) -> tuple[torch.Tensor, dict]:
+    def evaluate(self, observations: DataBatch, **kwargs) -> tuple[ScalarResult, dict]:
         """
         Args:
-            observations: [n, p] data, columns aligned to observed_vars.
+            observations: named data, selected in observed_vars order.
         Returns:
             (weighted_frobenius_distance, metrics)
         """
-        x = observations.to(self.device)
+        if not isinstance(observations, DataBatch):
+            raise TypeError("observations must be a DataBatch.")
+        batch = observations.subset(self.observed_vars)
+        x = batch.values.to(self.device)
         _check_observation_shape(x, len(self.observed_vars), type(self).__name__)
-        sample_cov = torch.cov(x.T)                              # [p, p]
         model_cov = self.model.cov_matrix(self.observed_vars)    # [p, p]
+        sample_cov = torch.cov(x.to(model_cov).T)                # [p, p]
 
         diff = sample_cov - model_cov
         if self.weight is not None:
             loss = (self.weight.to(self.device) * diff ** 2).sum()
         else:
             loss = (diff ** 2).sum()
-        return loss, {"weighted_frobenius_distance": loss.detach()}
+        return ScalarResult(loss, "weighted_frobenius_distance", batch.variables), {
+            "weighted_frobenius_distance": loss.detach()
+        }
 
     def __repr__(self):
         return "WeightedFrobeniusDistance"

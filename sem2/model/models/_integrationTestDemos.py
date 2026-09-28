@@ -1,6 +1,6 @@
 """Runnable demos for the SEM2 model classes.
 
-Run with:  python -m sem2.model.models._demo
+Run with:  python -m sem2.model.models._integrationTestDemos
 (Slated to be folded into integration tests.)
 """
 from ..models import SEM2, SEM2Discrete

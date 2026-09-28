@@ -7,6 +7,7 @@ import logging
 from .model.models import SEM2
 from .operators.scalar_operators import SEM2Loss
 from .default_configs import TrainingConfig
+from .data import DataBatch
 
 logger = logging.getLogger(__name__)
 
@@ -67,32 +68,35 @@ class SEM2Trainer:
         """
         self.optim.zero_grad()
 
-        Xs, targets = batch
+        if not isinstance(batch, DataBatch):
+            raise TypeError("The loader must yield DataBatch objects.")
+        batch = batch.to(self.device)
         # Compute loss
-        loss, loss_metrics = self.loss_fn.evaluate(targets)
+        result, loss_metrics = self.loss_fn.evaluate(batch)
+        loss = result.value
         # Calculate gradients and update model parameters
         loss.backward()
         self.optim.step()
 
         # Detach to stop memory leak
         loss = loss.detach()
-        loss_metrics = {k: v.detach() for k, v in loss_metrics.items()}
+        loss_metrics = {k: v.detach() if isinstance(v, torch.Tensor) else v for k, v in loss_metrics.items()}
         return loss, loss_metrics
 
 
 def main():
+    from .dataloader import DummyDiscreteDataloader
+    from .default_configs import MLPConfig
+    from .model import SEM2Discrete
+
     torch.manual_seed(0)
     logging.basicConfig(level=logging.INFO)
-    cfg = TrainingConfig()
-
-    formula1 = "u ~ Uniform(0,1); eps_d ~ Uniform(0,1); eps_y ~ Uniform(0,1); eps_z ~ Uniform(0,1);"
-    formula2 = "Z <- n(eps_z); D <- n(Z, u, eps_d); Y <- n(D, u, eps_y)"
-    model_formula = formula1 + formula2
-    sem_model = SEM2(model_formula, device=cfg.device)
-
-
-    trainer = SEM2Trainer(cfg, sem_model, [[0, 0]])
-    trainer.train()
+    cfg = TrainingConfig(device="cpu", epochs=1, sample_bs=32, instrument_node="Z")
+    model = SEM2Discrete("Z ~ Categorical(probs=[1,1]); X <- d(Z); Y <- d(X)", node_cfgs={
+        "X": MLPConfig(hidden_dims=[8], output_dim=2),
+        "Y": MLPConfig(hidden_dims=[8], output_dim=2),
+    })
+    SEM2Trainer(cfg, model, DummyDiscreteDataloader(2, batch_size=64)).train()
 
 
 if __name__ == "__main__":

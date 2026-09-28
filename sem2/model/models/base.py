@@ -8,6 +8,7 @@ from torch import Tensor
 
 from ..components.nodes import NodeExogenous, NodeLinear, NodeMLP, NodeMLPDiscrete, SEM2Node
 from ..construction import _DAG, SEMType
+from ...data import DataBatch, VariableInfo
 
 
 # ════════════════════════════════════════════════════════════════════════════════════
@@ -133,36 +134,59 @@ class SEM2(_DAG, nn.Module):
 
         return name_to_node
 
-    def sample(self, batch_size: int = 1, set_nodes: dict[str, Tensor]|None = None) -> tuple[dict[str, Tensor], dict]:
-        """ Forward pass of a continuous SEM2 model. Nodes are sampled from their respective distributions.
+    def _variable_info(self, name: str) -> VariableInfo:
+        node = self.node_dict[name]
+        categorical = isinstance(node, NodeMLPDiscrete) or isinstance(node.dist, torch.distributions.Categorical)
+        return VariableInfo(name, width=node.out_dim, categorical=categorical)
 
-        Args:
-            batch_size: Number of samples to draw.
-            set_nodes: Optional dict of node name -> tensor to pin specific node
-                       values (e.g. for interventions). Shape: [batch_size, out_dim].
-        Return:
-            {node_name: tensor} for user-declared nodes, excluding internal helpers.
-            {} Dummy dict, no metrics are generated.
-        """
-        layer = self.node_dict
-        topological_order = self.topological_order
+    def _intervention_values(self, set_nodes: DataBatch | None, batch_size: int) -> dict[str, Tensor]:
+        """Validate before coercion, then unwrap tensors for the sampling loop."""
+        if batch_size < 1:
+            raise ValueError("batch_size must be positive.")
+        if set_nodes is None:
+            return {}
+        if not isinstance(set_nodes, DataBatch):
+            raise TypeError("set_nodes must be a DataBatch.")
+        if len(set_nodes) != batch_size:
+            raise ValueError("Intervention rows must match batch_size.")
+        values = {}
+        for variable in set_nodes.variables:
+            name = variable.name
+            if name not in self.input_node:
+                raise ValueError(f"Unknown or internal intervention node: {name!r}")
+            node = self.node_dict[name]
+            value = set_nodes.select(name)
+            if variable.width != node.out_dim:
+                raise ValueError(f"Intervention width does not match {name!r}.")
+            constraint = node.support.constraint
+            if not torch.isfinite(value).all() or (constraint is not None and not constraint.check(value).all()):
+                raise ValueError(f"Intervention values outside the declared support of {name!r}.")
+            values[name] = value
+        return values
 
-        set_nodes = set_nodes if set_nodes is not None else {}
-        assert set(set_nodes.keys()).issubset(self.input_node), \
-            f"set_nodes contains unknown or internal nodes: {set(set_nodes.keys()) - self.input_node}"
+    def sample(self, batch_size: int = 1, set_nodes: DataBatch | None = None) -> tuple[DataBatch, dict]:
+        """Return named draws and intervention provenance, excluding helpers."""
+        return self._sample(batch_size, set_nodes)
 
-        for node_name in topological_order:
-            v = layer[node_name]
-            if node_name in set_nodes:
-                v.set_value(set_nodes[node_name])
+    def _sample(self, batch_size: int, set_nodes: DataBatch | None, target: str | None = None):
+        if target is not None and target not in self.input_node:
+            raise ValueError(f"Unknown or internal target node: {target!r}")
+        interventions = self._intervention_values(set_nodes, batch_size)
+        supplied = {} if set_nodes is None else dict(zip(set_nodes.names, set_nodes.variables))
+        values, variables = [], []
+        for name in self.topological_order:
+            node = self.node_dict[name]
+            if name in interventions:
+                node.set_value(interventions[name])
             else:
-                pred_values = [layer[p].get_value() for p in v.predecessors]
-                v(pred_values, batch_size)
-
-        return {
-            name: layer[name].get_value() for name in topological_order
-            if not self.node_specs[name].is_helper
-        }, {}
+                node([self.node_dict[p].get_value() for p in node.predecessors], batch_size)
+            if not self.node_specs[name].is_helper and (target is None or name == target):
+                values.append(node.get_value())
+                variables.append(supplied[name] if name in supplied else self._variable_info(name))
+            if name == target:
+                break
+        result = DataBatch(torch.cat(values, dim=-1), tuple(variables))
+        return result, {"interventions": set_nodes}
 
     def forward(self, *args, **kwargs):
         raise NotImplementedError(f"call the sample() method instead of forward() or calling the model directly.")

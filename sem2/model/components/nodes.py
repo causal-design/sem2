@@ -227,7 +227,7 @@ class NodeLinear(NodeEndogenous):
 
     def _forward_inner(self, x: list[torch.Tensor], batch_size: int = 1) -> torch.Tensor:
         x_cat = self._collate_fn(x) if x else self.linear.weight.new_empty(batch_size, 0)
-        return torch.nn.functional.linear(x_cat, self._effective_weight(), self.bias())
+        return torch.nn.functional.linear(x_cat.to(self.linear.weight), self._effective_weight(), self.bias())
 
 
 # ── Nonlinear (abstract) ──────────────────────────────────────────────────────
@@ -274,7 +274,7 @@ class NodeMLP(NodeNonlinear):
             Return shape:
                 return.shape = [bs, output_dim]
         """
-        return self.mlp(self._collate_fn(x))
+        return self.mlp(self._collate_fn(x).to(next(self.mlp.parameters())))
 
 
 # ── Discrete Node ───────────────────────────────────────────────────────────────────
@@ -295,6 +295,7 @@ class NodeMLPDiscrete(SEM2Node):
         super().__init__(name, rhs, predecessor_nodes, device=device)
         self.cfg = cfg if cfg is not None else MLPConfig()
 
+        cfg = self.cfg
         cfg.input_dim = self.input_dim
         if isinstance(cfg, MLPConfig):
             self.nn_module = _MLP(cfg, device=device)
@@ -325,7 +326,7 @@ class NodeMLPDiscrete(SEM2Node):
                 if DiscreteModes.SAMPLE_ONEHOT:
                     return.shape = TBD
         """
-        x = self._collate_fn(x)
+        x = self._collate_fn(x).to(next(self.nn_module.parameters()))
         out = self.nn_module(x)
         out = self._discretize(out, mode)
         return out
