@@ -5,7 +5,7 @@ import time
 import logging
 
 from .model.models import SEM2
-from .operators.scalar_operators import SEM2Loss
+from .operators.scalar_operators import SEM2Loss, EnergyLoss, ATE
 from .default_configs import TrainingConfig
 from .data import DataBatch
 
@@ -37,7 +37,15 @@ class SEM2Trainer:
         self.ds = ds
         self.device = cfg.device
 
-        self.loss_fn = SEM2Loss(cfg, sem)
+        # Express the existing config-driven defaults as operator–weight pairs.
+        components = []
+        if cfg.use_energy_score:
+            components.append((EnergyLoss(cfg, sem), cfg.energy_score_weight))
+        if cfg.use_ate:
+            components.append((ATE(cfg, sem), cfg.ate_weight))
+        if cfg.use_mmd:
+            raise NotImplementedError("MMD loss not implemented yet.")
+        self.loss_fn = SEM2Loss(components)
         self.optim = get_optimiser(sem, cfg)
 
     def train(self):
