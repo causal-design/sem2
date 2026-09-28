@@ -8,6 +8,7 @@ import pandas as pd
 import torch
 
 if TYPE_CHECKING:
+    from .model.components.nodes import RandomVariableSupport
     from .model.models.base import SEM2
 
 
@@ -168,20 +169,56 @@ def _encode_column(series: pd.Series, variable: VariableInfo) -> tuple[pd.Series
             if not categorical:
                 raise TypeError(f"Use pandas categorical dtype or supply an encoding for {variable.name!r}.")
             encoding = dict(zip(series.cat.categories, range(len(series.cat.categories))))
-        labels = series.cat.categories if categorical else series.unique()
-        if any(label not in encoding for label in labels):
-            raise ValueError(f"Encoding is missing labels for {variable.name!r}.")
+        labels = series.cat.categories.tolist() if categorical else series.unique().tolist()
+        missing = set(labels) - encoding.keys()
+        if missing:
+            raise ValueError(f"Encoding is missing labels for {variable.name!r}: {sorted(missing, key=repr)}")
         series = series.astype(object).map(encoding)
         variable = replace(variable, categorical=True, encoding=encoding)
     if encoding is not None:
         codes = list(encoding.values())
         if any(not isinstance(code, Integral) for code in codes) or len(set(codes)) != len(codes):
             raise ValueError(f"Encoding for {variable.name!r} must use unique integer codes.")
-        if not series.isin(codes).all():
-            raise ValueError(f"Unknown encoded values for {variable.name!r}.")
+        unknown = set(series.unique().tolist()) - set(codes)
+        if unknown:
+            raise ValueError(f"Unknown encoded values for {variable.name!r}: {sorted(unknown, key=repr)}")
     if not pd.api.types.is_numeric_dtype(series.dtype) or pd.api.types.is_complex_dtype(series.dtype):
         raise TypeError(f"Variable {variable.name!r} must contain real scalar values.")
     return series, variable
+
+
+def _validate_column(
+    series: pd.Series,
+    value: torch.Tensor,
+    variable: VariableInfo,
+    support: RandomVariableSupport,
+) -> None:
+    """Check original numeric values, encoding codes and score coverage before dtype conversion."""
+    name = variable.name
+    if not torch.isfinite(value).all() or (
+        support.constraint is not None and not support.constraint.check(value).all()
+    ):
+        raise ValueError(f"Values must be finite and inside the declared domain of {name!r}.")
+    if variable.encoding is not None and support.constraint is not None:
+        codes = value.new_tensor(list(variable.encoding.values()))
+        if not support.constraint.check(codes).all():
+            raise ValueError(f"Encoding codes outside the declared domain of {name!r}.")
+    if variable.scores is None:
+        return
+
+    labels = variable.encoding if variable.encoding is not None else series.unique().tolist()
+    missing = set(labels) - variable.scores.keys()
+    if missing:
+        raise ValueError(f"Scores are missing labels for {name!r}: {sorted(missing, key=repr)}")
+    scores = value.new_tensor(list(variable.scores.values()))
+    if not torch.isfinite(scores).all():
+        raise ValueError(f"Scores for {name!r} must be finite.")
+    if support.values is not None:
+        scored_codes = {variable.encoding[label] if variable.encoding is not None else label
+                        for label in variable.scores}
+        missing = set(support.values.tolist()) - scored_codes
+        if missing:
+            raise ValueError(f"Scores are missing declared states of {name!r}: {sorted(missing, key=repr)}")
 
 
 def prepare_data(
@@ -241,27 +278,8 @@ def prepare_data(
         series, variable = _encode_column(data[name], variable)
         # Check original numeric values before narrowing to the model's dtype.
         value = torch.as_tensor(series.to_numpy(dtype="float64", copy=True), device=device)
-        support = node.support
-        if not torch.isfinite(value).all() or (
-            support.constraint is not None and not support.constraint.check(value).all()
-        ):
-            raise ValueError(f"Values must be finite and inside the declared domain of {name!r}.")
-        if variable.encoding is not None and support.constraint is not None:
-            codes = value.new_tensor(list(variable.encoding.values()))
-            if not support.constraint.check(codes).all():
-                raise ValueError(f"Encoding codes outside the declared domain of {name!r}.")
-        if variable.scores is not None:
-            labels = variable.encoding if variable.encoding is not None else series.unique()
-            if any(label not in variable.scores for label in labels):
-                raise ValueError(f"Scores are missing labels for {name!r}.")
-            scores = value.new_tensor(list(variable.scores.values()))
-            if not torch.isfinite(scores).all():
-                raise ValueError(f"Scores for {name!r} must be finite.")
-            if support.values is not None:
-                codes = (variable.encoding[label] if variable.encoding is not None else label
-                         for label in variable.scores)
-                if not set(support.values.tolist()).issubset(set(codes)):
-                    raise ValueError(f"Scores must cover declared states of {name!r}, including unobserved states.")
+        _validate_column(series, value, variable, node.support)
+        # Finite source values can still overflow when converted to the model dtype.
         value = value.to(dtype=dtype)
         if not torch.isfinite(value).all():
             raise ValueError(f"Values of {name!r} overflow the model dtype.")
