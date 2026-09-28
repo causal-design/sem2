@@ -26,6 +26,7 @@ class DataBatch:
     variables: tuple[VariableInfo, ...]
 
     def __post_init__(self):
+        """Keep ordered metadata and check alignment so named selection cannot mislabel columns."""
         self.variables = tuple(self.variables)
         if not isinstance(self.values, torch.Tensor) or self.values.ndim != 2:
             raise ValueError("DataBatch values must be a two-dimensional tensor.")
@@ -85,6 +86,7 @@ class FiniteDistribution:
     probabilities: torch.Tensor
 
     def __post_init__(self):
+        """Check that probability columns index the state table on the same device."""
         if not isinstance(self.states, DataBatch):
             raise TypeError("states must be a DataBatch.")
         if self.probabilities.ndim != 2 or self.probabilities.shape[1] != len(self.states):
@@ -117,6 +119,7 @@ class ScalarResult:
     variables: tuple[VariableInfo, ...] = ()
 
     def __post_init__(self):
+        """Require one tensor-valued quantity without detaching its gradient graph."""
         if not isinstance(self.value, torch.Tensor) or self.value.ndim != 0:
             raise ValueError("ScalarResult value must be a scalar tensor.")
         self.variables = tuple(self.variables)
