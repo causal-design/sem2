@@ -11,6 +11,7 @@ import torch
 import torch.nn as nn
 
 from sem2.model.components.nn_models import _LinearConfig, _LinearModel, _MLP
+from sem2.data import DataBatch, VariableInfo
 from sem2.default_configs import LinearNodeConfig, MLPConfig
 from sem2.model.components.nodes import (
     RandomVariable, SEM2Node,
@@ -36,11 +37,13 @@ def make_model(formula, cfgs=None, device="cpu"):
     return SEM2(formula, node_cfgs=cfgs, device=device)
 
 
-def run(model, bs=BS, set_nodes=None, return_dict=True):
+def batch(values, *names):
+    return DataBatch(values, tuple(VariableInfo(name) for name in names))
+
+
+def run(model, bs=BS, set_nodes=None):
     res, _ = model.sample(batch_size=bs, set_nodes=set_nodes)
-    if return_dict:
-        return res
-    return torch.cat([res[k] for k in model.topological_order], dim=-1)
+    return res
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -567,52 +570,52 @@ class TestFormulaParser:
 
 class TestSEM2Forward:
 
-    def test_return_dict_keys(self):
+    def test_return_batch_names(self):
         m = make_model("e ~ Normal(0,1); y <- e")
-        assert set(run(m).keys()) == {"e", "y"}
+        assert set(run(m).names) == {"e", "y"}
 
     def test_return_tensor_shape(self):
         m = make_model("e ~ Normal(0,1); y <- e")
-        assert run(m, bs=BS, return_dict=False).shape == (BS, 2)
+        assert run(m, bs=BS).values.shape == (BS, 2)
 
     def test_batch_size_respected(self):
         m = make_model("e ~ Normal(0,1); y <- e")
         for bs in [1, 4, 32]:
-            assert run(m, bs=bs)["y"].shape == (bs, 1)
+            assert run(m, bs=bs).select("y").shape == (bs, 1)
 
     def test_set_nodes_overrides_value(self):
         m = make_model("e ~ Normal(0,1); y <- e")
         fixed = torch.zeros(BS, 1)
-        assert torch.allclose(run(m, set_nodes={"e": fixed})["e"], fixed)
+        assert torch.allclose(run(m, set_nodes=batch(fixed, "e")).select("e"), fixed)
 
     def test_set_nodes_invalid_key_raises(self):
         m = make_model("e ~ Normal(0,1); y <- e")
-        with pytest.raises(AssertionError):
-            run(m, set_nodes={"bad": torch.zeros(BS, 1)})
+        with pytest.raises(ValueError):
+            run(m, set_nodes=batch(torch.zeros(BS, 1), "bad"))
 
     def test_fixed_coeff_one_passthrough(self):
         """y <- 1*e with no bias — output should equal input."""
         m = make_model("e ~ Normal(0,1); y <- 1*e",
                        cfgs={"y": LinearNodeConfig(use_bias=False)})
         e_val = torch.tensor([[1.0], [2.0], [3.0], [4.0]])
-        out = run(m, set_nodes={"e": e_val})
-        assert torch.allclose(out["y"], e_val)
+        out = run(m, set_nodes=batch(e_val, "e"))
+        assert torch.allclose(out.select("y"), e_val)
 
     def test_fixed_coeff_negative(self):
         """y <- -1*e with no bias — output should be negated input."""
         m = make_model("e ~ Normal(0,1); y <- -1*e",
                        cfgs={"y": LinearNodeConfig(use_bias=False)})
         e_val = torch.tensor([[1.0], [2.0], [3.0], [4.0]])
-        out = run(m, set_nodes={"e": e_val})
-        assert torch.allclose(out["y"], -e_val)
+        out = run(m, set_nodes=batch(e_val, "e"))
+        assert torch.allclose(out.select("y"), -e_val)
 
     def test_fixed_coeff_fractional(self):
         """y <- 0.5*e with no bias — output should be halved input."""
         m = make_model("e ~ Normal(0,1); y <- 0.5*e",
                        cfgs={"y": LinearNodeConfig(use_bias=False)})
         e_val = torch.ones(BS, 1)
-        out = run(m, set_nodes={"e": e_val})
-        assert torch.allclose(out["y"], e_val * 0.5)
+        out = run(m, set_nodes=batch(e_val, "e"))
+        assert torch.allclose(out.select("y"), e_val * 0.5)
 
     def test_fixed_sum(self):
         """y <- 1*e1 + -1*e2 — should be e1 - e2."""
@@ -620,21 +623,21 @@ class TestSEM2Forward:
                        cfgs={"y": LinearNodeConfig(use_bias=False)})
         e1 = torch.ones(BS, 1) * 3
         e2 = torch.ones(BS, 1) * 1
-        out = run(m, set_nodes={"e1": e1, "e2": e2})
-        assert torch.allclose(out["y"], torch.ones(BS, 1) * 2)
+        out = run(m, set_nodes=batch(torch.cat([e1, e2], dim=-1), "e1", "e2"))
+        assert torch.allclose(out.select("y"), torch.ones(BS, 1) * 2)
 
     def test_multi_output_node(self):
         m = make_model("e ~ Normal(0,1); y <- e",
                        cfgs={"y": LinearNodeConfig(output_dim=3)})
-        assert run(m)["y"].shape == (BS, 3)
+        assert run(m).select("y").shape == (BS, 3)
 
     def test_multi_output_predecessor_feeds_downstream(self):
         m = make_model("e ~ Normal(0,1); x <- e; y <- x",
                        cfgs={"x": LinearNodeConfig(output_dim=2),
                               "y": LinearNodeConfig()})
         out = run(m)
-        assert out["x"].shape == (BS, 2)
-        assert out["y"].shape == (BS, 1)
+        assert out.select("x").shape == (BS, 2)
+        assert out.select("y").shape == (BS, 1)
 
     def test_fix_coeff_with_multi_output_predecessor(self):
         """1*x where x has out_dim=2 — both columns must use fixed value 1."""
@@ -649,29 +652,30 @@ class TestSEM2Forward:
 
     def test_mlp_forward(self):
         m = make_model("e1, e2 ~ Normal(0,1); y <- n(e1,e2)")
-        assert run(m)["y"].shape == (BS, 1)
+        assert run(m).select("y").shape == (BS, 1)
 
     def test_chain_graph(self):
         m = make_model("e ~ Normal(0,1); x1 <- e; x2 <- x1; x3 <- x2")
-        assert all(v.shape == (BS, 1) for v in run(m).values())
+        result = run(m)
+        assert all(result.select(name).shape == (BS, 1) for name in result.names)
 
     def test_diamond_graph(self):
         m = make_model("e ~ Normal(0,1); x1 <- e; x2 <- e; y <- x1 + x2")
-        assert run(m)["y"].shape == (BS, 1)
+        assert run(m).select("y").shape == (BS, 1)
 
     def test_gradients_flow(self):
         cfg = MLPConfig(hidden_dims=[8], output_dim=1)
         m = make_model("e ~ Normal(0,1); y <- n(e)", cfgs={"y": cfg})
-        out = run(m, set_nodes={"e": torch.randn(BS, 1)})
-        out["y"].sum().backward()
+        out = run(m, set_nodes=batch(torch.randn(BS, 1), "e"))
+        out.select("y").sum().backward()
         for name, p in m.named_parameters():
             assert p.grad is not None, f"No gradient for {name}"
 
     def test_intervention_does_not_corrupt_upstream(self):
         m = make_model("e ~ Normal(0,1); x <- e; y <- x")
-        out = run(m, set_nodes={"y": torch.zeros(BS, 1)})
-        assert out["x"].shape == (BS, 1)
-        assert torch.allclose(out["y"], torch.zeros(BS, 1))
+        out = run(m, set_nodes=batch(torch.zeros(BS, 1), "y"))
+        assert out.select("x").shape == (BS, 1)
+        assert torch.allclose(out.select("y"), torch.zeros(BS, 1))
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -681,17 +685,17 @@ class TestSEM2Forward:
 class TestEdgeCases:
 
     def test_single_exogenous_node(self):
-        assert run(make_model("e ~ Normal(0,1)"))["e"].shape == (BS, 1)
+        assert run(make_model("e ~ Normal(0,1)")).select("e").shape == (BS, 1)
 
     def test_batch_size_one(self):
-        assert run(make_model("e ~ Normal(0,1); y <- e"), bs=1)["y"].shape == (1, 1)
+        assert run(make_model("e ~ Normal(0,1); y <- e"), bs=1).select("y").shape == (1, 1)
 
     def test_large_batch(self):
-        assert run(make_model("e ~ Normal(0,1); y <- e"), bs=1024)["y"].shape == (1024, 1)
+        assert run(make_model("e ~ Normal(0,1); y <- e"), bs=1024).select("y").shape == (1024, 1)
 
     def test_exogenous_out_dim(self):
         m = make_model("e ~ Normal(0,1); y <- e", cfgs={"e": 3})
-        assert run(m)["e"].shape == (BS, 3)
+        assert run(m).select("e").shape == (BS, 3)
 
     def test_get_set_reset_value(self):
         m = make_model("e ~ Normal(0,1)")
@@ -1129,7 +1133,7 @@ class TestSEM2Linear:
         torch.manual_seed(0)
         m = _chain_linear()
         samp, _ = m.sample(batch_size=100000)
-        data = torch.cat([samp["x"], samp["y"]], dim=-1).detach()
+        data = samp.select(["x", "y"]).detach()
         emp = torch.cov(data.T)
         theo = m.cov_matrix(["x", "y"]).detach()
         assert torch.allclose(emp, theo, atol=0.1)
@@ -1158,7 +1162,7 @@ class TestLinearOperators:
     def _data(self, m, n=5000, seed=0):
         torch.manual_seed(seed)
         samp, _ = m.sample(batch_size=n)
-        return torch.cat([samp["x"], samp["y"]], dim=-1).detach()
+        return batch(samp.select(["x", "y"]).detach(), "x", "y")
 
     def test_base_guards_linearity(self):
         nl = SEM2("a, b ~ Normal(0,1); y <- n(a,b)",
@@ -1179,7 +1183,7 @@ class TestLinearOperators:
         ll, _ = LogLikelihood(m, ["x", "y"], loc=torch.zeros(2)).evaluate(data)
         Sigma = m.cov_matrix(["x", "y"]).detach()
         mvn = torch.distributions.MultivariateNormal(torch.zeros(2), Sigma)
-        assert ll.item() == pytest.approx(mvn.log_prob(data).mean().item(), abs=1e-4)
+        assert ll.value.item() == pytest.approx(mvn.log_prob(data.values).mean().item(), abs=1e-4)
 
     def test_loglikelihood_uses_formula_observed_vars(self):
         m = SEM2Linear(
@@ -1189,7 +1193,7 @@ class TestLinearOperators:
         data = self._data(m)
         implicit, _ = LogLikelihood(m, centered=True).evaluate(data)
         explicit, _ = LogLikelihood(m, ["x", "y"], centered=True).evaluate(data)
-        assert implicit.item() == pytest.approx(explicit.item(), abs=1e-6)
+        assert implicit.value.item() == pytest.approx(explicit.value.item(), abs=1e-6)
 
     def test_loglikelihood_requires_observed_vars_without_formula_mapping(self):
         m = _chain_linear()
@@ -1199,12 +1203,12 @@ class TestLinearOperators:
     def test_centered_loglikelihood_matches_zero_loc(self):
         m = SEM2Linear("e ~ Normal(2,1); x <- 1*e; unobs(e)",
                        node_cfgs={"x": LinearNodeConfig(use_bias=False)})
-        data = torch.zeros(4, 1)
+        data = batch(torch.zeros(4, 1), "x")
         centered, _ = LogLikelihood(m, centered=True).evaluate(data)
         explicit, _ = LogLikelihood(m, loc=torch.zeros(1)).evaluate(data)
         model_mean, _ = LogLikelihood(m).evaluate(data)
-        assert centered.item() == pytest.approx(explicit.item(), abs=1e-6)
-        assert centered.item() > model_mean.item()
+        assert centered.value.item() == pytest.approx(explicit.value.item(), abs=1e-6)
+        assert centered.value.item() > model_mean.value.item()
 
     def test_centered_and_loc_are_mutually_exclusive(self):
         m = SEM2Linear("e ~ Normal(0,1); x <- 1*e; unobs(e)",
@@ -1227,7 +1231,7 @@ class TestLinearOperators:
         mu = m.mean_vector().detach().index_select(0, idx)
         Sigma = m.cov_matrix(["x", "y"]).detach()
         mvn = torch.distributions.MultivariateNormal(mu, Sigma)
-        assert ll.item() == pytest.approx(mvn.log_prob(data).mean().item(), abs=1e-4)
+        assert ll.value.item() == pytest.approx(mvn.log_prob(data.values).mean().item(), abs=1e-4)
         assert "log_likelihood" in metrics
 
     def test_loglikelihood_requires_finite_second_moments(self):
@@ -1236,13 +1240,13 @@ class TestLinearOperators:
         with pytest.warns(UserWarning, match="pseudo-log-likelihood"):
             op = LogLikelihood(m, ["y"], loc=torch.zeros(1))
         with pytest.raises(ValueError, match="finite second moments"):
-            op.evaluate(torch.zeros(3, 1))
+            op.evaluate(batch(torch.zeros(3, 1), "y"))
 
     def test_weighted_frobenius_zero_on_model_data(self):
         m = _chain_linear()
         data = self._data(m, n=20000)
         loss, _ = WeightedFrobeniusDistance(m, ["x", "y"]).evaluate(data)
-        assert loss.item() < 0.05
+        assert loss.value.item() < 0.05
 
     def test_weighted_frobenius_weighted(self):
         m = _chain_linear()
@@ -1250,13 +1254,13 @@ class TestLinearOperators:
         W = torch.ones(2, 2)
         unweighted, _ = WeightedFrobeniusDistance(m, ["x", "y"]).evaluate(data)
         weighted, _ = WeightedFrobeniusDistance(m, ["x", "y"], weight=W).evaluate(data)
-        assert weighted.item() == pytest.approx(unweighted.item(), abs=1e-6)
+        assert weighted.value.item() == pytest.approx(unweighted.value.item(), abs=1e-6)
 
 
     def test_gradients_flow_through_cov(self):
         m = _chain_linear()
         data = self._data(m)
         loss, _ = WeightedFrobeniusDistance(m, ["x", "y"]).evaluate(data)
-        loss.backward()
+        loss.value.backward()
         grads = [p.grad for p in m.parameters() if p.grad is not None]
         assert len(grads) > 0

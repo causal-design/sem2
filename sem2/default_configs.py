@@ -84,6 +84,7 @@ class TrainingConfig(BaseModel):
     use_energy_score: bool = True
     energy_score_weight: float = 1.
     energy_score_beta: float = 1.
+    instrument_node: str | None = None              # Explicit IV objective; otherwise fit the observed margin
 
     # ATE loss
     use_ate: bool = False

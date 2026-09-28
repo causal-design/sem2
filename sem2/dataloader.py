@@ -1,4 +1,5 @@
 import torch
+from .data import DataBatch, VariableInfo
 
 
 class DummyDiscreteDataloader:
@@ -12,12 +13,14 @@ class DummyDiscreteDataloader:
         self.batch_size = batch_size
         self.outcome_probs = torch.tensor(self.outcome_probs)
         self.outcome_vals = torch.tensor(self.outcome_vals)
+        self.variables = (VariableInfo("Z", categorical=True),
+                          VariableInfo("X", categorical=False), VariableInfo("Y", categorical=False))
 
     def __iter__(self):
         for _ in range(self.n_steps):
             batch = torch.multinomial(self.outcome_probs, self.batch_size, replacement=True)
             batch_vals = [self.outcome_vals[i] for i in batch]
-            yield torch.stack(batch_vals, dim=0)
+            yield DataBatch(torch.stack(batch_vals, dim=0), self.variables)
 
     def __len__(self):
         return self.n_steps
