@@ -19,8 +19,7 @@ class DummyDiscreteDataloader:
     def __iter__(self):
         for _ in range(self.n_steps):
             batch = torch.multinomial(self.outcome_probs, self.batch_size, replacement=True)
-            batch_vals = [self.outcome_vals[i] for i in batch]
-            yield DataBatch(torch.stack(batch_vals, dim=0), self.variables)
+            yield DataBatch(self.outcome_vals[batch], self.variables)
 
     def __len__(self):
         return self.n_steps

@@ -9,7 +9,7 @@ from .._compat import StrEnum
 from ..data import DataBatch, FiniteDistribution, ScalarResult
 
 if TYPE_CHECKING:
-    from ..model.models import SEM2
+    from ..model.models.base import SEM2
 
 
 class OperatorInput(StrEnum):
@@ -34,23 +34,24 @@ class SEM2Operator(ABC):
 
 
 def _numeric_values(batch: DataBatch) -> torch.Tensor:
-    """Use supplied scores without replacing stored category identities."""
+    """Use caller-supplied scores without replacing stored category identities.
+
+    Score mappings are assumed complete; unmapped values propagate as NaN.
+    """
     columns = []
-    for variable in batch.variables:
-        values = batch.select(variable.name)
+    blocks = batch.values.split([v.width for v in batch.variables], dim=-1)
+    for variable, values in zip(batch.variables, blocks):
         if not values.is_floating_point():
             values = values.float()
         if variable.scores is not None:
             if variable.width != 1:
                 raise ValueError("Category scores require scalar variables.")
-            scored, matched = torch.zeros_like(values), torch.zeros_like(values, dtype=torch.bool)
+            scored = torch.full_like(values, float("nan"))
             for label, score in variable.scores.items():
                 code = variable.encoding[label] if variable.encoding is not None else label
                 mask = values == code
                 scored = torch.where(mask, score, scored)
-                matched |= mask
-            if not matched.all():
-                raise ValueError(f"Missing scores for values of {variable.name!r}.")
+
             values = scored
         elif variable.categorical:
             warnings.warn(

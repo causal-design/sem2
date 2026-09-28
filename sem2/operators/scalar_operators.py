@@ -4,12 +4,13 @@ import torch
 from .operators_base import OperatorInput, OperatorOutput, SEM2Operator, _numeric_values
 from .vector_operators import PotentialOutcome
 from .discrete_energy_loss import DiscreteEnergyLoss
-from ..model.construction import SEMType
+from ..model.construction.sem_types import SEMType
 from ..model.components.nodes import NodeExogenous
 from ..data import DataBatch, ScalarResult, VariableInfo
 
 
 class EnergyLoss(SEM2Operator):
+    """Compare named observations with model draws or finite probabilities."""
     input_type = OperatorInput.DATA
     output_type = OperatorOutput.SCALAR
 
@@ -54,24 +55,22 @@ class EnergyLoss(SEM2Operator):
         if instrument.values.shape[1] != 1:
             raise ValueError("The instrument must be scalar.")
         z = instrument.values[:, 0]
-        if not self.model.node_dict[self.instrument].support.constraint.check(z).all():
-            raise ValueError("Instrument observations are outside declared support.")
-        counts = [(z == level).sum() for level in self.levels]
-        if any(count < 2 for count in counts):
-            raise ValueError("Each declared instrument level needs at least two observations per batch.")
         total = observations.values.new_zeros((), dtype=torch.float32)
         metrics = {}
-        for level, count in zip(self.levels, counts):
+        # Group valid instrument values once; the kernel checks each group's size.
+        for level in self.levels:
+            group = outcomes[z == level]
             intervention = DataBatch(level.expand(self.bs, 1), instrument.variables)
             prediction, _ = self.model.sample(batch_size=self.bs, set_nodes=intervention)
-            result, details = self.discrete_loss.energy_dist(outcomes[z == level], prediction)
-            weight = count / len(observations)
+            result, details = self.discrete_loss.energy_dist(group, prediction)
+            weight = len(group) / len(observations)
             total = total + weight * result.value
             for name, value in details.items():
                 metrics[name] = metrics.get(name, 0) + weight * value
         return ScalarResult(total, "energy_distance", outcomes.variables), metrics
 
     def _energy_score(self, observations: DataBatch, prediction: DataBatch) -> tuple[ScalarResult, dict]:
+        """Compare observations [N, D] with named draws [M, D], allowing N != M."""
         targets = _numeric_values(observations)
         draws = _numeric_values(DataBatch(prediction.select(observations.names), observations.variables)).to(targets)
         n = draws.shape[0]
@@ -100,7 +99,6 @@ class MeanPotentialOutcome(SEM2Operator):
 
     def __init__(self, target_node: str, intervene_node: str, cfg, model, variable: VariableInfo | None = None):
         self.model = model
-        self.device = cfg.device
         self.target_node = target_node
         self.intervene_node = intervene_node
         if target_node not in model.input_node or intervene_node not in model.input_node:
@@ -177,10 +175,10 @@ class SEM2Loss(SEM2Operator):
         total = torch.zeros((), device=self.device)
         metrics, variables = {}, {}
         for component, weight in self.loss_components:
-            result, details = (component.evaluate(observations, **kwargs)
-                               if component.input_type == OperatorInput.DATA else component.evaluate(**kwargs))
-            if not isinstance(result, ScalarResult):
-                raise TypeError("Loss components must return ScalarResult.")
+            if component.input_type == OperatorInput.DATA:
+                result, details = component.evaluate(observations, **kwargs)
+            else:
+                result, details = component.evaluate(**kwargs)
             total = total + weight * result.value
             variables.update((v.name, v) for v in result.variables)
             metrics.update((f"{component}/{name}", value) for name, value in details.items())
