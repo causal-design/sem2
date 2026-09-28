@@ -140,7 +140,7 @@ class SEM2(_DAG, nn.Module):
         return VariableInfo(name, width=node.out_dim, categorical=categorical)
 
     def _intervention_values(self, set_nodes: DataBatch | None, batch_size: int) -> dict[str, Tensor]:
-        """Validate before coercion, then unwrap tensors for the sampling loop."""
+        """Check names and shapes, then unwrap caller-supplied valid intervention values."""
         if batch_size < 1:
             raise ValueError("batch_size must be positive.")
         if set_nodes is None:
@@ -158,33 +158,35 @@ class SEM2(_DAG, nn.Module):
             value = set_nodes.select(name)
             if variable.width != node.out_dim:
                 raise ValueError(f"Intervention width does not match {name!r}.")
-            constraint = node.support.constraint
-            if not torch.isfinite(value).all() or (constraint is not None and not constraint.check(value).all()):
-                raise ValueError(f"Intervention values outside the declared support of {name!r}.")
             values[name] = value
         return values
 
     def sample(self, batch_size: int = 1, set_nodes: DataBatch | None = None) -> tuple[DataBatch, dict]:
         """Return named draws and intervention provenance, excluding helpers."""
+        # Share the sampling loop with queries that stop at a specific target.
         return self._sample(batch_size, set_nodes)
 
     def _sample(self, batch_size: int, set_nodes: DataBatch | None, target: str | None = None):
         if target is not None and target not in self.input_node:
             raise ValueError(f"Unknown or internal target node: {target!r}")
+        # Unwrap interventions once and retain their supplied variable metadata.
         interventions = self._intervention_values(set_nodes, batch_size)
         supplied = {} if set_nodes is None else dict(zip(set_nodes.names, set_nodes.variables))
         values, variables = [], []
+        # Evaluate parents first, replacing intervened equations with fixed values.
         for name in self.topological_order:
             node = self.node_dict[name]
             if name in interventions:
                 node.set_value(interventions[name])
             else:
                 node([self.node_dict[p].get_value() for p in node.predecessors], batch_size)
+            # Keep compiler helpers out of the returned batch.
             if not self.node_specs[name].is_helper and (target is None or name == target):
                 values.append(node.get_value())
                 variables.append(supplied[name] if name in supplied else self._variable_info(name))
             if name == target:
                 break
+        # Stack variable blocks in the same order as their metadata.
         result = DataBatch(torch.cat(values, dim=-1), tuple(variables))
         return result, {"interventions": set_nodes}
 

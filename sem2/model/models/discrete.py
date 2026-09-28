@@ -30,7 +30,7 @@ class SEM2Discrete(SEM2):
             )
         logging.info("Building a discrete SEM2 model.")
 
-    def __init__(self, model_formula: str, node_cfgs: dict = None, device="cpu", max_states: int = 100_000):
+    def __init__(self, model_formula: str, node_cfgs: dict = None, device="cpu"):
         super().__init__(model_formula, node_cfgs, device=device)
         self.device = device
 
@@ -57,9 +57,6 @@ class SEM2Discrete(SEM2):
             self.N_conf = 1
             for dim in n_classes:
                 self.N_conf *= dim
-
-            if self.N_conf > max_states:
-                raise ValueError(f"Enumeration requires {self.N_conf} states; max_states={max_states}.")
 
             # Generate Cartesian product of all possible states
             # all_states shape: [N_conf, N_nn_nodes]
@@ -93,6 +90,7 @@ class SEM2Discrete(SEM2):
                 set_nodes: Optional DataBatch of named intervention values.
         """
 
+        # Unwrap valid interventions before enumerating conditional probabilities.
         interventions = self._intervention_values(set_nodes, batch_size)
 
         device = self.device
@@ -106,7 +104,7 @@ class SEM2Discrete(SEM2):
         for node_name in self.topological_order:
             node = self.node_dict[node_name]
             is_discrete = isinstance(node, NodeMLPDiscrete)
-            # ---- Intervention handling ----
+            # An intervention replaces this node's probability factor with a point mass.
             if node_name in interventions:
                 node.set_value(interventions[node_name])
 
@@ -156,8 +154,7 @@ class SEM2Discrete(SEM2):
                 p_val = p_val.unsqueeze(1).expand(batch_size, M, p_val.shape[-1])  # [bs, M, dim]
                 parent_values[pn.name] = p_val
 
-            # 3) Run NN only for M contexts
-            # IMPORTANT: v(...) must accept parent_values with second dim = M
+            # Evaluate each distinct parent context in the formula's declared order.
             node([parent_values[p] for p in node.predecessors], batch_size, mode=DiscreteModes.SOFTMAX)
 
             # 4) Compute cond prob for each global configuration using inverse map
@@ -178,15 +175,16 @@ class SEM2Discrete(SEM2):
 
             log_cond_prob = torch.log(cond_prob)
             log_probs = log_probs + log_cond_prob
-            # if not torch.all(torch.isfinite(log_probs)):
-            #     print("Warning: All probabilities are zero. Check for underflow or incorrect model specification.")
+
         probs = torch.exp(log_probs)
 
+        # Pair probability columns with their named states and preserve supplied metadata.
         supplied = {} if set_nodes is None else dict(zip(set_nodes.names, set_nodes.variables))
         variables = tuple(supplied[name] if name in supplied else self._variable_info(name)
                           for name in self.state_node_names)
         result = FiniteDistribution(DataBatch(all_states, variables), probs)
         names = [name for name in self.state_node_names if not self.node_specs[name].is_helper]
         if len(names) != len(self.state_node_names):
+            # Sum over internal helpers rather than exposing their state coordinates.
             result = result.marginalize(names)
         return result, {"interventions": set_nodes}

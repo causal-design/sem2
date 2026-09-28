@@ -5,6 +5,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Optional
 import torch
+import torch.nn.functional as F
 import warnings
 from torch import nn
 from torch.distributions import Distribution, constraints
@@ -227,7 +228,7 @@ class NodeLinear(NodeEndogenous):
 
     def _forward_inner(self, x: list[torch.Tensor], batch_size: int = 1) -> torch.Tensor:
         x_cat = self._collate_fn(x) if x else self.linear.weight.new_empty(batch_size, 0)
-        return torch.nn.functional.linear(x_cat.to(self.linear.weight), self._effective_weight(), self.bias())
+        return F.linear(x_cat.to(self.linear.weight), self._effective_weight(), self.bias())
 
 
 # ── Nonlinear (abstract) ──────────────────────────────────────────────────────
