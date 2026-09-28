@@ -150,19 +150,16 @@ class ATE(SEM2Operator):
 
 
 class SEM2Loss(SEM2Operator):
-    """Existing weighted scalar objective, with typed component results."""
+    """Weighted sum of explicit (scalar operator, weight) pairs.
+
+    Component conventions are unchanged: a negative log-likelihood weight gives
+    a minimization objective. Diagnostics use index:class prefixes to avoid collisions.
+    """
     input_type = OperatorInput.DATA
     output_type = OperatorOutput.SCALAR
 
-    def __init__(self, cfg, model):
-        self.device = cfg.device
-        self.loss_components = []
-        if cfg.use_energy_score:
-            self.loss_components.append((EnergyLoss(cfg, model), cfg.energy_score_weight))
-        if cfg.use_ate:
-            self.loss_components.append((ATE(cfg, model), cfg.ate_weight))
-        if cfg.use_mmd:
-            raise NotImplementedError("MMD loss not implemented yet.")
+    def __init__(self, components: list[tuple[SEM2Operator, float]]) -> None:
+        self.loss_components = list(components)
         if not self.loss_components:
             raise ValueError("At least one loss component is required.")
         for component, _ in self.loss_components:
@@ -172,15 +169,17 @@ class SEM2Loss(SEM2Operator):
     def evaluate(self, observations: DataBatch, **kwargs) -> tuple[ScalarResult, dict]:
         if not isinstance(observations, DataBatch):
             raise TypeError("observations must be a DataBatch.")
-        total = torch.zeros((), device=self.device)
+        # Start with a Python zero so the components determine tensor dtype/device.
+        total = 0
         metrics, variables = {}, {}
-        for component, weight in self.loss_components:
+        for index, (component, weight) in enumerate(self.loss_components):
             if component.input_type == OperatorInput.DATA:
                 result, details = component.evaluate(observations, **kwargs)
             else:
                 result, details = component.evaluate(**kwargs)
             total = total + weight * result.value
             variables.update((v.name, v) for v in result.variables)
-            metrics.update((f"{component}/{name}", value) for name, value in details.items())
-            metrics[str(component)] = result.value.detach()
+            label = f"{index}:{type(component).__name__}"
+            metrics.update((f"{label}/{name}", value) for name, value in details.items())
+            metrics[label] = result.value.detach()
         return ScalarResult(total, "loss", tuple(variables.values())), metrics
