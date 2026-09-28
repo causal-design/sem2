@@ -3,8 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 import keyword
 from numbers import Integral
+from typing import TYPE_CHECKING
 import pandas as pd
 import torch
+
+if TYPE_CHECKING:
+    from .model.models.base import SEM2
 
 
 @dataclass
@@ -128,7 +132,7 @@ class ScalarResult:
         self.variables = tuple(self.variables)
 
 
-def _column_names(columns) -> list[str]:
+def _column_names(columns: pd.Index) -> list[str]:
     """Normalize labels, reserving valid names before suffixing collisions."""
     reserved = {name for name in columns
                 if isinstance(name, str) and name.isidentifier() and not keyword.iskeyword(name)}
@@ -151,7 +155,7 @@ def _column_names(columns) -> list[str]:
     return names
 
 
-def _encode_column(series: pd.Series, variable: VariableInfo):
+def _encode_column(series: pd.Series, variable: VariableInfo) -> tuple[pd.Series, VariableInfo]:
     """Encode declared labels; numeric columns already contain stored values."""
     categorical = isinstance(series.dtype, pd.CategoricalDtype)
     encoding = variable.encoding
@@ -180,7 +184,12 @@ def _encode_column(series: pd.Series, variable: VariableInfo):
     return series, variable
 
 
-def prepare_data(model, frame: pd.DataFrame, variables: tuple[VariableInfo, ...] = (), device=None):
+def prepare_data(
+    model: SEM2,
+    frame: pd.DataFrame,
+    variables: tuple[VariableInfo, ...] = (),
+    device: torch.device | str | None = None,
+) -> tuple[DataBatch, dict[str, object]]:
     """Prepare a DataFrame once, returning (DataBatch, report) without mutation.
 
     Metadata uses normalized model names. Numeric columns contain stored values;
