@@ -2,12 +2,12 @@ import logging
 import pandas as pd
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader, TensorDataset
 
-from .model.models import SEM2
-from .operators.operators_base import OperatorInput, OperatorOutput, SEM2Operator
-from .default_configs import TrainingConfig
-from .data import DataBatch, VariableInfo, prepare_data
+from ..model.models import SEM2
+from ..operators.operators_base import OperatorInput, OperatorOutput, SEM2Operator
+from ..default_configs import TrainingConfig
+from ..data import DataBatch, VariableInfo
+from ..dataloader import prepare_dataloader
 
 logger = logging.getLogger(__name__)
 
@@ -38,8 +38,9 @@ class SEM2Trainer:
         self.cfg = cfg
         self.sem = sem
         self.loss_fn = objective
-        self.data, self.preparation_report = prepare_data(sem, data, variables, device=cfg.device)
-        self.loader = DataLoader(TensorDataset(self.data.values), batch_size=cfg.batch_size, shuffle=True)
+        self.loader, self.variables, self.preparation_report = prepare_dataloader(
+            sem, data, cfg.batch_size, variables=variables, device=cfg.device,
+        )
         if self.preparation_report["dropped_rows"]:
             logger.warning("Dropped %d rows with missing values.", self.preparation_report["dropped_rows"])
 
@@ -55,7 +56,7 @@ class SEM2Trainer:
         self.sem.train()
         for epoch in range(cfg.epochs):
             for (values,) in self.loader:
-                self._fit_batch(DataBatch(values, self.data.variables))
+                self._fit_batch(DataBatch(values, self.variables))
             logger.info("Epoch %d/%d completed.", epoch + 1, cfg.epochs)
         return self.sem
 
@@ -82,10 +83,10 @@ def fit(model: SEM2, data: pd.DataFrame, objective: SEM2Operator, config: Traini
 
 
 def main():
-    from .dataloader import DummyDiscreteDataloader
-    from .default_configs import MLPConfig
-    from .model import SEM2Discrete
-    from .operators.scalar_operators import EnergyLoss
+    from ..dataloader import DummyDiscreteDataloader
+    from ..default_configs import MLPConfig
+    from ..model import SEM2Discrete
+    from ..operators.scalar_operators import EnergyLoss
 
     torch.manual_seed(0)
     logging.basicConfig(level=logging.INFO)

@@ -1,1 +1,1 @@
-from .sem2trainer import fit
+from .trainer import fit
