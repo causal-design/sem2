@@ -66,12 +66,7 @@ class SEM2Trainer:
         else:
             result, _ = self.loss_fn.evaluate()
         loss = result.value
-        if not torch.isfinite(loss):
-            raise FloatingPointError("Nonfinite training loss.")
         loss.backward()
-        gradients = [p.grad for p in self.sem.parameters() if p.grad is not None]
-        if gradients and not torch.stack([torch.isfinite(g).all() for g in gradients]).all():
-            raise FloatingPointError("Nonfinite training gradients.")
         self.optim.step()
 
 
@@ -80,7 +75,7 @@ def fit(model: SEM2, data: pd.DataFrame, objective: SEM2Operator, config: Traini
     """Fit and return the supplied model in place, using a fresh optimizer.
 
     variables optionally carries column meaning/encoding for prepare_data().
-    Numerical errors raise without rolling back updates already completed.
+    No per-update finiteness checks or rollback are performed.
     """
     return SEM2Trainer(config, model, data, objective, variables=variables).train()
 
