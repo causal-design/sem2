@@ -2,6 +2,7 @@ import logging
 import pandas as pd
 import torch
 import torch.nn as nn
+from torch.utils.data import DataLoader, TensorDataset
 
 from .model.models import SEM2
 from .operators.operators_base import OperatorInput, OperatorOutput, SEM2Operator
@@ -38,6 +39,7 @@ class SEM2Trainer:
         self.sem = sem
         self.loss_fn = objective
         self.data, self.preparation_report = prepare_data(sem, data, variables, device=cfg.device)
+        self.loader = DataLoader(TensorDataset(self.data.values), batch_size=cfg.batch_size, shuffle=True)
         if self.preparation_report["dropped_rows"]:
             logger.warning("Dropped %d rows with missing values.", self.preparation_report["dropped_rows"])
 
@@ -52,9 +54,8 @@ class SEM2Trainer:
         self.optim = get_optimiser(self.sem, cfg)
         self.sem.train()
         for epoch in range(cfg.epochs):
-            rows = torch.randperm(len(self.data), device=cfg.device)
-            for indices in rows.split(cfg.batch_size):
-                self._fit_batch(self.data[indices])
+            for (values,) in self.loader:
+                self._fit_batch(DataBatch(values, self.data.variables))
             logger.info("Epoch %d/%d completed.", epoch + 1, cfg.epochs)
         return self.sem
 
