@@ -2,10 +2,10 @@
 from __future__ import annotations
 from typing import TYPE_CHECKING
 from abc import ABC, abstractmethod
+from enum import StrEnum
 import warnings
 import torch
 
-from .._compat import StrEnum
 from ..data import DataBatch, FiniteDistribution, ScalarResult
 
 if TYPE_CHECKING:
