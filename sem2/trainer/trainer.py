@@ -6,7 +6,7 @@ import torch.nn as nn
 from ..model.models import SEM2
 from ..operators.operators_base import OperatorInput, OperatorOutput, SEM2Operator
 from ..default_configs import TrainingConfig
-from ..data import DataBatch, VariableInfo
+from ..dataloader.data import DataBatch, VariableInfo
 from ..dataloader import prepare_dataloader
 
 logger = logging.getLogger(__name__)

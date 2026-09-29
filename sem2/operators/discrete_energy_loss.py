@@ -1,6 +1,6 @@
 """Energy calculations for named finite distributions."""
 import torch
-from ..data import DataBatch, FiniteDistribution, ScalarResult
+from ..dataloader.data import DataBatch, FiniteDistribution, ScalarResult
 from .operators_base import _numeric_values
 
 

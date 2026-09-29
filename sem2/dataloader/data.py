@@ -8,8 +8,8 @@ import pandas as pd
 import torch
 
 if TYPE_CHECKING:
-    from .model.components.nodes import RandomVariableSupport
-    from .model.models.base import SEM2
+    from ..model.components.nodes import RandomVariableSupport
+    from ..model.models.base import SEM2
 
 
 @dataclass
