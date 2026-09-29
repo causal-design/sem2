@@ -34,23 +34,44 @@ class EnergyLoss(SEM2Operator):
             if len(self.levels) < 2:
                 raise ValueError("The instrument requires at least two declared levels.")
 
+        if SEMType.is_continuous(model.sem_type):
+            self.evaluate = self._evaluate_continuous
+        elif SEMType.is_discrete(model.sem_type):
+            self.evaluate = self._evaluate_discrete if self.instrument is None else self._evaluate_discrete_iv
+        else:
+            raise NotImplementedError(f"Energy score is not implemented for this SEM type: {model.sem_type}")
+
     def evaluate(self, observations: DataBatch, **kwargs) -> tuple[ScalarResult, dict]:
+        """Replaced at initialization by the model-specific implementation."""
+        raise NotImplementedError
+
+    def _prepare_observations(self, observations: DataBatch) -> DataBatch:
         if not isinstance(observations, DataBatch):
             raise TypeError("observations must be a DataBatch.")
         observations = observations.to(self.device)
         unknown = set(observations.names) - self.model.input_node
         if unknown:
             raise ValueError(f"Unknown or internal observed variables: {sorted(unknown)}")
-        if SEMType.is_continuous(self.model.sem_type):
-            prediction, _ = self.model.sample(batch_size=self.bs)
-            return self._energy_score(observations, prediction)
+        return observations
+
+    def _evaluate_continuous(self, observations: DataBatch, **kwargs) -> tuple[ScalarResult, dict]:
+        observations = self._prepare_observations(observations)
+        prediction, _ = self.model.sample(batch_size=self.bs)
+        return self._energy_score(observations, prediction)
+
+    def _evaluate_discrete(self, observations: DataBatch, **kwargs) -> tuple[ScalarResult, dict]:
+        observations = self._prepare_observations(observations)
         names = [name for name in observations.names if name in self.model.state_node_names
                  and not self.model.node_specs[name].is_helper]
         outcomes = observations.subset(names)
-        if self.instrument is None:
-            prediction, _ = self.model.sample(batch_size=self.bs)
-            return self.discrete_loss.energy_dist(outcomes, prediction)
+        prediction, _ = self.model.sample(batch_size=self.bs)
+        return self.discrete_loss.energy_dist(outcomes, prediction)
 
+    def _evaluate_discrete_iv(self, observations: DataBatch, **kwargs) -> tuple[ScalarResult, dict]:
+        observations = self._prepare_observations(observations)
+        names = [name for name in observations.names if name in self.model.state_node_names
+                 and not self.model.node_specs[name].is_helper]
+        outcomes = observations.subset(names)
         instrument = observations.subset(self.instrument)
         if instrument.values.shape[1] != 1:
             raise ValueError("The instrument must be scalar.")
@@ -110,19 +131,33 @@ class MeanPotentialOutcome(SEM2Operator):
             raise ValueError("MeanPotentialOutcome requires a scalar intervention node.")
         if SEMType.is_continuous(model.sem_type):
             self.sampler = PotentialOutcome(model, target_node)
+            self.evaluate = self._evaluate_continuous
+        elif SEMType.is_discrete(model.sem_type):
+            self.evaluate = self._evaluate_discrete
+        else:
+            raise NotImplementedError(f"Mean potential outcome is not implemented for this SEM type: {model.sem_type}")
 
     def evaluate(self, set_value: DataBatch, **kwargs) -> tuple[ScalarResult, dict]:
+        """Replaced at initialization by the model-specific implementation."""
+        raise NotImplementedError
+
+    def _validate_intervention(self, set_value: DataBatch) -> None:
         if not isinstance(set_value, DataBatch) or set_value.names != (self.intervene_node,):
             raise TypeError("set_value must be a DataBatch containing the intervention variable.")
-        if SEMType.is_continuous(self.model.sem_type):
-            draws, details = self.sampler.evaluate(batch_size=len(set_value), set_nodes=set_value)
-            value = _numeric_values(DataBatch(draws.values, (self.variable,))).mean()
-        else:
-            prediction, details = self.model.sample(batch_size=len(set_value), set_nodes=set_value)
-            prediction = prediction.marginalize([self.target_node])
-            states = DataBatch(prediction.states.values, (self.variable,))
-            numeric = _numeric_values(states)[:, 0].to(prediction.probabilities)
-            value = (prediction.probabilities @ numeric).mean()
+
+    def _evaluate_continuous(self, set_value: DataBatch, **kwargs) -> tuple[ScalarResult, dict]:
+        self._validate_intervention(set_value)
+        draws, details = self.sampler.evaluate(batch_size=len(set_value), set_nodes=set_value)
+        value = _numeric_values(DataBatch(draws.values, (self.variable,))).mean()
+        return ScalarResult(value, "mean_potential_outcome", (self.variable,)), details
+
+    def _evaluate_discrete(self, set_value: DataBatch, **kwargs) -> tuple[ScalarResult, dict]:
+        self._validate_intervention(set_value)
+        prediction, details = self.model.sample(batch_size=len(set_value), set_nodes=set_value)
+        prediction = prediction.marginalize([self.target_node])
+        states = DataBatch(prediction.states.values, (self.variable,))
+        numeric = _numeric_values(states)[:, 0].to(prediction.probabilities)
+        value = (prediction.probabilities @ numeric).mean()
         return ScalarResult(value, "mean_potential_outcome", (self.variable,)), details
 
 
