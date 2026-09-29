@@ -6,7 +6,7 @@ from enum import StrEnum
 import warnings
 import torch
 
-from ..data import DataBatch, FiniteDistribution, ScalarResult
+from ..dataloader.data import DataBatch, FiniteDistribution, ScalarResult
 
 if TYPE_CHECKING:
     from ..model.models.base import SEM2

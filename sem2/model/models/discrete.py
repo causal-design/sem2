@@ -10,7 +10,7 @@ from collections import defaultdict
 from ..components.nodes import NodeMLPDiscrete, SEM2Node, DiscreteModes
 from ..construction import SEMType
 from .base import SEM2
-from ...data import DataBatch, FiniteDistribution
+from ...dataloader.data import DataBatch, FiniteDistribution
 
 
 class SEM2Discrete(SEM2):

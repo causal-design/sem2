@@ -8,7 +8,7 @@ from torch import Tensor
 
 from ..components.nodes import NodeExogenous, NodeLinear, NodeMLP, NodeMLPDiscrete, SEM2Node
 from ..construction import _DAG, SEMType
-from ...data import DataBatch, VariableInfo
+from ...dataloader.data import DataBatch, VariableInfo
 
 
 # ════════════════════════════════════════════════════════════════════════════════════

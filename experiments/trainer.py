@@ -2,7 +2,7 @@
 import logging
 import pandas as pd
 import torch
-from sem2.data import DataBatch, VariableInfo
+from sem2.dataloader.data import DataBatch, VariableInfo
 from sem2.dataloader import DummyDiscreteDataloader
 from sem2.default_configs import TrainingConfig, MLPConfig
 from sem2.model import SEM2Discrete

@@ -1,5 +1,5 @@
 import torch
-from ..data import DataBatch, VariableInfo
+from .data import DataBatch, VariableInfo
 
 
 class DummyDiscreteDataloader:

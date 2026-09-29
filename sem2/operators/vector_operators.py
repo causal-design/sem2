@@ -2,7 +2,7 @@
 from __future__ import annotations
 from .operators_base import SEM2Operator, OperatorInput, OperatorOutput
 from ..model.construction import SEMType
-from ..data import DataBatch
+from ..dataloader.data import DataBatch
 
 
 class PotentialOutcome(SEM2Operator):

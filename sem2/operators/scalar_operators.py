@@ -6,7 +6,7 @@ from .vector_operators import PotentialOutcome
 from .discrete_energy_loss import DiscreteEnergyLoss
 from ..model.construction.sem_types import SEMType
 from ..model.components.nodes import NodeExogenous
-from ..data import DataBatch, ScalarResult, VariableInfo
+from ..dataloader.data import DataBatch, ScalarResult, VariableInfo
 
 
 class EnergyLoss(SEM2Operator):

@@ -12,7 +12,7 @@ import torch
 from .operators_base import OperatorInput, OperatorOutput, SEM2Operator
 from ..model.construction import SEMType
 from ..model.models import SEM2Linear
-from ..data import DataBatch, ScalarResult
+from ..dataloader.data import DataBatch, ScalarResult
 
 
 class SEM2LinearModelOperator(SEM2Operator):

@@ -11,7 +11,7 @@ import torch
 import torch.nn as nn
 
 from sem2.model.components.nn_models import _LinearConfig, _LinearModel, _MLP
-from sem2.data import DataBatch, VariableInfo
+from sem2.dataloader.data import DataBatch, VariableInfo
 from sem2.default_configs import LinearNodeConfig, MLPConfig
 from sem2.model.components.nodes import (
     RandomVariable, SEM2Node,
