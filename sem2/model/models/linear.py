@@ -90,7 +90,7 @@ class SEM2Linear(SEM2):
                 # effective_weight is [1, input_dim]; scalar parents -> one col each.
                 w = node.effective_weight().reshape(-1)
                 for col, parent in enumerate(node.predecessors):
-                    B[self._node_index[name], self._node_index[parent]] = w[col]
+                    B[self._node_index[name], self._node_index[parent]] += w[col]
         return B
 
     # ── model-implied mean and covariance ─────────────────────────────────────

@@ -134,12 +134,10 @@ class ScalarResult:
 
 
 def _column_names(columns: pd.Index) -> list[str]:
-    """Normalize labels, reserving valid names before suffixing collisions."""
-    reserved = {name for name in columns
-                if isinstance(name, str) and name.isidentifier() and not keyword.iskeyword(name)}
+    """Normalize labels, rejecting ambiguous names rather than guessing by order."""
     used, names = set(), []
     for label in columns:
-        if label in reserved:
+        if isinstance(label, str) and label.isidentifier() and not keyword.iskeyword(label):
             name = label
         else:
             name = "".join(char if ("_" + char).isidentifier() else "_" for char in str(label))
@@ -147,10 +145,8 @@ def _column_names(columns: pd.Index) -> list[str]:
                 name = "_" + name
             if keyword.iskeyword(name):
                 name += "_"
-            base, suffix = name, 2
-            while name in reserved or name in used:
-                name = f"{base}_{suffix}"
-                suffix += 1
+        if name in used:
+            raise ValueError(f"Column names collide after normalization: {name!r}. Rename them explicitly.")
         names.append(name)
         used.add(name)
     return names
