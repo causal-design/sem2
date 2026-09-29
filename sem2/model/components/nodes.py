@@ -3,6 +3,7 @@
 from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Optional
 import torch
 import torch.nn.functional as F
@@ -10,7 +11,6 @@ import warnings
 from torch import nn
 from torch.distributions import Distribution, constraints
 
-from ..._compat import StrEnum
 from .nn_models import _LinearConfig, _LinearModel, _MLP
 from ...default_configs import LinearNodeConfig, MLPConfig
 

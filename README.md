@@ -12,7 +12,7 @@ Start with the [v0.1 planning review](docs/plan/v0.1.md), which links the modelâ
 
 ## Installation
 
-SEM2 requires Python 3.10 or later.
+SEM2 requires Python 3.11 or later.
 
 ```bash
 python -m pip install -e .
