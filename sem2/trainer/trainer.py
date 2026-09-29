@@ -28,11 +28,11 @@ class SEM2Trainer:
                  objective: SEM2Operator, *, variables: tuple[VariableInfo, ...] = ()):
         """Prepare named data once for in-place fitting with an explicit objective.
 
-        Construct the model on cfg.device. Scalar objectives are minimized;
+        Construct the model on cfg.device. Data-taking scalar objectives are minimized;
         use a negative weight for LogLikelihood in SEM2Loss.
         """
-        if objective.output_type != OperatorOutput.SCALAR:
-            raise TypeError("Training requires a scalar objective.")
+        if objective.input_type != OperatorInput.DATA or objective.output_type != OperatorOutput.SCALAR:
+            raise TypeError("Training requires a data-taking scalar objective.")
         if torch.device(sem.device) != torch.device(cfg.device):
             raise ValueError("Construct the model on the same device as TrainingConfig.device.")
         self.cfg = cfg
@@ -63,10 +63,7 @@ class SEM2Trainer:
     def _fit_batch(self, batch: DataBatch) -> None:
         """Evaluate the objective and take one optimizer step."""
         self.optim.zero_grad()
-        if self.loss_fn.input_type == OperatorInput.DATA:
-            result, _ = self.loss_fn.evaluate(batch)
-        else:
-            result, _ = self.loss_fn.evaluate()
+        result, _ = self.loss_fn.evaluate(batch)
         loss = result.value
         loss.backward()
         self.optim.step()
