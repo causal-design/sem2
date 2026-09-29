@@ -14,12 +14,12 @@ class EnergyLoss(SEM2Operator):
     input_type = OperatorInput.DATA
     output_type = OperatorOutput.SCALAR
 
-    def __init__(self, cfg, model):
+    def __init__(self, model, sample_bs: int = 512, beta: float = 1., instrument_node: str | None = None):
         self.model = model
-        self.device = cfg.device
-        self.bs = cfg.sample_bs
-        self.beta = cfg.energy_score_beta
-        self.instrument = cfg.instrument_node
+        self.device = model.device
+        self.bs = sample_bs
+        self.beta = beta
+        self.instrument = instrument_node
         self.discrete_loss = DiscreteEnergyLoss(self.beta)
         if self.instrument is not None:
             if not SEMType.is_discrete(model.sem_type):
@@ -97,7 +97,7 @@ class MeanPotentialOutcome(SEM2Operator):
     input_type = OperatorInput.SELF
     output_type = OperatorOutput.SCALAR
 
-    def __init__(self, target_node: str, intervene_node: str, cfg, model, variable: VariableInfo | None = None):
+    def __init__(self, target_node: str, intervene_node: str, model, variable: VariableInfo | None = None):
         self.model = model
         self.target_node = target_node
         self.intervene_node = intervene_node
@@ -130,12 +130,13 @@ class ATE(SEM2Operator):
     input_type = OperatorInput.SELF
     output_type = OperatorOutput.SCALAR
 
-    def __init__(self, cfg, model, variable: VariableInfo | None = None):
-        self.device = cfg.device
-        self.bs = cfg.sample_bs
+    def __init__(self, model, target_node: str, intervene_node: str, sample_bs: int = 512,
+                 variable: VariableInfo | None = None):
+        self.device = model.device
+        self.bs = sample_bs
         self.model = model
-        self.intervene_node = cfg.T_node
-        self.treat_pot_out = MeanPotentialOutcome(cfg.Y_node, cfg.T_node, cfg, model, variable=variable)
+        self.intervene_node = intervene_node
+        self.treat_pot_out = MeanPotentialOutcome(target_node, intervene_node, model, variable=variable)
 
     def evaluate(self, **kwargs) -> tuple[ScalarResult, dict]:
         metadata = (self.model._variable_info(self.intervene_node),)

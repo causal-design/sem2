@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 from typing import Literal, Union, Any, Optional
 
 import torch
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Node configs  (public, user-facing)
@@ -55,47 +55,30 @@ Optimisers = Literal["AdamW", "Adam", "SGD"]
 class TrainingConfig(BaseModel):
     """Configuration for a SEM2 training run.
 
-    Covers device selection, optimiser, training loop, and loss function
-    settings. Node architecture is configured separately via LinearNodeConfig
-    and MLPConfig.
+    Covers device selection, optimiser and training loop settings.
+    Objectives are supplied separately; node architecture is configured via
+    LinearNodeConfig and MLPConfig.
 
     Usage:
         cfg = TrainingConfig()                        # auto-selects best device
         cfg = TrainingConfig(device="cpu", epochs=50) # explicit override
     """
-    model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True)
+    model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True, extra="forbid", allow_inf_nan=False)
 
     # Device: leave as None to auto-select CUDA > MPS > CPU.
-    # Set explicitly (e.g. "cpu", "cuda", "mps") to override.
+    # Construct the model on the same device before fitting.
     device: Union[str, Any] = None
 
     # Optimiser
     optim: Optimisers = "AdamW"
-    lr: float = 5e-4
-    weight_decay: float = 0.
-    momentum: float = 0.9                   # SGD only
+    lr: float = Field(default=5e-4, gt=0)
+    weight_decay: float = Field(default=0., ge=0)
+    momentum: float = Field(default=0.9, ge=0)       # SGD only
 
     # Training loop
-    batch_size: int = 1024
-    epochs: int = 12
+    batch_size: int = Field(default=1024, gt=0)
+    epochs: int = Field(default=12, gt=0)
     rng_seed: int = 42
-    sample_bs: int = 512                           # Sample batch size for distribution sampling
-
-    # Energy score loss
-    use_energy_score: bool = True
-    energy_score_weight: float = 1.
-    energy_score_beta: float = 1.
-    instrument_node: str | None = None              # Explicit IV objective; otherwise fit the observed margin
-
-    # ATE loss
-    use_ate: bool = False
-    ate_weight: float = -0.05
-    T_node: str = "X"
-    Y_node: str = "Y"
-
-    # MMD loss  # TODO
-    use_mmd: bool = False
-    mmd_weight: float = 1.
 
     @model_validator(mode="after")
     def _resolve_device(self) -> "TrainingConfig":

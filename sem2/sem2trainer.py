@@ -1,13 +1,12 @@
+import logging
+import pandas as pd
 import torch
 import torch.nn as nn
-from typing import Iterable
-import time
-import logging
 
 from .model.models import SEM2
-from .operators.scalar_operators import SEM2Loss, EnergyLoss, ATE
+from .operators.operators_base import OperatorInput, OperatorOutput, SEM2Operator
 from .default_configs import TrainingConfig
-from .data import DataBatch
+from .data import DataBatch, VariableInfo, prepare_data
 
 logger = logging.getLogger(__name__)
 
@@ -18,93 +17,91 @@ def get_optimiser(model: nn.Module, cfg) -> torch.optim.Optimizer:
     elif cfg.optim == "Adam":
         return torch.optim.Adam(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
     elif cfg.optim == "SGD":
-        return torch.optim.SGD(model.parameters(), momentum=0.9, lr=cfg.lr, weight_decay=cfg.weight_decay)
+        return torch.optim.SGD(model.parameters(), momentum=cfg.momentum, lr=cfg.lr, weight_decay=cfg.weight_decay)
     else:
         raise ValueError(f"Invalid optimiser: {cfg.optim}")
 
 
 class SEM2Trainer:
-    def __init__(self, cfg: TrainingConfig, sem: SEM2, ds: Iterable):
-        """ Trainer class. Handles training a SEM2 model.
-        Args:
-            cfg: TrainingConfig object containing training configuration.
-            sem: SEM2 model to train.
-            ds: Iterable dataset to train on. Each element should be a batch of data.
-        """
+    def __init__(self, cfg: TrainingConfig, sem: SEM2, data: pd.DataFrame,
+                 objective: SEM2Operator, *, variables: tuple[VariableInfo, ...] = ()):
+        """Prepare named data once for in-place fitting with an explicit objective.
 
+        Construct the model on cfg.device. Scalar objectives are minimized;
+        use a negative weight for LogLikelihood in SEM2Loss.
+        """
+        if objective.output_type != OperatorOutput.SCALAR:
+            raise TypeError("Training requires a scalar objective.")
+        if torch.device(sem.device) != torch.device(cfg.device):
+            raise ValueError("Construct the model on the same device as TrainingConfig.device.")
         self.cfg = cfg
         self.sem = sem
-        self.ds = ds
-        self.device = cfg.device
+        self.loss_fn = objective
+        self.data, self.preparation_report = prepare_data(sem, data, variables, device=cfg.device)
+        if self.preparation_report["dropped_rows"]:
+            logger.warning("Dropped %d rows with missing values.", self.preparation_report["dropped_rows"])
 
-        # Express the existing config-driven defaults as operator–weight pairs.
-        components = []
-        if cfg.use_energy_score:
-            components.append((EnergyLoss(cfg, sem), cfg.energy_score_weight))
-        if cfg.use_ate:
-            components.append((ATE(cfg, sem), cfg.ate_weight))
-        if cfg.use_mmd:
-            raise NotImplementedError("MMD loss not implemented yet.")
-        self.loss_fn = SEM2Loss(components)
-        self.optim = get_optimiser(sem, cfg)
+    def train(self) -> SEM2:
+        """Run the epoch budget, returning the same model with updated parameters.
 
-    def train(self):
-        """ Train the model. """
-        cfg = self.cfg
-
-        self.sem.train()
-
-        for epoch in range(cfg.epochs):
-            epoch_st_t = time.perf_counter()
-
-            losses = []
-            # Train steps
-            for batch in self.ds:
-                loss, loss_metrics = self._fit_batch(batch)
-                losses.append(loss)
-            # Timing
-            epoch_end_t = time.perf_counter()
-            epoch_time = epoch_end_t - epoch_st_t
-            logger.info(f"Epoch {epoch}: {epoch_time:.2f}s")
-            # Get loss statistics
-            average_loss = torch.stack(losses).mean().item()
-            logger.info(f'{average_loss=:.4g}')
-
-    def _fit_batch(self, batch):
-        """ Fit model on a single batch.
-            Includes making predictions, calculating gradients, and updating model parameters.
+        Each call resets the fitting RNG and optimizer, not model parameters.
+        No histories, final evaluation or convergence claim are produced.
         """
-        self.optim.zero_grad()
+        cfg = self.cfg
+        torch.manual_seed(cfg.rng_seed)
+        self.optim = get_optimiser(self.sem, cfg)
+        self.sem.train()
+        for epoch in range(cfg.epochs):
+            rows = torch.randperm(len(self.data), device=cfg.device)
+            for indices in rows.split(cfg.batch_size):
+                self._fit_batch(self.data[indices])
+            logger.info("Epoch %d/%d completed.", epoch + 1, cfg.epochs)
+        return self.sem
 
-        if not isinstance(batch, DataBatch):
-            raise TypeError("The loader must yield DataBatch objects.")
-        batch = batch.to(self.device)
-        # Compute loss
-        result, loss_metrics = self.loss_fn.evaluate(batch)
+    def _fit_batch(self, batch: DataBatch) -> None:
+        """Evaluate the objective and take one optimizer step."""
+        self.optim.zero_grad()
+        if self.loss_fn.input_type == OperatorInput.DATA:
+            result, _ = self.loss_fn.evaluate(batch)
+        else:
+            result, _ = self.loss_fn.evaluate()
         loss = result.value
-        # Calculate gradients and update model parameters
+        if not torch.isfinite(loss):
+            raise FloatingPointError("Nonfinite training loss.")
         loss.backward()
+        gradients = [p.grad for p in self.sem.parameters() if p.grad is not None]
+        if gradients and not torch.stack([torch.isfinite(g).all() for g in gradients]).all():
+            raise FloatingPointError("Nonfinite training gradients.")
         self.optim.step()
 
-        # Detach to stop memory leak
-        loss = loss.detach()
-        loss_metrics = {k: v.detach() if isinstance(v, torch.Tensor) else v for k, v in loss_metrics.items()}
-        return loss, loss_metrics
+
+def fit(model: SEM2, data: pd.DataFrame, objective: SEM2Operator, config: TrainingConfig,
+        *, variables: tuple[VariableInfo, ...] = ()) -> SEM2:
+    """Fit and return the supplied model in place, using a fresh optimizer.
+
+    variables optionally carries column meaning/encoding for prepare_data().
+    Numerical errors raise without rolling back updates already completed.
+    """
+    return SEM2Trainer(config, model, data, objective, variables=variables).train()
 
 
 def main():
     from .dataloader import DummyDiscreteDataloader
     from .default_configs import MLPConfig
     from .model import SEM2Discrete
+    from .operators.scalar_operators import EnergyLoss
 
     torch.manual_seed(0)
     logging.basicConfig(level=logging.INFO)
-    cfg = TrainingConfig(device="cpu", epochs=1, sample_bs=32, instrument_node="Z")
+    cfg = TrainingConfig(device="cpu", epochs=1, batch_size=64)
     model = SEM2Discrete("Z ~ Categorical(probs=[1,1]); X <- d(Z); Y <- d(X)", node_cfgs={
         "X": MLPConfig(hidden_dims=[8], output_dim=2),
         "Y": MLPConfig(hidden_dims=[8], output_dim=2),
     })
-    SEM2Trainer(cfg, model, DummyDiscreteDataloader(2, batch_size=64)).train()
+    batch = next(iter(DummyDiscreteDataloader(1, batch_size=128)))
+    data = pd.DataFrame(batch.values.numpy(), columns=batch.names)
+    objective = EnergyLoss(model, sample_bs=32, instrument_node="Z")
+    fit(model, data, objective, cfg, variables=batch.variables)
 
 
 if __name__ == "__main__":
