@@ -6,7 +6,7 @@ from sem2.data import DataBatch, VariableInfo
 from sem2.dataloader import DummyDiscreteDataloader
 from sem2.default_configs import TrainingConfig, MLPConfig
 from sem2.model import SEM2Discrete
-from sem2.sem2trainer import SEM2Trainer
+from sem2.trainer import SEM2Trainer
 from sem2.operators.scalar_operators import EnergyLoss, MeanPotentialOutcome
 
 
