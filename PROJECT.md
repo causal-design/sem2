@@ -1,198 +1,86 @@
 # SEM2 project status
 
-**Last updated:** 29 August 2026<br>
-**Repository baseline:** `main` at `315df9cfe5d6f1298f9d73ec574e08c87fa59426`<br>
-**Detailed source-review baseline:** `cafcae6e7002e8b9809ef0c55bc061a4bc1d3117`
+**Last updated:** 30 September 2026
 
-This file records the current capabilities, limitations, decisions, and order of work. [`README.md`](README.md) is the stable user entry point, while [`AGENTS.md`](AGENTS.md) contains contributor guidance. Fresh source and test evidence takes precedence over this record.
+**Default-branch source baseline:** `main` at `ac3052b0a1ba08f228f935552e85605a82dde34e`.
 
-The supporting evidence is in the [updated technical review](docs/meetings/2026-08-26-ai-review-updated.md), the [26 August meeting summary](docs/meetings/2026-08-26-meeting.md), and the [28 August meeting summary](docs/meetings/2026-08-28-meeting.md).
+This file records current capabilities, limitations, decisions, and next work. [`README.md`](README.md) gives stable user context; [`AGENTS.md`](AGENTS.md) gives durable contribution rules. Fresh source and executed evidence take precedence over stale prose. The [v0.1 product specification](docs/plan/v0.1/README.md) and [implementation plan](docs/plan/v0.1.md) define the target, not a claim that every planned feature is present.
 
-## Current status
+## Current implementation on main
 
-### Working core
+The parser/DAG builder, continuous and linear samplers, scalar linear moment calculations, Gaussian likelihood operator, and small finite-state probability engine are present. This does not establish a general end-to-end fitting workflow or release readiness.
 
-The strongest parts of the package are:
-
-- formula parsing and DAG construction;
-- continuous and linear structural sampling;
-- exact mean and covariance calculations for scalar linear SEMs;
-- Gaussian likelihood fitting for linear Gaussian models; and
-- finite-state probability calculations for small discrete models.
-
-Interventions can be evaluated by replacing selected node values during sampling. This computes the intervention implied by the supplied structural model; it does not validate the graph, prove exogeneity, or establish identification from observational data.
-
-### Experimental, incomplete, or absent
-
-| Area | Current position |
+| Area | Observed implementation and limits |
 |---|---|
-| Generic continuous fitting | The energy-loss and package-trainer path needs repair and direct end-to-end tests. |
-| Real-table workflow | Named column mapping, categorical encoding, missing-value policy, and reusable preprocessing are not provided as a coherent package workflow. |
-| Multidimensional variables | The present graph and node interfaces are oriented toward scalar variables; a multidimensional covariate node with a supplied empirical distribution is not supported. |
-| Discrete fitting | Finite-state probability calculation works, but the fitting workflow is specialized and incomplete. |
-| Mixed models | Mixed discrete/continuous graphs can be classified, but fitting is not supported end to end. |
-| Partial identification | The operator abstraction can optimize a causal target alongside fit, but numerical extrema are not automatically sharp identified bounds. |
-| Uncertainty quantification | No package-level confidence interval or posterior workflow is implemented. |
-| MMD | Not implemented. |
-| PFN inference | Not implemented. |
-| Diagnostics | Optimizer and model-fit diagnostics are not yet systematic. |
+| Continuous/linear sampling | `sample()` returns a node-to-tensor dictionary plus an auxiliary dictionary. `set_nodes` accepts a dictionary of node names to valid tensors. Calling the model directly raises `NotImplementedError`. |
+| Finite-discrete models | `SEM2Discrete` enumerates endogenous states and returns probabilities for each exogenous draw, with auxiliary state information. Enumeration grows as the product of category counts; keep examples small. This is not a batch of realized category draws. |
+| Linear models/objectives | Scalar linear means/covariances and tensor-based Gaussian log-likelihood/covariance objectives are implemented. `LogLikelihood` returns mean **log**-likelihood, so a minimizing optimizer needs its negative. It is exact for linear Gaussian models and a moment-based pseudo-likelihood otherwise. |
+| Observation status/data | `unobs(...)` supplies the model's observed-variable list. The default branch has no `sem2/data.py`, named records, or reusable DataFrame preparation path. Tensor column alignment remains a caller responsibility. |
+| General fitting | The package trainer and a separate experimental trainer remain. No public `fit` entry point or systematic returned training history/final report is present. The package trainer's batch and objective interfaces remain experimental. |
+| Energy/IV objectives | Continuous energy evaluation explicitly selects `Z`, `X`, `Y`; the discrete route uses the first column as binary `Z`. Continuous sample-axis/estimator handling needs review. These are not graph-generic fitting guarantees. |
+| Query/combination | Potential-outcome operators and a config-driven weighted loss are present. `ATE` fixes a 1-versus-0 intervention contrast; arbitrary-level/joint public query interfaces and explicit operator-list composition are not current default-branch interfaces. |
+| Remaining scope | Mixed-model fitting, a supplied joint empirical covariate distribution, graphical identification, native penalty sweeps/extrapolation, general uncertainty quantification, MMD and PFN inference are not completed package workflows. Optimizing a target alongside fit does not by itself provide sharp identified bounds. |
 
-### Work outside the shared package
+### Unmerged implementation and review status
 
-Contributors have reported two relevant implementations outside the reviewed tree:
+[PR #60](https://github.com/causal-design/sem2/pull/60), inspected at `c1b219088af3c5bb54086572e567517818f9adce`, contains preparatory steps 1–5: formula/helper repairs, node-owned support, named records and caller migration, scalar DataFrame preparation, and explicit scalar operator–weight composition. Its actual record names include `DataBatch`, `FiniteDistribution`, and `ScalarResult`. These are **not merged main capabilities**.
 
-- a local Sinkhorn-divergence implementation with encouraging preliminary heavy-tail results; and
-- additional discrete-model code developed for the associated paper.
+The [30 September review instruction](https://github.com/causal-design/sem2/pull/60#issuecomment-5909025337) says no further updates to PR #60 are required: incorporate its comments in a new PR, then it can be closed. The current documentation update is a separate, three-file PR against `main`; it does not revise that implementation, claim all its comments resolved, or close PR #60. The replacement implementation must account for every review comment and follow-up. Later trainer development is separate work and is not included in this source baseline.
 
-These are candidates for bounded review and integration, not current SEM2 capabilities.
+Keep the reviewed implementation distinct from the intended design. Its incomplete observation-status transition, categorical scoring behavior, fixed 1-versus-0 convenience contrast, and remaining numerical/documentation issues still require review. Earlier inline explanations are not evidence that corrections have been implemented or accepted.
 
-## Agreed design direction
+## Agreed direction
 
-### Separate the model, data view, and query
+### Separate model, data, and query
 
-The structural model should describe the graph, exogenous distributions, and endogenous mechanisms. Whether a variable is observed is a property of a dataset relative to that model, not an intrinsic property of the model.
+The structural model specifies the graph, exogenous distributions, and mechanisms. Observation status belongs to the dataset relative to that model. Treatment, outcome, estimand, and intervention roles belong to queries/operators, not hard-coded node names or positional columns in generic components.
 
-A future data layer should therefore provide:
+For v0.1, the agreed fitting input is a named pandas DataFrame of **scalar** variables, prepared internally with complete-case reporting. A categorical variable with several levels is still scalar. The richer dataset/schema interface is later work, not an unresolved prerequisite for this minimal contract. Distinguish category labels, stored integer codes, and deliberate numeric scores; numerical storage does not establish quantitative meaning. Scoring is separate preprocessing before training, with supplied meaning/provenance retained rather than guessed.
 
-- a named mapping from table columns to model nodes;
-- the nodes observed in each dataset;
-- variable types, shapes, support, and missing-value policy;
-- the observational or interventional regime;
-- interventions and fixed values, if any; and
-- explicit dataset weights when several losses are combined.
+The target named-data and formula migrations are described in the [model–data handoff](docs/plan/v0.1/minimal-model-data-interface.md) and [support/data handoff](docs/plan/v0.1/named-data-batches.md). Do not advertise the named records, support properties, fixed numeric intercepts, or public fitting route as available on `main` until their implementation is reviewed and merged. Preserve valid existing formulas while making any intentionally retired boundary formats explicit.
 
-Treatment, outcome, estimand, and intervention roles belong to a query or operator. Generic operators must not silently assume binary-IV node names or positional table columns. The existing `unobs(...)` syntax remains part of the current API; any migration should preserve existing formulas or provide an explicit compatibility path.
+### Keep the release scope and causal claims bounded
 
-### Preserve joint covariate distributions without unnecessary modelling
+Use a graph supplied by the user. The agreed v0.1 examples are PoliticalDemocracy, Kang–Schafer adapted to the average treatment effect on the treated (ATT), the two-stage randomized example, and discrete IV. There is no separate missing-data case study. RHC/proximal/RDD demonstrations and a general empirical-covariate framework are not additions to this release scope.
 
-The RHC example showed that representing many dependent covariates as unrelated scalar root nodes changes their joint distribution when the fitted model resamples them. That can change the population over which a causal contrast is averaged. The package should not silently turn this convenience representation into an independence assumption.
+Preserving the observed **joint** covariate distribution remains important: replacing dependent covariates with independent roots can change the target population. Its general implementation is deferred, not solved by scalar data preparation. Historical RHC discussions remain useful motivation rather than an active v0.1 acceptance requirement.
 
-For an ordinary confounder-adjustment problem, the software should be able to preserve the observed joint covariate distribution without requiring the user to estimate an unnecessary high-dimensional generator. A multidimensional exogenous object with a supplied empirical distribution is one candidate. Whether this belongs in the model, dataset layer, or sampling interface remains an architectural question.
+Distinguish fit to observed distributions, identification, target regularity, finite-sample uncertainty, and numerical optimization error. An intervention is a model calculation, not validation of a graph or identification. A numerical search endpoint is not automatically a sharp bound or confidence limit. Prioritize credible point estimation before general uncertainty machinery. Graph discovery and broad PFN amortization remain later research, requiring their own baselines, calibration and prior-shift evaluation.
 
-### Keep the graph supplied at first
+### Use agents within a human-controlled process
 
-The immediate goal is reliable inference for a graph supplied by the user. PFN work may eventually amortize across graphs provided as inputs. Learning the graph as an output is a separate and substantially less identified problem, and is not the current priority.
+Humans retain control of scientific meaning, architecture, accepted behavior, review and merge. Agents work on explicitly authorized bounded changes. Keep plan and implementation review distinct, reuse existing components, and justify new abstractions with a concrete requirement. Reviewed contracts—not agent-authored tests alone—define correctness. An earlier task, plan, or passing tests does not authorize the next implementation unit, merge, or deployment.
 
-### Validate point estimation before general uncertainty machinery
+## Documentation policy and enforcement
 
-The near-term target is a polished point-estimation workflow for simple, well-specified designs. Controlled simulations with known answers should test whether the fitting method recovers the intended target. A reduced one- or two-covariate RHC example may test that the pipeline runs, but must not be presented as a substantive analysis of the full high-dimensional problem. A low-dimensional proximal-proxy graph is another candidate test case.
+**Agreed policy:** concise but sufficient local API contracts, automatically generated API reference, and longer mathematical/architectural/workflow explanations in `docs/`. Document important internals as well as public objects, update documentation with behavioral changes, and cross-link rather than duplicate. Do not require padding or long examples for trivial helpers. The canonical contributor rule, including a NumPy-style docstring example, is in [`AGENTS.md`](AGENTS.md#documentation-policy); [`README.md`](README.md#documentation-and-contribution-policy) provides the user-facing summary.
 
-Confidence intervals remain important, but a general interface should follow evidence that point estimation works across the intended model classes. Bootstrap-like, jackknife-like, and influence-function routes require separate statistical assumptions and validation.
+**Enforcement design:** selected `numpydoc` checks over source objects, a strict Sphinx build including cross-reference checks, PR evidence of what changed and what ran, and required human review. Protect policy files, workflows, checker configuration and exceptions with human review too. Agents must not disable checks or bypass approval. Human reviewers assess semantic/mathematical accuracy and concision; presence/format checks cannot establish these.
 
-### Keep causal claims conditional
+**Actual setup at this baseline:** no tracked Sphinx configuration, `numpydoc` validation configuration, pre-commit configuration, or GitHub workflow was found. Documentation tools are not declared in `pyproject.toml`. GitHub branch-protection/required-review settings were not inspected and must not be represented as enabled or disabled. This update changes only the three root Markdown files; it does not add enforcement configuration, update source docstrings, build a documentation site, or alter administrative settings.
 
-SEM2 can answer questions under a supplied structural model. Reports and examples must separate:
+**Remaining setup:** prepare the small API/page preview, agree selected checks and explicit exceptions, configure source coverage and the strict build, then have an authorized maintainer make CI checks and human approvals required. Sphinx with NumPy-style docstrings and `numpydoc` validation is the recommended implementation route; build/hosting details still need review. If existing omissions require phased adoption, record a reviewed scope/baseline rather than silently suppressing failures. The earlier plan's documentation-preview item remains relevant; the local-versus-external documentation policy itself is now recorded, not an open question.
 
-1. fit to observed distributions;
-2. nonparametric or model-based identification;
-3. regularity of the target under the chosen discrepancy;
-4. finite-sample statistical uncertainty; and
-5. numerical optimization error.
+## Current work and next reviews
 
-A good fit on observed variables is not evidence that all five issues have been resolved.
+1. **Replace, rather than keep updating, PR #60.** A separately authorized implementation revision must carry forward the applicable steps 1–5 work and account for every original comment/follow-up. Distinguish explanations, implemented changes awaiting review, decisions needed, and agreed deferrals. This documentation-only PR is not that code replacement.
+2. **Implement documentation enforcement in a separately authorized change.** Follow the setup above and expand missing API/mathematical documentation alongside reviewed code. Do not claim this policy-only update supplies CI or branch protection.
+3. **Review the canonical trainer separately.** Reconcile the package and experimental trainers and the public DataFrame path with the trainer handoff and later explicit decisions. Do not describe another branch's work as present on `main`; steps 1–5 alone do not complete the fitting interface.
+4. **Resolve method choices before extending operators/examples.** Follow the [product decision agenda](docs/plan/v0.1/README.md#next-steps-and-review-decisions) for energy estimators, category distances, IV weights/batching, unscored categorical queries, and the concrete ATT adaptation. Current code is not approval of those choices. Use the small agreed example collection with independent references and actual execution.
+5. **Keep identification/search separately controlled.** Preserve the existing pause and review requirements in the [identification handoff](docs/plan/v0.1/identification-and-partial-identification.md). Native user-supplied penalty sweeps and separate contiguous-window extrapolation are the target; selector details remain open. This documentation request does not restart those tasks.
+6. **Finish bounded packaging/integration after the relevant units.** Dependency separation remains incomplete (`pytest` is still mandatory runtime; pandas is not yet declared on `main`). Retained examples/notebooks, the chosen documentation build, and installation need release-level verification. Integration and public release/deployment are separate human decisions.
 
-### Use coding agents within a human-controlled process
-
-The team intends to explore more extensive use of coding agents, subject to contributor agreement and explicit safeguards. Agents may accelerate implementation, but humans retain control of the product definition, architecture, accepted behavior, review, and merge decisions.
-
-The working process is:
-
-1. consolidate desired features and known issues from meetings, GitHub issues, reviews, and repository evidence;
-2. have the team remove, revise, and prioritize that inventory;
-3. agree the intended product behavior and architectural boundaries before implementation;
-4. require an implementation plan and acceptance criteria for each bounded change;
-5. use behavioral tests and realistic examples to verify alignment; and
-6. review changes through small branches and pull requests, questioning unexpected abstractions, files, dependencies, or behavior.
-
-`README.md`, `PROJECT.md`, and `AGENTS.md` support this process by separating stable human context, maintained project state, and durable agent guidance. Documentation and tests are part of the control system for agent-written code.
-
-## Work plan
-
-### Priority 1: define the intended product and review the feature inventory
-
-Compile the desired capabilities and known problems from the last two meetings, existing GitHub issues, dated reviews, reports, and source evidence. Organize them by product area, propose priorities, identify conflicts or dependencies, and ask the team to confirm what belongs in the near-term package before committing to an implementation architecture.
-
-### Priority 2: make the general point-estimation path reliable
-
-- define the graph-generic dataset and schema contract;
-- decide how supplied multidimensional and empirical distributions enter the model-data boundary;
-- repair the continuous energy-loss sample-axis logic;
-- remove hard-coded `Z`, `X`, and `Y` assumptions from generic components;
-- make device and dtype handling explicit; and
-- settle the relationship between the package trainer and experiment trainers.
-
-### Priority 3: add direct behavioral tests and evaluation examples
-
-Test losses, trainers, interventions, and partial-identification operators directly. Cover analytical values, gradients, batch and feature axes, devices, seeds, convergence failures, and named variable mappings. Retained examples should run in CI.
-
-Use simulations with known targets as the primary statistical evaluation. Use the reduced RHC example only as an end-to-end smoke test and consider a low-dimensional proximal-proxy design as a second method example.
-
-### Priority 4: review external implementations
-
-Bring the Sinkhorn and remaining discrete code into review branches with their exact objectives, dependencies, supported shapes and devices, fixed-seed examples, reference tests, and benchmark acceptance criteria. Also compare projected or sliced energy methods where dimension makes the ordinary energy score weak.
-
-### Priority 5: add diagnostics and uncertainty
-
-Expose optimizer convergence, loss decomposition, parameter changes, and model-versus-data checks. Once point-estimation behavior is credible, develop uncertainty theory and implementations without conflating identification, differentiability, finite-sample variation, and numerical error.
-
-### Priority 6: run a bounded PFN study
-
-Start with a supplied graph and learn a posterior for a specific causal query, or for a modest parameter vector in a linear SCM. Compare against an explicit baseline such as direct optimization, a Laplace approximation, MCMC, or simulation-based inference. Evaluate calibration and prior-shift sensitivity before broadening the graph or mechanism family.
-
-## Meeting follow-up
-
-The following ownership was discussed and should be confirmed against contributors' availability before scheduling work:
-
-| Owner | Follow-up |
-|---|---|
-| Qingyuan Zhao | Develop the uncertainty argument, ask Max and Amruth for feedback on the AI-assisted workflow, and coordinate the feature-inventory review. |
-| Chiara Catalano | Reduce the RHC example to one or two covariates, develop simulations with known targets, and consider the proximal-proxy example with team input. |
-| Amruth | Prepare the Sinkhorn work and related RDD study for review. |
-| Max | Identify and package the remaining discrete research code. |
-| Team | Review the feature inventory and priorities, decide how to represent supplied empirical covariate distributions, and agree architectural boundaries and acceptance criteria. |
-
-## Open questions
-
-- What is the smallest useful dataset and schema API for several observed margins and regimes?
-- Which preprocessing responsibilities belong inside the package, and which should remain with the caller?
-- Should a supplied empirical covariate distribution be represented as an exogenous node, a dataset-level sampling mechanism, or another reusable component?
-- How should losses from datasets of different sizes and scales be weighted?
-- When should a missing observed node be an error rather than an intentional marginalization?
-- Which simulations and real-data smoke tests are required before the point-estimation workflow is considered reliable?
-- Which diagnostics are required before reporting a numerical partial-identification bound?
-- Which uncertainty route is appropriate for each supported model class after point estimation has been validated?
-- Which priors over nonlinear mechanisms are meaningful enough for Bayesian or PFN work?
-- At what level does amortization provide enough reuse to justify PFN training?
-- What review and testing rules are necessary to keep agent-written changes understandable and aligned with the agreed architecture?
+Older contributor assignments remain in dated records, not as new active assignments. The local Sinkhorn implementation and additional discrete-paper code reported in August remain externally reported candidates; this pass does not verify their current status or schedule integration. New discrepancy families and general uncertainty/PFN work are outside the v0.1 implementation units.
 
 ## Evidence and uncertainty
 
-Directly observed in the reviewed repository:
+- **Freshly inspected:** the default-branch model/operator/trainer source, package metadata, tracked documentation/configuration files, and PR #60's head and latest discussion. Current API guidance is anchored to `main`, not the older August baseline or an unmerged branch.
+- **Execution evidence:** fresh checks for this three-file update are reported in its PR. PR #60's earlier reported suite/example results apply to its own implementation baseline, not to `main` or this update.
+- **Not established by documentation or a passing suite:** statistical recovery across model families/seeds, general trainer robustness, sharpness of search bounds, comparative merits of alternative discrepancies, or future PFN calibration. GitHub enforcement settings are also unverified here.
 
-- the parser, DAG builder, samplers, linear moment code, linear likelihood, finite-state probability engine, and current tests;
-- defects and design-specific assumptions documented in the technical review;
-- the scalar-oriented node interface and absence of a coherent real-table preprocessing workflow; and
-- the absence of package implementations for MMD, a supplied empirical covariate distribution, and PFN inference.
+## Supporting records
 
-Contributor-reported, but not observed in the reviewed tree:
-
-- the local Sinkhorn implementation and preliminary heavy-tail behavior; and
-- additional discrete paper code awaiting integration.
-
-Agreed or proposed in the 28 August meeting, but not yet implemented:
-
-- preserving high-dimensional covariates through a supplied empirical joint distribution;
-- the reduced RHC smoke test, controlled simulations, and proximal-proxy example;
-- prioritizing reliable point estimation before a general confidence-interval interface; and
-- the human-controlled, AI-assisted planning and implementation process.
-
-Unverified:
-
-- robustness of the general trainer across seeds and model families;
-- recovery of known causal targets in the proposed simulations;
-- sharpness of numerical partial-identification bounds;
-- comparative benefits of Sinkhorn, projected energy, and MMD for target recovery;
-- the best architectural location for multidimensional empirical covariate sampling; and
-- calibration and prior-shift robustness of any future PFN approach.
-
-The full source-backed assessment, equations, examples, and references remain in the [dated technical review](docs/meetings/2026-08-26-ai-review-updated.md). The meeting records preserve the discussion that led to the maintained directions above.
+- [v0.1 product specification and open decisions](docs/plan/v0.1/README.md), [ordered implementation plan](docs/plan/v0.1.md), and their linked interface handoffs.
+- [September 3/7 decision record](docs/meetings/2026-09-03-and-07/product-and-implementation-plan-updated.md), preserving meeting evidence and later clarifications.
+- [August 26 meeting](docs/meetings/2026-08-26-meeting.md) and [August 28 meeting](docs/meetings/2026-08-28-meeting.md), including historical ownership and research directions.
+- [Updated August technical review](docs/meetings/2026-08-26-ai-review-updated.md) and [original review](docs/meetings/2026-08-26-ai-review.md). Findings describe their dated source baselines, not current capability lists; preserve those records rather than rewriting them to match later code.
