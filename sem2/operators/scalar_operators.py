@@ -7,6 +7,7 @@ from .vector_operators import PotentialOutcomeSample
 from .discrete_energy_loss import DiscreteEnergyLoss
 from ..model.construction.sem_types import SEMType
 from ..data import DataBatch, ScalarResult, VariableInfo
+from ..utils import seeded_rng
 
 if TYPE_CHECKING:
     from ..model.models.base import SEM2
@@ -79,7 +80,7 @@ class MeanPotentialOutcome(SEM2Operator):
         self.outcome = outcome
         self.intervention = dict(intervention)
         self.n_samples = n_samples
-        self.seed = 0 if seed is None else seed
+        self.seed = seed
         if outcome not in model.input_node or set(intervention) - model.input_node:
             raise ValueError("Query nodes must be user-declared model variables.")
         self.variable = variable if variable is not None else model._variable_info(outcome)
@@ -101,19 +102,7 @@ class MeanPotentialOutcome(SEM2Operator):
         set_nodes = DataBatch(torch.cat(values, dim=1),
                               tuple(self.model._variable_info(n) for n in self.intervention)) if values else None
 
-        # Save CPU and the model device's RNG. Seed only those generators, not
-        # every accelerator in the process; fork_rng restores them on exit.
-        devices = []
-        if device.type == "cuda":
-            devices = [device.index if device.index is not None else torch.cuda.current_device()]
-        elif device.type == "mps":
-            devices = [0]
-        with torch.random.fork_rng(devices=devices, device_type="mps" if device.type == "mps" else "cuda"):
-            torch.random.default_generator.manual_seed(self.seed)
-            if device.type == "cuda":
-                torch.cuda.default_generators[devices[0]].manual_seed(self.seed)
-            elif device.type == "mps":
-                torch.mps.manual_seed(self.seed)
+        with seeded_rng(self.seed, device=device):
             if SEMType.is_continuous(self.model.sem_type):
                 draws, details = self.sampler.evaluate(batch_size=self.n_samples, set_nodes=set_nodes)
                 value = _apply_numeric_mapping(DataBatch(draws.values, (self.variable,))).mean()

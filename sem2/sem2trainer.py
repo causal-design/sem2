@@ -8,6 +8,7 @@ from .model.models import SEM2
 from .operators.scalar_operators import SEM2Loss, EnergyLoss, ATE
 from .default_configs import TrainingConfig
 from .data import DataBatch
+from .utils import seeded_rng
 
 logger = logging.getLogger(__name__)
 
@@ -92,13 +93,13 @@ class SEM2Trainer:
         return loss, loss_metrics
 
 
+@seeded_rng(0)
 def main():
     from .dataloader import DummyDiscreteDataloader
     from .default_configs import MLPConfig
     from .model import SEM2Discrete
     from .operators.discrete_iv import DiscreteIVEnergyLoss
 
-    torch.manual_seed(0)
     logging.basicConfig(level=logging.INFO)
     cfg = TrainingConfig(device="cpu", epochs=1, sample_bs=32)
     model = SEM2Discrete("Z ~ Categorical(probs=[1,1]); X <- d(Z; levels=2); Y <- d(X; levels=2)", node_cfgs={

@@ -14,8 +14,8 @@ Reference (lavaan ML, structural regressions among latents):
 import os
 import pytest
 import torch
+from sem2.utils import seeded_rng
 
-torch.manual_seed(0)
 torch.set_num_threads(1)
 
 from sem2.model import SEM2Linear, SEMType
@@ -53,8 +53,8 @@ def _load_centered():
     return data, cols
 
 
+@seeded_rng(0)
 def _fit(iters=2000, lr=0.05):
-    torch.manual_seed(0)
     data, cols = _load_centered()
     x = DataBatch(data[:, [cols[v] for v in OBS]], tuple(VariableInfo(v) for v in OBS))
     m = SEM2Linear(FORMULA)
@@ -92,11 +92,13 @@ def _structural_coefs(m):
 
 class TestPoliticalDemocracy:
 
+    @seeded_rng(0)
     def test_model_is_linear_gaussian(self):
         m = SEM2Linear(FORMULA)
         assert m.inferred_sem_type == SEMType.LINEAR_GAUSSIAN
         assert set(OBS).issubset(m.input_node)
 
+    @seeded_rng(0)
     def test_cov_matrix_symmetric_and_pd(self):
         m = SEM2Linear(FORMULA)
         sigma = m.cov_matrix(OBS).detach()
