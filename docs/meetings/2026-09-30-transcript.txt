@@ -1,0 +1,422 @@
+[00:08] Speaker 1: This was, um... This seems unnecessary, right? Especially if this is a demo.
+[00:15] Speaker 2: Oh, yeah.
+[00:16] Speaker 1: Um, is this a good default configuration for discrete variables? Do you know what hidden dimension means?
+[00:27] Speaker 2: I think it's the dimension of the MLP itself, like kind of...
+[00:30] Speaker 1: It's just one hidden layer.
+[00:33] Speaker 2: I thought the... You can set it in the config, I think, one or two.
+[00:36] Speaker 1: Okay. If so, perhaps we, um, can set it as default. I guess the output dimensions that we have to kind of see what it is.
+[00:58] Speaker 2: Yeah.
+[01:03] Speaker 1: Perhaps we can do something here and over here and say how many...
+[01:11] Speaker 2: Ah, I hid the other one.
+[01:20] Speaker 1: Because output dim needs to be specified. Could this be done in, uh, the formula? Perhaps we use B for a binary variable, and how would you define a discrete?
+[01:57] Speaker 2: I was thinking we'd do it another way because we don't use too many letters. So we'd do like X and then maybe like colon three for discrete variables.
+[02:07] Speaker 1: I think D is... D is also not great, right? I would probably say discrete or something. D is a bit strange, yeah.
+[02:11] Speaker 2: Right now we're using D for discrete.
+[02:15] Speaker 1: So then, but what would be...
+[02:19] Speaker 2: Isn't a binary discrete?
+[02:20] Speaker 1: Binary is discrete, so I was just thinking if we want a new, um, because binary so often comes up.
+[02:28] Speaker 4: So we can just, um, give it the length of the space depending on X and C and then the number which corresponds to the levels of that...
+[02:35] Speaker 2: Yeah.
+[02:37] Speaker 1: Or something like probs, like something like this?
+[02:40] Speaker 2: Yeah. And that's categorical, not probabilities, but like...
+[02:44] Speaker 1: So what does probs equals to 1 1 mean?
+[02:47] Speaker 2: So this is if you initialize them like a random variable, Bernoulli random variable with probability 0.5.
+[02:54] Speaker 1: Ah, so it's going to normalize automatically.
+[02:56] Speaker 2: Yeah. Maybe something like X and then colon three for discrete variable, or like, for like a three-variable, so we can specify how many discrete categories.
+[03:12] Speaker 1: C U colon 3, like this?
+[03:16] Speaker 2: Uh, yeah.
+[03:16] Speaker 1: Is that what you meant?
+[03:17] Speaker 2: Yeah. Maybe, yeah, I think so, like. Move the colon outside, maybe.
+[03:22] Speaker 1: Ah. This?
+[03:24] Speaker 2: That's even weirder, actually.
+[03:26] Speaker 1: That's weird.
+[03:27] Speaker 2: I think the other... that's fine.
+[03:39] Speaker 1: Not quite sure.
+[03:43] Speaker 2: Yeah, who knows. Maybe move the colon two after the X, so it's really the X.
+[03:53] Speaker 1: Or maybe say something like levels equals to two.
+[03:55] Speaker 2: Yeah.
+[03:57] Speaker 1: Would that be easier to understand?
+[04:00] Speaker 2: Oh, I think so, yeah.
+[04:30] Speaker 1: Right. Um, well, that's a new comment, but this is basically an experiment that I don't think it was very important. Um, one thing I picked up was this thing, mean potential outcome. This seems very awkward. [laughter] Um, and not human-readable.
+[04:51] Speaker 2: Yeah, I agree. That's bad, though.
+[04:54] Speaker 1: Um, so in this PR, they say Y is the outcome, X is the one to be intervened on, there's a configuration. It's a model [laughter] that's terrible. Um, yeah. So he was thinking about, oh, this is something we, I guess, had earlier in some kind of plan. I don't know which file this is. But this would be probably be better: mean potential outcome model, outcome Y, intervention X1, and evaluate. I think that would be a much better interface.
+[05:38] Speaker 2: Uh, I think so. So does this actually call the evaluate, then?
+[05:44] Speaker 1: So, this is not calling the evaluate.
+[05:49] Speaker 2: Yeah. So, it's a bit strange to, like, make a class and then immediately set its parameters afterwards, I think.
+[05:58] Speaker 1: So you would not put evaluate here?
+[06:01] Speaker 2: Yeah.
+[06:02] Speaker 1: You would just put this...
+[06:04] Speaker 2: Put this into the... into the init function.
+[06:08] Speaker 1: Into the init function. I guess the only diff- the only difference is that this would then needs to init... If this is something we need quite often...
+[06:30] Speaker 2: Yeah.
+[06:31] Speaker 1: So this is more like a function then, not a class. But we did implement these as classes.
+[06:39] Speaker 2: Yeah.
+[06:43] Speaker 1: Okay, we can ask AI.
+[06:45] Speaker 2: I mean, adding the keyword arguments will help a lot, and then getting rid of the variable info, which is... I'm not sure why that has to be that.
+[06:58] Speaker 1: Um, so this whole thing with the samples and seed... That's the interface. What's the... Okay. Um, right, so that's that's fine.
+[07:34] Speaker 2: Well, I think the reason we need the variable info is if we have discrete variables and we want to make like different values for each category.
+[07:42] Speaker 1: Yeah.
+[07:43] Speaker 2: So right now, let's say it's 0 1 1.
+[07:46] Speaker 1: Yeah, yeah.
+[07:47] Speaker 2: That's why it's like that.
+[07:48] Speaker 1: But I know, but it's just that should not be in the, [laughter] in the user interface, that they have to initialize that.
+[07:58] Speaker 2: Yeah.
+[08:03] Speaker 1: Okay. It's model components init. I think there's nothing really here. The nodes, I think this was there some additions. Um, there's a random variable support class, which gives the constraint for the values. Um, I don't really know what this is. Constraint is a PyTorch membership constraint, or none if unknown. I think this is PyTorch distribution.
+[08:42] Speaker 2: You can specify like the range of values it supports.
+[08:46] Speaker 1: Yeah. And values, do you know, an enumeration with native batch event dimensions when available. Not quite sure what that means.
+[08:58] Speaker 2: I would assume it means the discrete values, but I don't know what native event means.
+[09:03] Speaker 1: Can you further explain what values and this... are these meant for discrete variables? Um, right. None means un-enumerated, not necessarily infinite. These are not observations or numerical scores assigned to categories. I don't quite understand.
+[09:47] Speaker 2: Yeah.
+[09:49] Speaker 1: Um, I'm thinking of this: how are we going to do the update? So we're going to put put down all these comments. Haven't used GitHub often enough, so what's going to happen next? I mean, we can ask AI to reply, but then they'll just reply. But when we ask them to make new update, we can just do a new code review?
+[10:20] Speaker 2: I think so, yeah. Like, I think PRs can see the comments you left here, so you should be able to...
+[10:25] Speaker 1: Yeah, yeah.
+[10:26] Speaker 2: And you can do the updates in there. Update the pull request, and everything will be fine.
+[10:30] Speaker 1: So should I, like if this is an instruction, should I already resolve the comment? Or is this going to be kept when the, um... We can ask AI.
+[10:43] Speaker 2: I think it'll be kept.
+[10:49] Speaker 1: Okay, I can ask them, right? I can... I have some, some follow-up comments, uh, and I think, uh, we will need to make updates to this PR. What's the best, best way to collaborate on that? We will ask you to make updates. I want to make sure that, uh, every comment I made was addressed. Ask AI what's the best way to do it. I haven't done a lot of [laughter] collaboration over GitHub at this scale. Um, right, so this was also confusing, because this is in, I think, a class for, um, constructing DAGs. See, so in the DAG, um, file. But then it refers to observed variables, and it declares some unobserved variables. But I thought we agreed that we're not going to... I mean, the observed and unobserved is not a property of the DAG itself.
+[12:23] Speaker 2: Yeah.
+[12:31] Speaker 1: So the agent is saying... I don't know. So what is this functional DAG? Oh. Where can I see the actual file? This is a build a SAM2 DAG structure. So this is a DAG. This is in the DAG class, no? So I don't know what the agent is staying about. I think we don't need the unobserved syntax, right? That can be removed.
+[13:26] Speaker 2: Yeah.
+[13:30] Speaker 1: Uh, we'd like to remove the unobs syntax, the legacy, and move definitions of observed or unobserved variables outside of the DAG class. Okay. Yeah, so that was the thing I picked up. Now this one. Um, this is formula parser. This was just me not sure, but I think this is what when we had this expansion of the formula, when we had a non-linear function and a linear on top, then we kind of expanded the function. So I think it's saying this is a helper equation. So, um, yes. Please add the inline comment. Comment.
+[15:09] Speaker 2: Yeah, I think that's fine.
+[15:14] Speaker 1: SAM AST, do you know what that file does?
+[15:20] Speaker 2: I, I think it's best not to look into the formula parsing too much, and let them have that.
+[15:25] Speaker 1: Is this also formula part...?
+[15:27] Speaker 2: I don't know why they took... I can't remember why.
+[15:30] Speaker 1: So all I'm doing now is I'm just looking at the changes that the LLM made. And if there are things that I'm not happy, I just put them as comment.
+[15:39] Speaker 2: Yeah.
+[15:42] Speaker 1: Um, I don't know what this file does, but there's nothing important. It's nothing important. The base.py, as there are some kind of the variable info, um, intervention values. I thought this looks fine. They're doing some things, but...
+[16:11] Speaker 2: Yeah, it loves to do like checks in the middle of a function for like no reason.
+[16:14] Speaker 1: Right. So what the complaint I made was that this seems to be quite a bit longer than the previous one. The previous, they they they removed the sample function, they added a couple of functions, uh, and then they have another sample function, which this sample function calls an internal sample function.
+[16:36] Speaker 3: Hi there, sorry. Uh, do you have the room booked for now or...?
+[16:40] Speaker 1: Yes, is M10. Is Did I come...
+[16:42] Speaker 3: Yeah, this is MR10, yeah.
+[16:44] Speaker 1: I, I, I talked to the...
+[16:47] Speaker 2: To Richard?
+[16:47] Speaker 1: To the reception, yeah, in the morning. They might not have put it down on the system.
+[16:52] Speaker 3: Okay, okay. Uh, all right. Uh, best of luck. Uh, we didn't have it booked now though, so I don't know.
+[17:00] Speaker 1: Uh, they did Yeah, the reception the receptionists didn't They said it's only booked in the afternoon today at 2:00.
+[17:08] Speaker 2: You talked to Richard?
+[17:09] Speaker 1: This is another receptionist, but they he she had the printout for today, and she said this room is only booked for 2:00. Sorry. All right. Um, sample. Yeah, so I basically complained, I'm like, why why is this... Uh, I should have said longer. [laughter] I think, well, uh, LLM interpreted that correctly. It is longer in this file, but part of that is consolidating work that was previously lived elsewhere. The actual sampling algorithms unchanged in structure. The additions have four jobs: validate intervention names and tensor shapes, return one batch one-named batch rather than dictionary, record the intervention batch in the auxiliary results, share the traversal with potential outcome. So this is mainly reused. It's not a new sample sampling engine. However, the bookkeeping now obscures that simple algorithm. I would keep the common traversal and the essential named shape boundary. I don't know what they're saying. Okay, it's good to know that the essential algorithm is the same. Is there room to simplify? Why do did you have, um, have a have a separate internal...? Not to say that it's a bad idea. Um, the discrete... The thing I picked up was I didn't pick up anything. Seemed okay. It's not changed. Linear, something I was not quite sure is why they put plus, but then they said the same parent can occur more than once in an equation. Right. This is a correctness fix, but you should not put the same parent more than once. Um, but we should not, not allow users to put the same parent node more than once, unless this might happen because of of the helper equation expansion. If you agree, we should, um, check if the same parent appeared more than once in formula parsing and not use plus equals here. I mean, it's a good point. [laughter] It's a pedantic point, but that's not the way to fix it, [laughter] right? I mean, that's a dirty fix, isn't it? So, for the discrete energy loss, I didn't pick up anything.
+[21:23] Speaker 2: I think it deleted the comments. That's what it did.
+[21:27] Speaker 1: I deleted?
+[21:28] Speaker 2: No, AI deleted the comments.
+[21:31] Speaker 1: I see.
+[21:32] Speaker 2: Yeah, so if you scroll down a bit...
+[21:34] Speaker 1: You mean here?
+[21:35] Speaker 2: No, no, in the in the changes, diff view.
+[21:40] Speaker 1: Did I?
+[21:42] Speaker 2: I have to scroll down, it's quite long.
+[21:45] Speaker 1: Wait, the AI shouldn't delete my comment. That's...
+[21:47] Speaker 2: It deleted all of my comments from earlier.
+[21:52] Speaker 1: Okay, I need to configure the AI so they never delete comments. That's crazy. Like, they're embarrassed? [laughter] But how how did you What Where Where did you see that?
+[22:06] Speaker 2: I just saw a comment in the code, though.
+[22:10] Speaker 1: Oh, oh, okay. Not not in the GitHub.
+[22:12] Speaker 2: I think so, yeah.
+[22:13] Speaker 1: No, no, no. Okay. That That would be very I would be very mad if I wrote a comment in my code review and the AI deleted my comment. [laughter]
+[22:25] Speaker 1: So, a comment on on what? On On the...
+[22:27] Speaker 2: In the energy loss, like it deleted how what the energy loss is doing. It just like doesn't have that description anymore.
+[22:33] Speaker 1: Where is this? Is in the discrete energy loss or...?
+[22:36] Speaker 2: Yeah. I think you set back.
+[22:45] Speaker 1: No, sorry. Is this Is this Oh, is talking about this file, operators?
+[22:48] Speaker 2: Yeah, in this file, yeah.
+[22:50] Speaker 1: But where did I... Where was this? These things?
+[22:58] Speaker 2: Yeah, these things. Yeah, okay. It's the documentation they deleted.
+[23:05] Speaker 1: So we need to think about the documentation, right? Do we want documentation, you know, how much detail do we want each function and class to be documented?
+[23:15] Speaker 2: I think we should document like the input and output shapes of all of these, and then say what it's doing.
+[23:21] Speaker 1: Um, yeah. So I can we can instruct AI to do that, right?
+[23:29] Speaker 2: Yeah, we can do that.
+[23:32] Speaker 1: But we we need a kind of a format to follow.
+[23:36] Speaker 2: Yeah.
+[23:38] Speaker 1: Um, I was asking AI to look at some of this. Sphinx, something they mentioned. But we also need a policy for...
+[23:49] Speaker 2: Yeah.
+[23:50] Speaker 1: Because, well, once we give the policy, AI would be very good at following that, and I'm sure there are a lot of policies. Um... Yeah, okay. Yes, we need some documentation. [laughter] AI wrote...
+[24:12] Speaker 2: Doesn't need to be this long, though. [laughter]
+[24:15] Speaker 1: AI wrote this. Um...
+[24:21] Speaker 4: So do we want should the two separate documentation, one in the code and one...
+[24:26] Speaker 1: I think we need several. We need something light in the code. Uh, well, but if we keep it long, then this could go to this could automatically generate doc documentation.
+[24:42] Speaker 2: Yeah.
+[24:44] Speaker 1: Uh, uh, but I'm I'm not sure if we actually want that, because I think there is some benefit in keeping the documentation in the code relatively short,
+[24:56] Speaker 2: Yeah.
+[24:57] Speaker 1: to not overwhelm the actual code. Uh, so possibly we can have things like input and output dimensions and uh you know, roughly what this function does in the code.
+[25:12] Speaker 2: Yeah.
+[25:13] Speaker 1: And for these kind of documentations, I mean, I I do think we need to say, you know, what's being computed here. Like if we're computing an energy loss, we should show an equation
+[25:23] Speaker 2: Yeah.
+[25:23] Speaker 1: of what was what's being computed. And maybe that could be in in the more detailed documentation else in in a separate, dedicated documentation.
+[25:36] Speaker 2: Yeah.
+[25:39] Speaker 1: But that documentation was specific for the codebase. Then we need other documentation that are more readable, that are not just you know, documenting every function, every class, but it's sort of more about how you use um how to use the package.
+[25:58] Speaker 2: Yeah.
+[26:00] Speaker 1: So we we can talk about that after we finish looking at this. But this is this is fine. I mean, I I'm not too bothered by this. I just think this needs to be kind of um documented. We can't just, you know, let AI write this and we have no way to check um the code they write. So I'm not too worried about that.
+[26:23] Speaker 2: Let's ask it to bring back my old comments.
+[26:26] Speaker 1: Okay. Um, but but but really I I think we just need a policy
+[26:34] Speaker 2: Yeah.
+[26:35] Speaker 1: for for the documentation. We we can we can finalize that um after I just had a look at all this. I mean, it's I think it's helpful to go through this all together, because you know, we we kind of know what the AI could do,
+[26:51] Speaker 2: Yeah.
+[26:52] Speaker 1: and there are certain things we don't want them to do, and we we can use this to develop that policy. Um, yeah, so this was a comment that I think the AI was constructing a class about um about the Frobenius distance between sample covariance and model-implied covariance. Then I essentially my complaint was that this doesn't need to be a linear model. It doesn't need to be a linear model operator. For any SAM2, you can you can compute the sample covariance from the data, you can compute a model covariance from your sample. It doesn't not tied to a linear model. Um, so these are not intrinsically linear model concepts. So yeah, so I'll just ask them to yeah, to make this separation. Separation. I think that's fine. Operator base, I don't think there was... Yeah, so there's function called internal function called numeric values. I just don't understand what it does. [laughter] It's some code and then I don't This is not very helpful. Use caller-supplied scores without replacing stored category identities. This is about converting categorical variables to numeric variables?
+[28:35] Speaker 2: I think so, yeah.
+[28:37] Speaker 1: This is uninformative names. Private numerical view of already-supplied meaning. So this is about converting a categorical variable to a numeric variable. Can we use a more um a self-explanatory name, more informative function name? Any suggestions? Okay. Oh, yeah, so this is a large change. Um...
+[29:51] Speaker 1: Yeah.
+[29:53] Speaker 2: I didn't like this change, though.
+[29:55] Speaker 1: No?
+[29:56] Speaker 2: Because it makes it quite confusing to see what the code does, since like all of the functions are just... All the discrete and continuous functions are put into one single function that has a lot of if statements that goes around.
+[30:10] Speaker 1: Right. Shall we say that? You would say what?
+[30:14] Speaker 2: I did change this back in the new next step, but we can you can do it here as well, so...
+[30:20] Speaker 1: Oh, okay. But we can just document what we don't
+[30:24] Speaker 2: Yeah.
+[30:24] Speaker 1: like. Yeah, so I like... But we didn't like this change, that we said older...
+[30:30] Speaker 2: Yeah, the changes are in the next commit and then step six, I did change this back.
+[30:37] Speaker 1: Okay. Max has changed some things back in uh the next batch of commits, not yet PR.
+[31:05] Speaker 2: Yeah.
+[31:07] Speaker 1: Okay. Other things are okay? I didn't make... Ah, this is another thing. Right, I was not happy with this is, I think, about estimate uh evaluating the average treatment effect or the mean potential outcome, or ATE. And this sort of assumes the treatment is binary. So I thought, well, at least they need a comment on that.
+[31:41] Speaker 2: Yeah.
+[31:43] Speaker 1: Yeah. And maybe later we don't want this, but this is fine. Okay. We're not far away. Sorry for [laughter] doing all of these. Um, yeah, this I was complaining because this was uh I think this was returning some samples, then is in the vector operators. Um, but but the file, I think the the class was called Potential Outcomes. So I thought that was slightly odd.
+[32:37] Speaker 2: Yeah.
+[32:38] Speaker 1: I mean, if you call it Potential Outcome Sample, that would be okay.
+[32:41] Speaker 2: Yeah.
+[32:42] Speaker 1: Perhaps. What do you think? Because Potential Outcome itself, it's not very clear what what that class does.
+[32:51] Speaker 2: Yeah, you could call it that.
+[32:56] Speaker 1: Perhaps just to change perhaps just to change Potential Outcomes to Potential Outcome Sample. Okay. Yeah, so there's some data handling, variable info. Now Now Now we see what it is. There's name, width, categorical, encoding, scores. What is scores? Scores maps those labels to explicitly supply numeric scores. Change the terminology. Term score too easy to be confused with energy score, or a statistical score function. Right. Then I think there were some handling, data handling that we asked them to do. Um, converting a pie uh pandas data frame into our format. There was a lot of things. Um, yeah, so I asked AI to explain the design, because it was a lot. The intended design is one-named representation inside the package, ordinary data frames at the public fitting boundary. Extend the design, this variable info, name and representation of one variable, data batch, a tensor plus aligned variable metadata. That sounds like a good idea. Finite distribution, a named state table paired with probabilities. I don't quite understand this syntax. Scalar result. I thought this finite distribution and scalar result I I'm a bit I found a bit difficult to understand.
+[35:46] Speaker 2: Yeah. I think the with scalar result, it just like makes sense. It's just like a scalar result. I'm not sure what the finite distribution is for, though.
+[35:56] Speaker 1: Okay.
+[35:57] Speaker 2: Is it like a sample? Is it trying to say it has a sample?
+[36:00] Speaker 1: Well, no. I think this is just...
+[36:07] Speaker 2: Oh, I think it's the like partial marginalization for discrete variables or something like... I don't know. Yeah, I think it is for the discrete energy loss.
+[36:21] Speaker 1: This is just for the discrete part, no?
+[36:23] Speaker 2: I think so, yeah.
+[36:25] Speaker 1: Um, then maybe we should rename it to discrete distribution.
+[36:28] Speaker 2: Yeah.
+[36:30] Speaker 1: So we get that hint.
+[36:32] Speaker 2: Or discrete samples, discrete...
+[36:35] Speaker 1: But this is, I think, we pair it with probabilities. This is not a sample.
+[36:39] Speaker 2: It's kind of like partial sampling. It's the energy loss where we did like the partial sampling, so we marginalize over the discrete variables, but not the continuous ones.
+[36:50] Speaker 1: Okay. Um, all right. I don't I don't fully understand, but I think... I I don't understand the purpose. Is this for the discrete SAM2 class only? Um, is this like a sample? In that case, perhaps rename to Discrete Distribution? We'll see. Um, yeah, so we're nearly there. I think data loader, there's not much to see.
+[37:53] Speaker 2: Yeah.
+[37:55] Speaker 1: Default configs. Um, yeah, this I wasn't sure. I think they put instrument node in the configuration.
+[38:03] Speaker 2: Yeah.
+[38:04] Speaker 1: I think that that's a categorical mistake to me.
+[38:09] Speaker 2: I think we need to decide how we the user specifies this, like I think how does the user specify which variable to intervene on, like what the loss function is and stuff?
+[38:18] Speaker 1: There's the basic SAM2
+[38:20] Speaker 2: Yeah.
+[38:21] Speaker 1: where you just specify which variable you want to intervene on. Then if you if we want instrumental variables, we have a separate instrumental variable class.
+[38:30] Speaker 2: Okay, yeah.
+[38:31] Speaker 1: And over there, you initialize the class and you tell the class which variable is the instrument.
+[38:39] Speaker 2: Okay.
+[38:43] Speaker 1: I don't know what does the AI say. There are two different issues here. The field removes the literal hard-coded name position. But it still puts a IV-specific role and fitting model inside the generic training function and energy loss. It's architectural concern you are raising. Making the name configurable does not fix that separation. The checked-in named data specification... So, apparently, we did not see this. Right? This is... Yeah, I think there's some document that we we committed that we did not read. Yeah. This is not right. We don't want this. [laughter] Right?
+[39:31] Speaker 2: Yeah.
+[39:34] Speaker 1: Okay, so we didn't read that carefully. Which is fine. AI can read too much anyway. Um... No. They want They want us to defer this. Group-wise fitting of that. In a later explicit IV-specific class adapter using the same sampler. In a later... Yeah. Please construct a separate... Pay enough intentions attention to... which is suggested by an agent. That's not the intended design. Please construct a separate class to handle the IV testing. Uh, for This is, I think, for discrete instrumental variable problems, right?
+[40:55] Speaker 2: Yeah.
+[40:57] Speaker 1: Discrete instrumental variable problems. I know I know this is an example that we'd like to test against. Okay, so this is some configuration. Um, here what I was not clear is that there's this function there's a main function in the trainer file, which seems to be an example. Um, yeah. I think Yes, I think we should keep the runnable example.
+[41:56] Speaker 2: Yeah.
+[41:56] Speaker 1: Move example to the experiment folder. That's fine. There's a test, but I don't think there's much to see about these tests. There's one comment I made about the unit tests, which are now, you see, over 1,200 [laughter] lines. Um, then I essentially asked AI... I'm not sure if we need so many tests. [laughter] Perhaps consolidate. My main worry is the agents is going to get distracted or get the wrong idea from these tests. I mean, I I don't care about these tests, right? But the agent might feel that they need to pass some of the tests, and then they write code that are not...
+[42:53] Speaker 2: Every time it writes code, it says like, "Passed 191 tests with 56 warnings." [laughter] Because every time, it says that.
+[43:01] Speaker 1: Yeah, [laughter] I understand. So, "Agree that the test must not become an agent-authored specification by accident. Intended behavior should come from the reviewed mathematics and API decisions. A passing test only show agreement with this assertion. One scope clarification: this PR adapts existing tests." So they said there's some sensible con- consolidation candidates: the small core worth retaining is independent behavior evidence. Consolidation should therefore follow the documented... I mean, potentially we could just delete these tests, right? Ask a- agent in the next round just write some fresh tests.
+[43:47] Speaker 2: Yeah.
+[43:48] Speaker 1: Because I I think there is a bit of a friction that they have these tests and then they're all these design choices we've made, and then the agent might get lost. And um and then, because they wanted to pass the tests, [laughter] they did not honor our requests.
+[44:11] Speaker 2: Yeah.
+[44:13] Speaker 1: Um, I think these tests were generated by agents anyway. They're all along, right?
+[44:18] Speaker 2: Yeah. [laughter] In the middle of a thousand lines of tests...
+[44:23] Speaker 1: In the next round, we should delete all these unit tests. Um, write and rewrite them from scratch after ask agents to revise after the core um code is revised. Okay. Yeah, and that's it. Um... So, I I think I don't need to submit more, right? I think this is just part of my comments, I think. Right, yes. Here is me, then I have some more. So, I don't need to... Right. So, I think we should talk about our next steps. I mean, these are things that we are not happy with, etc. The agents, we will ask them to take care of those um in some way. But I think documentation is pretty important. Having a policy uh for the documentation is important.
+[45:56] Speaker 2: Yeah.
+[45:57] Speaker 1: Um, and there's also some immediate things about how to turn these comments into the next PR. My feeling is that perhaps we should just close this PR with all these comments, and ask AI to work on it again with these comments taken into account. And you have other uh new changes that you haven't
+[46:27] Speaker 2: Yeah.
+[46:28] Speaker 1: submitted as a PR. So, I'll just close this. But say this should be... Oh, maybe I won't close it for now, but I will say, uh, "No further updates to this PR is required. The comments should be incorporated in a new PR, after uh after which this PR can be closed." Right. So, we we're not going to fix fix it on this particular PR and battling with these comments with the AI. Um, right, so documentation. What do we want to do? Let's see what the AI said. There are some different approaches. Sphinx, MkDocs, pdoc. The usual approach is to write docstrings. I mean, I can ask AI, "For docstrings, will Do people generally Do people typically write all the documentation in the files before... Right. Right after functions, classes are defined? Will that overwhelm the actual code?"
+[48:45] Speaker 2: I think that's what PyTorch does, yeah. The actual code... I mean, for PyTorch and stuff, they do do that, yeah.
+[48:54] Speaker 1: Um, so the doc... It It depends on how we are going to look at these as well.
+[48:59] Speaker 2: Yeah.
+[49:00] Speaker 1: Do Do you use like You use an IDE, VS Code or something like that?
+[49:04] Speaker 2: Yeah, VS Code.
+[49:07] Speaker 1: I haven't decided how I should do this. Um, but now it's easy. I can ask AI to set it up. I I I still I'm not sure if I wanted to use VS Code. Uh, so... But um but do we want to see the documentation alongside the code, or do we want some light documentation?
+[49:41] Speaker 2: I think we can ask AI. It'll save like people writing two sets of documentation, and keeping that updated.
+[50:07] Speaker 1: Um, the problem is some of these are the there are some equations that are involved, right? So you don't really want to see that in a Python file.
+[50:21] Speaker 2: Yeah, they don't render out properly.
+[50:25] Speaker 1: And you could still put them there and get them to be rendered out in a documentation, but...
+[50:34] Speaker 2: I think we would want the equations in the file anyway, so like someone reading the code knows what it is doing. So you've got like render the LaTeX in your head, and then like...
+[50:44] Speaker 1: So you think it's still better if It's probably true, because the the AI if we have AI agents maintaining this, it's kind of giving them all the context they need to know.
+[50:55] Speaker 2: Yeah.
+[50:57] Speaker 1: Right?
+[50:58] Speaker 2: Yeah. I mean, yeah. You could use Markdown for the equations, but that's a bit strange still, I think.
+[51:11] Speaker 1: Um, let me see.
+[51:17] Speaker 2: So normally, the documentation is only like a couple of lines long anyway, like for most functions.
+[51:21] Speaker 1: Ah, so they say keep concise documentation besides the code, and longer explanations elsewhere is a standard approach.
+[51:28] Speaker 2: Yeah.
+[51:29] Speaker 1: Okay. I thought I thought they'd just write everything, but apparently not. "You do not need to put a whole manual into .py files. Scientific libraries sometimes have substantial docstrings, but these coexist with separate guides and tutorials. A useful distinction is: how to use this particular object correctly versus how to how the broader system or method works. In the .py file, the local contract. Docstring goes inside the function/class immediately before..." Ah, it's before its definition, the whole class line. Before the implementation. "For SAM2, I would keep a short statement of purpose, parameters and outputs, including tensor shapes and axis meanings, essential assumptions, restrictions, and side effects, a short example or algorithm code note when genuinely helpful, a link to the longer explanation." That sounds good to me. "Concise should not mean merely restating the function names." That's fine. AIs typically say that kind of things. "A reader should not have to open a separate chapter to discover whether an input must be normalized, or a method modifies its arguments. In docs, explanations spanning several objects. Put the longer material here: architecture and how classes fit together, mathematical definitions, derivations, statistical assumptions, end-to-end workflows, extended examples, design rationale, the comparison between approaches. Sphinx can combine these hand-written pages with reference pages extracted from docstrings." Okay, so readers can see one connected documentation site, not two disconnected systems. Yeah. "Keeping code review manageable: my recommendation would be keep important contracts close to the implementation, but move the extended exposition out. Avoid duplicating the same explanation across several docstrings. Link to one authoritative explanation. Keep documentation-only additions in separate commits from behavioral changes where practical. Right. Use longer docstrings when where the interface genuinely warrants them, not a fixed documentation template for every tiny helper. The balance I suggest is this: concise for..." Yeah, okay. That's fine.
+[54:17] Speaker 2: Yeah.
+[54:19] Speaker 1: Um, I guess I can ask AI, "Should we This sounds fine, but how do we enforce this policy, especially um with AI agents that will help um with coding?" I guess is to put it in the agents.md or something like like that?
+[55:08] Speaker 2: And maybe Sphinx has a configuration that like forces you to write docs for every function.
+[55:13] Speaker 1: Have you have you used Sphinx?
+[55:15] Speaker 2: I don't think so, no.
+[55:16] Speaker 1: We can I I I think I'm going to ask them to AI to generate some policy for the documentation, and then we ask them what's the best...
+[55:24] Speaker 2: Okay, yeah.
+[55:25] Speaker 1: Compare these different approaches and different softwares for this. Okay, so we'll so we'll do that for the rest of the meeting. We'll just get the policy for documentation.
+[55:48] Speaker 2: Yeah.
+[55:49] Speaker 1: We will pick a documenter, um Sphinx or something else. And what else do we want to discuss? Do you have everything you need, you think, for the immediate stuff?
+[56:06] Speaker 2: I think we just need to discuss what to do for step six, since it's like what the user interface should be for the trainer. Step six is the main trainer.
+[56:15] Speaker 1: Okay. Um, how do you want to do it?
+[56:20] Speaker 2: Um, I can quickly go through the changes we made so far, I think.
+[56:25] Speaker 1: Okay, you want to show us?
+[56:26] Speaker 2: It's not pull request yet, but yeah.
+[56:28] Speaker 1: Show us.
+[57:20] Speaker 2: Uh, all of these changes are going together. That's not step five, is it? What? It's probably the one before. I think that's after here. Yeah. So... Yeah, we have the trainer, so the trainer now supports like the pandas as a data input. So we have like a data frame, but we still haven't fully specified it. There's a data frame that's specified with data, I think. Is it not there? So the first thing I did was move all the files around to different folders again, so we have like a proper data folder. So previously there was like a data loader file and a data file, they're now all in the data loader folder. And the same for the trainer folder as well. And then configs, yes. So for some reason, the agent decided to move the configuration of the loss function outside of the trainer. I feel we should put it back, because we want the trainer to construct all the loss functions automatically for us, right? So previously, we would we were defining all of the like loss functions inside the trainer, so we had an energy score and ATE loss, and so on. I think what the agent wants us to do now is to like manually define all of the loss functions which you give to the trainer, which I think we should probably not do, right?
+[59:24] Speaker 1: Uh, why not?
+[59:26] Speaker 2: Because we want everything to be done automatically.
+[59:31] Speaker 1: Uh, trainer... Sorry, I just I thought that that's actually kind of reasonable that you have separate loss functions
+[59:41] Speaker 2: Okay.
+[59:41] Speaker 1: that you use.
+[59:46] Speaker 2: So now the trainer just takes in an objective that you've predefined yourself.
+[59:52] Speaker 1: Right. So this would be the example.
+[59:56] Speaker 2: Yeah, so you define your objective here, right? And then you give that to the model. So the model or the trainer doesn't define the objectives now. Is that what we want?
+[60:08] Speaker 1: I thought so, because the trainer is a trainer. It's uh training towards the loss function. The loss function is not the trainer itself.
+[60:18] Speaker 2: Okay. Okay, yeah, we can do that then. So do we want to automatically build the loss function then, or make the user specify it themselves? Because right now the user has to specify like the batch size and the instrument name again.
+[60:32] Speaker 1: Hm. Instrument node is a separate thing, but for for batch, I mean that that I think we can ask AI to kind of create a separate instrument class, so that's that's not uh...
+[60:47] Speaker 2: Yeah.
+[60:48] Speaker 1: Not too worried about that. But for sample, the batch size...
+[60:53] Speaker 2: There'll be other like variables as well.
+[60:56] Speaker 1: That feels like that should belong to the trainer, not the not the objective function, right?
+[61:04] Speaker 2: So it's a bit strange, because the energy loss the energy loss here doesn't depend on your sample. There's some like there's some loss functions that don't depend on any data, like ATE. So they they are sampled independently of the main batch size.
+[61:23] Speaker 1: Right, but it's still... Well... Like when when I want to evaluate an ATE, I do need to be able to say what sample size I'm going to use.
+[61:40] Speaker 2: Yeah, exactly.
+[61:50] Speaker 4: But I I didn't quite get what this sample batch size 32 is doing here.
+[61:55] Speaker 2: So we draw 32 samples from the model, and then compute the energy score over those 32 samples.
+[62:01] Speaker 4: Oh, I see.
+[62:03] Speaker 1: You would typically think that's like in part of the like stochastic gradient descent algorithm.
+[62:08] Speaker 2: Yeah.
+[62:09] Speaker 1: But, yeah, I understand your point that for things like ATE, we also the way we evaluate it would require sampling, and we we want that. Um...
+[62:23] Speaker 2: So even for the energy loss and stuff, we have a batch of observations, that's our actual batch size, and then a batch of samples from our model, and we combine them together to compute the energy loss.
+[62:34] Speaker 1: I still feel we should probably distinguish those two batch sizes. One is for our own for the user evaluation,
+[62:38] Speaker 2: Yeah.
+[62:42] Speaker 1: and one is for training.
+[62:43] Speaker 2: Yeah.
+[62:44] Speaker 1: For training, you typically use a much smaller sample size.
+[62:50] Speaker 1: Um...
+[62:51] Speaker 2: Yeah.
+[62:53] Speaker 1: And that feels like that should be part of the configuration.
+[62:57] Speaker 2: Okay, yeah.
+[62:58] Speaker 1: Um...
+[63:01] Speaker 4: So again, a part of the trainer?
+[63:04] Speaker 1: Yeah. But, but you could have you could leave you could you could over- Would it be a good idea to override this the the batch sample size in the trainer? So we have a...
+[63:18] Speaker 2: So something we could do is we could give the config to the loss, loss class like we used to. So what used to happen is we would give these config files to the energy loss class.
+[63:28] Speaker 1: Mm, no. Just from a user experience... I mean, okay, so what what I would say is that essentially the problem is that you use The energy loss is mainly used for training only. But even then, you could be for diagnostic purposes, you might want to increase the sample size
+[63:46] Speaker 2: Yeah.
+[63:46] Speaker 1: a lot, right? But for ATE, that's both maybe used for actually doing the inference and for training.
+[63:54] Speaker 2: Yeah.
+[63:55] Speaker 1: All right. And the sample sizes for these two are often quite different. My my my thought was that we allow sample batch size to be unspecified, so it doesn't need to be initialized.
+[64:14] Speaker 2: Yeah.
+[64:14] Speaker 1: And when a user then does not initialize that, but calls the function to estimate average treatment effect,
+[64:22] Speaker 2: Okay.
+[64:23] Speaker 1: we give some default value. And that can be in the configuration that you saved. There's some default batch size for that. But for training, or you could have two default defaults, right? You could have a batch size that's that's just when this is called, and for training you have a different default batch size.
+[64:45] Speaker 2: Yeah.
+[64:46] Speaker 1: All right. So when training, then you use the default batch size, but that can be overridden if you change the configuration.
+[64:54] Speaker 2: Yeah. Okay.
+[64:56] Speaker 2: So the problem with that is that in the default configuration file, we'll need batch sizes for like every possible operator, every possible loss function operator. Even if...
+[65:07] Speaker 1: But can can we just do one for uh the default the default default, and one for the trainer default for all the loss functions? So we use the same default for the training.
+[65:18] Speaker 2: Okay, yeah.
+[65:21] Speaker 1: So you just have two values, and when you I mean, I'm just thinking about a user like me who doesn't want I just I want to see the average treatment effect on this particular model. I don't want to be bothered bothered by specifying the sample size every time.
+[65:38] Speaker 2: Right.
+[65:39] Speaker 1: Right? And you would just give a reasonably large value,
+[65:43] Speaker 2: Yeah.
+[65:43] Speaker 1: and maybe in the output, you can say, "Well, this is estimate based on 1,000 samples from the model," and etc. Then the user said, "Well, maybe I want to increase that."
+[65:55] Speaker 2: Yeah. Okay. Yeah, so I think in the old one, we had like a config.sample_batch_size. Would that be that what you want?
+[66:06] Speaker 1: Yeah, I think that would be the user default.
+[66:08] Speaker 2: Yeah.
+[66:09] Speaker 1: And then you have a training default, perhaps.
+[66:13] Speaker 2: Okay, yeah.
+[66:14] Speaker 1: The default used for training, because you don't want to use use that for you don't want to use 10,000 samples for training.
+[66:21] Speaker 2: Yeah. What about like the other parameters, like the energy loss has like a beta parameter? How do we want to specify that? In in the config, or directly in the energy loss?
+[66:31] Speaker 1: Can Can't we do both? Because you could...
+[66:34] Speaker 2: You can, but yeah.
+[66:35] Speaker 1: You could You could get the default config, right? And then you could change some of the parameters in that config, and then you train it with that config.
+[66:45] Speaker 2: So in that default config, we'll need configs for like every possible thing in that, then. Default for every single possible operator.
+[66:54] Speaker 1: Um...
+[66:58] Speaker 2: I think we had that before.
+[66:59] Speaker 1: At the moment, I would use the same value for every operator.
+[67:03] Speaker 2: Well, like, what I mean is we have like an energy loss, then we have like an MMD later on, we'll have like a...
+[67:07] Speaker 1: I would just use the same value, unless later on we felt we should use different values.
+[67:14] Speaker 2: I think the You mean different stuff in like different losses, though, right? Because like a There's no equivalent of an energy score beta to like a MMD, or same Oh, you mean for...
+[67:23] Speaker 1: Oh, yeah, for for energy score beta, then sure.
+[67:27] Speaker 2: I don't know, then.
+[67:28] Speaker 1: Yeah, yeah, sure. I mean, yeah, yeah, of course. Yeah, no, sorry. I thought we were talking Yeah, we're not talking about sample size, we're talking about other parameters that are specific to these functions.
+[67:36] Speaker 2: Yeah. I mean, operators.
+[67:40] Speaker 1: I think that's the more general approach, isn't it? That you have the configurations file for everything, [laughter] but that can be overridden.
+[67:48] Speaker 2: Yeah.
+[67:49] Speaker 1: Um...
+[67:56] Speaker 1: Or do you think that's too many configurations?
+[67:59] Speaker 2: I think that's what we did anyway, so like in the original configuration... Too many files. Yeah, so we were having like a ATE, a few attributes of ATE, energy score as well.
+[68:15] Speaker 1: Where just where it is, I guess. It's just where those default values...
+[68:20] Speaker 2: Yeah.
+[68:21] Speaker 1: Do you want it everything to be in a separate file, or do we want... I mean, you you don't have to make all the configuration in the same file, right? You could have a trainer configuration, you could have a operator configuration, right? Just to separate it a little bit.
+[68:38] Speaker 2: I think we probably should do that.
+[68:40] Speaker 1: And, yeah, maybe if this gets more complicated, you would even have functions to initialize the configurations, if maybe you have different... So So that's also a possibility, that you have a function that initializes the sample size for uh for for default evaluation,
+[69:02] Speaker 2: Yeah.
+[69:03] Speaker 1: and then you can toggle between a default evaluation or a training.
+[69:08] Speaker 2: Yeah, I'll look into it.
+[69:14] Speaker 1: Yeah, this this is fine. It's fine for now.
+[69:19] Speaker 2: Do you want this config file to be like a part of the user interface as well? Like do we want the user to edit this config file, or just hope everything's okay?
+[69:29] Speaker 1: I don't think the user should edit the config file, right? Directly.
+[69:33] Speaker 2: Just for defaults, and then...
+[69:34] Speaker 1: These are the defaults, and then if they want to change things, they can override.
+[69:38] Speaker 2: Okay, yeah.
+[69:43] Speaker 2: Yeah, makes sense.
+[69:53] Speaker 2: Yeah, and there'll be a lot more configs for like optimizers and stuff as well, like learning rate, schedule, and stuff like that, yeah.
+[70:33] Speaker 2: I think that's all the changes we've all the important changes that we need to go through, I think.
+[70:38] Speaker 1: Okay. So after you've done some work, you can ask Paris to look at PR 60,
+[70:50] Speaker 2: Okay.
+[70:50] Speaker 1: all the comments there, incorporate those,
+[70:52] Speaker 2: Yeah.
+[70:53] Speaker 1: then close that PR, then you submit a new one, then we can all take a look again.
+[70:59] Speaker 2: Okay.
+[71:00] Speaker 2: Should we make the docs afterwards, I think?
+[71:03] Speaker 1: Yeah, I'm trying to first get the policies in the
+[71:07] Speaker 2: Yeah.
+[71:08] Speaker 1: in the repository, then we pick I mean, maybe we don't have time to pick a documenter, which I don't think is that important. Uh, we'll we'll find something. Right. And uh that will be a separate Probably I'm not quite sure about what comes first. If you have You're going to make some substantive changes,
+[71:30] Speaker 2: Yeah.
+[71:30] Speaker 1: and then there's all the documentation, and I imagine there will be a one big PR where they add a lot of documentation to every function,
+[71:37] Speaker 2: Yeah.
+[71:38] Speaker 1: and this whole documentation web page, perhaps. So do we want to do that documentation update alongside what you're doing here, or do we want it to be a bit later?
+[71:54] Speaker 2: Maybe a bit later.
+[71:55] Speaker 1: Maybe later, after we merge your PR,
+[71:57] Speaker 2: Yeah.
+[71:57] Speaker 1: then we do the documentation.
+[72:01] Speaker 1: Um, maybe we realize some other things. And then there are other thi- other other items, other other units that the agent wants to to do, right? But I I do I did feel like documentation would be quite useful, because it's you know, if they write 200 lines of code, it's I don't understand. [laughter] I don't want to read every single line.
+[72:27] Speaker 2: Yeah.
+[72:28] Speaker 4: Yeah, I think it's a good idea to have it early on maybe, as soon as Max finishes his
+[72:32] Speaker 2: Yeah.
+[72:34] Speaker 4: the the new PR.
+[72:38] Speaker 1: Good. Yeah, so I'm I'm getting close to introducing a few new agents to the workspace, which then I think if we don't we shouldn't need Paris anymore once that stabilizes.
+[72:56] Speaker 2: Yeah.
+[72:57] Speaker 1: Um, it's it's should get It It's on my my desktop, um, and it should have more computing power. And I'll connect it to the HPC server.
+[73:12] Speaker 2: Okay.
+[73:12] Speaker 1: So if it's if it's a massive job, then we also have that.
+[73:16] Speaker 2: Okay.
+[73:21] Speaker 1: Yeah, so that's underway. [laughter] Okay. Um, I I guess the other thing I wanted to discuss was the the the grant proposal with Explainable AI. Um, I think I will need some help because we need to kind of get it done in about 2 weeks' time. And really, what I want from from here is just like, um, small demo. I think the simplest thing we could do is we can look at we can find a study of human psychology, that are the questions sort of make sense for AI agent. We look at what they did. We, I mean, these are usually done by questionnaires, and we just ask AI to answer those questionnaires.
+[74:23] Speaker 2: Yeah.
+[74:24] Speaker 1: Um, we have a few AI to do that. And we take the data. They don't need to answer it many, many times, I suppose. The question is there may not be a lot of variation um if we ask them to do it many times. Um, so the it's So then it would be less interesting. But I don't know. Maybe it will still be okay if it's if the measurement is very, very accurate, that's also fine, I guess.
+[74:56] Speaker 4: Do you think that we just give them the questionnaire, or should we maybe start a conversation first, give them some context, and then ask the questions?
+[75:09] Speaker 1: No, I mean, we can give different prompts. That's fine. Right? If you You can have the something before the questionnaire, it's prompts. But what I What I would do is that that mean that's I would just keep the same thing that they give, like information sheet for human participants to take this questionnaires. So...
+[75:31] Speaker 4: I was just thinking when you when you give questionnaires to to to humans, they have um they have different experiences, they have they have different lives. It's like [cough] if you give the same to LLM, the same questionnaire, is it very likely that you get the same answers, roughly?
+[75:56] Speaker 1: Possibly, but not always, right? You would you might see a lot of differences. I I don't know. And there are these temperature settings that you can set in the LLM. Um, but essentially, we're thinking about each LLM or each agent as a population. Every time you ask them, you're like asking an instance of that agent. And every instance is a little bit different, they have different random seeds. Right. And and you get a sort of a psychometric profile of that agent population. And we might I think, for this simple experiment, we could just do maybe for each agent, we can prompt them I don't know, 100 times, like it's like a sample of 100 human users, like human participants, and we can run our model. And we can try a few agents, um, and we see if the model's coefficients are different. So we should look for kind of um questionnaires and sort of psychological studies where we expect different agents to behave quite differently. My guess is the the coding agents are probably quite similar to each other,
+[77:24] Speaker 2: Yeah.
+[77:24] Speaker 1: but other agents are might be quite different because of the system prompts. And the LLMs, I don't know how the backend LLM, how important that is. I think there is certainly some difference, like when you use these different LLMs, you do notice
+[77:41] Speaker 2: There definitely are differences.
+[77:42] Speaker 1: differences. Um, but yeah, but but but we're looking for not differences in terms of their abilities per se, but more about uh kind of um other kind of attributes.
+[78:00] Speaker 2: How do these psychometric tests work? Like what what do they evaluate for an LLM?
+[78:05] Speaker 1: But I I don't think people have really done this very seriously, uh besides that maybe that paper that does some item response theory.
+[78:12] Speaker 2: Yeah.
+[78:13] Speaker 1: But that's really just still about evaluating their capabilities, not not so much. Because item response theory is from mostly educational testing, I think.
+[78:20] Speaker 2: Yeah.
+[78:21] Speaker 1: They give you a bunch of tests, like multiple-choice questions, and then they try to evaluate your ability from those questions. What we're trying to do is one level beyond that, which is kind of their how are their capabilities and personalities are kind of influence each other. Um, yeah.
+[78:42] Speaker 2: How would you evaluate that? Because you can't just ask an LLM like... You can't just ask an LLM a question, because it might not do that, and not behave like that. Like, you can ask an LLM like, "Do you write good code?" and it will always say yes, and maybe it doesn't.
+[78:56] Speaker 1: Um, I think maybe we don't ask them to do write code, but something else.
+[79:02] Speaker 2: Yeah, give them a task.
+[79:04] Speaker 1: Yeah. I think maybe we need to brainstorm with uh some agents.
+[79:12] Speaker 2: Yeah.
+[79:13] Speaker 1: I can add you to our channel. We have a channel for this, um... Yeah, it's called Explainable AI. Just added you. Um, yeah, but we can we can we can do a bit of brainstorming of that experiment, and... Yeah, we do need that. [laughter] Um, so yeah, for because for this proposal, it's just three pages of scientific case. We're not not going to write a lot.
+[80:05] Speaker 2: Right.
+[80:05] Speaker 1: So I think what they're going to look for mainly look at is sort of the ambition and, you know, of the project, you know. Is it really going to um have a transformative change, which I think we have a good case for that.
+[80:24] Speaker 2: Yeah.
+[80:25] Speaker 1: Um, then it's also about kind of the team and whether they can deliver it. Um, yeah. So So for kind of I I thought some kind of small example will help whoever review the proposal to understand what we're trying to do, [laughter]
+[80:45] Speaker 2: Yeah.
+[80:46] Speaker 1: right? Otherwise, it would be quite abstract, and people you know, if it's a computer scientists look at this, they might not understand the psychometric aspect.
+[80:56] Speaker 2: Yeah.
+[80:57] Speaker 1: But we need a good example. It shouldn't be very hard to get the data. Um, just need to prompt some LLM. This could be done automatically. Okay. Sounds good? All right. Okay, thanks a lot.
+[81:26] Speaker 2: Yeah.
+[81:43] Speaker 1: Okay. Right.
