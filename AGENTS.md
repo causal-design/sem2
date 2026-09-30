@@ -12,6 +12,8 @@ SEM2 is a research-stage PyTorch implementation of structural equation models. R
 - `sem2/model/models/discrete.py`: finite-state probability calculation and discrete interventions.
 - `sem2/operators/linear.py`: Gaussian likelihood and covariance-based linear objectives.
 - `sem2/operators/scalar_operators.py`: experimental energy and causal-query operators.
+- `sem2/operators/vector_operators.py`: potential-outcome sampling.
+- `sem2/operators/discrete_energy_loss.py`: finite-discrete energy calculations.
 - `sem2/sem2trainer.py`: current package trainer; do not assume it is the sole or stable fitting path.
 - `tests/`: parser, construction, sampling, and linear-model tests.
 - `experiments/` and `notebooks/`: research code and demonstrations; some imports and dependencies are stale.
@@ -37,13 +39,17 @@ Formula statements are separated by semicolons:
 
 Call `model.sample(...)`; `forward(...)` deliberately raises `NotImplementedError`. Continuous sampling returns a node-to-tensor dictionary plus an auxiliary dictionary. Discrete sampling returns probabilities over `model.all_states` plus state metadata.
 
-Pass node configurations through `node_cfgs`, keyed by the left-hand-side node name. Treat tensor column order as unsafe unless it is checked against named model variables.
+Pass `set_nodes` as a node-name-to-tensor dictionary with shape `(batch_size, node.out_dim)` for each value. Sampling updates cached node values and draws from the PyTorch RNG; it is not a pure inspection operation.
+
+Pass node configurations through `node_cfgs`, keyed by the left-hand-side node name. Construction consumes entries from that dictionary; pass a copy if the caller needs to retain it. Treat tensor column order as unsafe unless it is checked against named model variables.
+
+These conventions describe the current default-branch API. Named records, node-owned support, fixed formula intercepts, DataFrame preparation, and explicit objective composition are migration work, not capabilities to infer from planning documents or an unmerged implementation. Inspect the exact branch before documenting its API.
 
 ## Design conformance
 
 Before changing model, data, or operator boundaries, read the agreed design direction in [`PROJECT.md`](PROJECT.md). Preserve compatibility with existing formulas, require named variable mappings at data boundaries, and keep application-specific roles out of graph-generic components.
 
-For v0.1 work, start with the [planning review](docs/plan/v0.1.md) and its linked support/data and trainer specifications. Distinguish target interfaces from inspected current behavior. Keep plan review separate from implementation review; the linked closed code PRs are unmerged examples, not approved dependencies. Do not infer a numeric-column default from storage dtype or existing arithmetic on state codes.
+For v0.1 work, start with the [implementation plan](docs/plan/v0.1.md) and its linked interface specifications, then check [`PROJECT.md`](PROJECT.md) for the current baseline and review status. Distinguish the agreed target from inspected behavior. Keep plan review separate from implementation review; an earlier task, prototype, or plan approval does not authorize the next unit. Do not infer quantitative meaning from numeric storage or arithmetic on category codes.
 
 ## Capability and claim discipline
 
@@ -62,7 +68,7 @@ python -m pytest
 
 For code changes:
 
-1. add focused tests next to the behavior being changed;
+1. extend suitable existing tests or add a few focused cases for distinct contract changes; respect an explicit request to defer new tests while still running relevant existing checks;
 2. run the smallest relevant tests while iterating;
 3. run the full suite before publication;
 4. run `git diff --check`; and
@@ -71,6 +77,54 @@ For code changes:
 Estimator and operator changes should test analytical values, gradients, tensor axes, batch shapes, devices, reproducibility, and failure cases. Intervention tests should use explicit node names and state the model assumptions. Optimizer-based examples should report convergence information rather than only an iteration count.
 
 For documentation changes, verify every repository-relative link and execute retained code examples when the environment has the declared dependencies.
+
+## Documentation policy
+
+This policy applies equally to human contributors and coding agents. Document every new or behaviorally changed public class, function, and method, plus internal helpers whose contracts or algorithms matter to correctness. Reconcile existing documentation when its behavior changes; a usage example alone is not API documentation.
+
+- **In the source:** use concise NumPy-style docstrings immediately inside the class/function. State purpose, parameter and output meanings, relevant types/defaults, tensor shapes and axis meanings, essential assumptions, restrictions, side effects, randomness, and important errors as applicable. Explain constructor arguments and important attributes for classes. Do not merely repeat the name or hide a necessary precondition in an external chapter.
+- **In `docs/`:** keep architecture, mathematical definitions and derivations, statistical assumptions, equation-to-code explanations, end-to-end workflows, and extended examples. Cross-link relevant API and explanatory text. Keep one authoritative explanation rather than copying it into several docstrings.
+- **Keep it proportionate:** no arbitrary minimum length or compulsory long example/extended-summary section for every small helper. Separate documentation-only edits from behavioral edits in commits where practical, but review their consistency together in the same PR.
+- **Keep it truthful:** describe inspected behavior, not intended behavior. Reviewed mathematics and API decisions define the intended contract; agent-written code, tests, and prose do not silently become its specification. Flag a conflict for a human decision rather than documenting a bug as the intended result.
+
+For the current base `SEM2.sample`, a docstring could read as follows (docstring only, not a new implementation or the discrete subclass contract):
+
+```python
+"""Draw node values in parent-before-child order, with optional interventions.
+
+Parameters
+----------
+batch_size : int, default 1
+    Number of rows to draw.
+set_nodes : dict of str to torch.Tensor, optional
+    Values replacing named node equations. Each tensor must have shape
+    (batch_size, node.out_dim) and valid values on the model's device.
+
+Returns
+-------
+samples : dict of str to torch.Tensor
+    Node values, each shaped (batch_size, node.out_dim).
+auxiliary : dict
+    Empty in this implementation.
+
+Notes
+-----
+Uses the PyTorch RNG and updates cached node values. Interventions are
+model calculations, not evidence of causal identification.
+"""
+```
+
+### Automated checks and human review
+
+The enforcement design is source-level docstring validation plus a strict documentation build and required human review. Consult [the implementation status](PROJECT.md#documentation-policy-and-enforcement) before claiming any check is configured or passing.
+
+1. Use a small selected set of `numpydoc` checks for missing docstrings and missing, obsolete, or undescribed parameters/returns. Check source coverage as well as generated pages so omitted API objects cannot escape validation. Scope exceptions explicitly; do not use formatting rules to demand filler.
+2. Build the Sphinx API reference and explanatory pages with warnings treated as errors and unresolved cross-references reported. Local pre-commit checks are useful feedback, not a substitute for CI checks on the PR. Confirm actual configuration and commands before claiming a build.
+3. In each PR, identify changed interfaces/behavior, the updated documentation (or why none was needed), and the checks actually executed, including limitations. Human reviewers check semantic and mathematical accuracy, shapes, assumptions, completeness, and concision. A second AI review is advisory, not approval.
+4. Require passing documentation checks and approval from designated human reviewers before default-branch integration; require renewed review after substantive changes. Protect policy files, checker configuration, exclusions, workflows, and ownership rules with human review too. Agents must not weaken checks to make their changes pass, approve their own work, or bypass review requirements. Administrative configuration requires a separate authorized change; writing this rule does not enable it.
+5. Account for every review comment and follow-up, including comments on outdated lines. Link changes and executed evidence back to the request; distinguish answered, implemented-awaiting-review, blocked, and explicitly deferred items. Leave thread resolution and merge to the human reviewer.
+
+Reference behavior: [numpydoc validation](https://numpydoc.readthedocs.io/en/latest/validation.html), [Sphinx build options](https://www.sphinx-doc.org/en/master/man/sphinx-build.html), and [GitHub branch protection](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/managing-a-branch-protection-rule).
 
 ## Research integration
 
