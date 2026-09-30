@@ -53,7 +53,7 @@ Humans retain control of scientific meaning, architecture, accepted behavior, re
 
 ## Documentation policy and enforcement
 
-**Agreed policy:** concise but sufficient local API contracts, automatically generated API reference, and longer mathematical/architectural/workflow explanations in `docs/`. Document important internals as well as public objects, update documentation with behavioral changes, and cross-link rather than duplicate. Do not require padding or long examples for trivial helpers. The canonical contributor rule, including a NumPy-style docstring example, is in [`AGENTS.md`](AGENTS.md#documentation-policy); [`README.md`](README.md#documentation-and-contribution-policy) provides the user-facing summary.
+**Agreed policy:** concise but sufficient local API contracts, automatically generated API reference, and longer mathematical/architectural/workflow explanations in `docs/`. Document important internals as well as public objects, update documentation with behavioral changes, and cross-link rather than duplicate. Do not require padding or long examples for trivial helpers. The contributor instructions are in [`AGENTS.md`](AGENTS.md#documentation-policy); [`README.md`](README.md#documentation-and-contribution-policy) provides the user-facing summary.
 
 **Enforcement design:** selected `numpydoc` checks over source objects, a strict Sphinx build including cross-reference checks, PR evidence of what changed and what ran, and required human review. Protect policy files, workflows, checker configuration and exceptions with human review too. Agents must not disable checks or bypass approval. Human reviewers assess semantic/mathematical accuracy and concision; presence/format checks cannot establish these.
 
