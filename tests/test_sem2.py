@@ -9,6 +9,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import pytest
 import torch
 import torch.nn as nn
+from sem2.utils import seeded_rng
 
 from sem2.model.components.nn_models import _LinearConfig, _LinearModel, _MLP
 from sem2.data import DataBatch, VariableInfo
@@ -1128,8 +1129,8 @@ class TestSEM2Linear:
         expected = torch.tensor([[1.0, 2.0], [2.0, 5.0]])
         assert torch.allclose(S, expected, atol=1e-5)
 
+    @seeded_rng(0)
     def test_cov_matrix_matches_empirical(self):
-        torch.manual_seed(0)
         m = _chain_linear()
         samp, _ = m.sample(batch_size=100000)
         data = samp.select(["x", "y"]).detach()
@@ -1159,8 +1160,8 @@ class TestSEM2Linear:
 class TestLinearOperators:
 
     def _data(self, m, n=5000, seed=0):
-        torch.manual_seed(seed)
-        samp, _ = m.sample(batch_size=n)
+        with seeded_rng(seed):
+            samp, _ = m.sample(batch_size=n)
         return batch(samp.select(["x", "y"]).detach(), "x", "y")
 
     def test_base_guards_linearity(self):

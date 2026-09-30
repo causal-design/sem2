@@ -8,10 +8,11 @@ from sem2.model import SEM2Discrete
 from sem2.sem2trainer import SEM2Trainer
 from sem2.operators.scalar_operators import MeanPotentialOutcome, SEM2Loss
 from sem2.operators.discrete_iv import DiscreteIVEnergyLoss
+from sem2.utils import seeded_rng
 
 
+@seeded_rng(0)
 def main():
-    torch.manual_seed(0)
     logging.basicConfig(level=logging.INFO)
     cfg = TrainingConfig(device="cpu", epochs=2, batch_size=64, sample_bs=32)
     formula = "U ~ Uniform(0,1); Z ~ Categorical(probs=[1,1]); X <- d(Z,U; levels=2); Y <- d(X,U; levels=2)"
@@ -24,10 +25,10 @@ def main():
     trainer.loss_fn = SEM2Loss([(DiscreteIVEnergyLoss(cfg, model, instrument="Z"), cfg.energy_score_weight)])
     batch = next(iter(loader))
     print("Batch:", batch.names, batch.values.shape)
-    rng = torch.get_rng_state()
-    result, _ = trainer.loss_fn.evaluate(batch)
-    torch.set_rng_state(rng)
-    reordered, _ = trainer.loss_fn.evaluate(batch.subset(["Y", "Z", "X"]))
+    with seeded_rng(0):
+        result, _ = trainer.loss_fn.evaluate(batch)
+    with seeded_rng(0):
+        reordered, _ = trainer.loss_fn.evaluate(batch.subset(["Y", "Z", "X"]))
     torch.testing.assert_close(result.value, reordered.value)
     print("Named-column reorder check passed.")
     trainer.train()
