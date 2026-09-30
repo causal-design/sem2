@@ -97,8 +97,8 @@ class SEM2Linear(SEM2):
 
     def mean_vector(self) -> Tensor:
         """Model-implied mean over all nodes: mu = (I - B)^-1 c, where c[i] is the
-        exogenous distribution mean for exogenous nodes and the bias term for
-        linear nodes (0 if the node has no bias).
+        exogenous distribution mean for exogenous nodes and the intercept for
+        linear nodes (0 if the node has no intercept).
         """
         N = len(self.node_order)
         B = self.coef_matrix()
@@ -114,8 +114,8 @@ class SEM2Linear(SEM2):
                         f"Node '{name}' has mean {mean}."
                     )
                 c[i] = mean
-            elif isinstance(node, NodeLinear) and node.bias() is not None:
-                c[i] = node.bias().reshape(-1)[0]
+            elif isinstance(node, NodeLinear) and node.intercept() is not None:
+                c[i] = node.intercept().reshape(-1)[0]
         eye = torch.eye(N, device=self.device)
         return torch.linalg.solve(eye - B, c)
 

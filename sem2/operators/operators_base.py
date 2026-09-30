@@ -6,7 +6,7 @@ import warnings
 import torch
 
 from .._compat import StrEnum
-from ..data import DataBatch, FiniteDistribution, ScalarResult
+from ..data import DataBatch, DiscreteDistribution, ScalarResult
 
 if TYPE_CHECKING:
     from ..model.models.base import SEM2
@@ -21,7 +21,7 @@ class OperatorOutput(StrEnum):
     SCALAR = "Scalar"   # ScalarResult, retaining gradients
     MATRIX = "Matrix"   # Tensor with axis metadata in diagnostics
     DATA_BATCH = "DataBatch"
-    FINITE_DISTRIBUTION = "FiniteDistribution"
+    DISCRETE_DISTRIBUTION = "DiscreteDistribution"
 
 
 class SEM2Operator(ABC):
@@ -30,7 +30,7 @@ class SEM2Operator(ABC):
     output_type: OperatorOutput
 
     @abstractmethod
-    def evaluate(self, *args, **kwargs) -> tuple[ScalarResult | DataBatch | FiniteDistribution | torch.Tensor, dict]:
+    def evaluate(self, *args, **kwargs) -> tuple[ScalarResult | DataBatch | DiscreteDistribution | torch.Tensor, dict]:
         """Return a typed result and a dictionary of diagnostics."""
 
 

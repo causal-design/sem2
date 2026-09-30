@@ -88,8 +88,14 @@ class DataBatch:
 
 
 @dataclass
-class FiniteDistribution:
-    """Named states and probabilities [exogenous draws, states]."""
+class DiscreteDistribution:
+    """Finite named states and probabilities, not realized observations.
+
+    probabilities has shape [exogenous draws, states]. Each row is a conditional
+    distribution for one Monte Carlo sample of the exogenous inputs. Averaging
+    rows estimates the marginal law.
+    This record represents either a joint distribution or a selected marginal.
+    """
     states: DataBatch
     probabilities: torch.Tensor
 
@@ -102,11 +108,11 @@ class FiniteDistribution:
         if self.probabilities.device != self.states.values.device:
             raise ValueError("States and probabilities must be on the same device.")
 
-    def to(self, *args, **kwargs) -> FiniteDistribution:
+    def to(self, *args, **kwargs) -> DiscreteDistribution:
         probabilities = self.probabilities.to(*args, **kwargs)
-        return FiniteDistribution(self.states.to(device=probabilities.device), probabilities)
+        return DiscreteDistribution(self.states.to(device=probabilities.device), probabilities)
 
-    def marginalize(self, names) -> FiniteDistribution:
+    def marginalize(self, names) -> DiscreteDistribution:
         """Combine equal projected states; retain the exogenous-draw axis."""
         states = self.states.subset(names)
         if states.values.shape[1] == 0:
@@ -116,7 +122,7 @@ class FiniteDistribution:
             values, inverse = torch.unique(states.values, dim=0, return_inverse=True)
             probabilities = self.probabilities.new_zeros((self.probabilities.shape[0], len(values)))
             probabilities = probabilities.index_add(1, inverse, self.probabilities)
-        return FiniteDistribution(DataBatch(values, states.variables), probabilities)
+        return DiscreteDistribution(DataBatch(values, states.variables), probabilities)
 
 
 @dataclass
