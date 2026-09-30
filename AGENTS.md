@@ -33,6 +33,28 @@
 - Update documentation with behavior in the same PR. Describe what the code does and label planned behavior as planned.
 - Run configured docstring checks and the strict documentation build; do not weaken checks to make a change pass. See [enforcement status](PROJECT.md#documentation-policy-and-enforcement) for what is actually configured.
 
+Use this format for internal helpers (illustrative, not an existing API); omit sections that do not apply:
+
+```python
+import torch
+
+
+def _mean_over_samples(draws: torch.Tensor) -> torch.Tensor:
+    """Average each variable over Monte Carlo samples.
+
+    Parameters
+    ----------
+    draws : torch.Tensor
+        Floating-point values of shape (n_samples, n_variables), n_samples > 0.
+
+    Returns
+    -------
+    torch.Tensor
+        Means of shape (n_variables,), preserving input dtype and device.
+    """
+    return draws.mean(dim=0)
+```
+
 ## Verify
 
 Run from the repository root:
