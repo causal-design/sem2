@@ -19,20 +19,18 @@ class LinearNodeConfig:
     keeping the model formula self-contained and readable.
     """
 
-    # output_dim > 1 lets a linear node output probabilities over discrete
-    # states (e.g. a discrete latent variable), essentially a linear
-    # classifier / softmax layer useful for exact marginalisation.
+    # Number of real-valued output coordinates. Discrete category counts belong
+    # to d(...; levels=N), not to a linear node's output dimension.
     output_dim: int = 1
 
-    # Without bias the linear relationship is forced through the origin
-    # a strong structural constraint. Set False only when your model
-    # explicitly requires it.
-    use_bias: bool = True
+    # Estimate an intercept when the formula omits a constant. Explicit formula
+    # constants always win; otherwise False forces the equation through the origin.
+    use_intercept: bool = True
 
 
 @dataclass
 class MLPConfig:
-    """Public configuration for MLP nodes."""
+    """Network architecture; discrete output_dim is set by the formula's levels."""
 
     input_dim: int = None                                                   # Inferred from graph
     hidden_dims: list = field(default_factory=lambda: [512, 512, 512])      # Hidden layer widths

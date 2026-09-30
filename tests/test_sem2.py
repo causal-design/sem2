@@ -187,7 +187,7 @@ class TestNodeLinear:
 
     def test_fixed_coeff_one(self):
         """Fixed coefficient 1.0 — output should be 1*input regardless of learned weight."""
-        cfg = LinearNodeConfig(use_bias=False)
+        cfg = LinearNodeConfig(use_intercept=False)
         node = self._make([1.0], cfg=cfg)
         with torch.no_grad():
             node.linear.weight.fill_(99.0)
@@ -195,7 +195,7 @@ class TestNodeLinear:
 
     def test_fixed_coeff_negative(self):
         """Fixed coefficient -1.0 — output should be -1*input."""
-        cfg = LinearNodeConfig(use_bias=False)
+        cfg = LinearNodeConfig(use_intercept=False)
         node = self._make([-1.0], cfg=cfg)
         with torch.no_grad():
             node.linear.weight.fill_(99.0)
@@ -203,7 +203,7 @@ class TestNodeLinear:
 
     def test_fixed_coeff_fractional(self):
         """Fixed coefficient 0.5 — output should be 0.5*input."""
-        cfg = LinearNodeConfig(use_bias=False)
+        cfg = LinearNodeConfig(use_intercept=False)
         node = self._make([0.5], cfg=cfg)
         with torch.no_grad():
             node.linear.weight.fill_(99.0)
@@ -211,7 +211,7 @@ class TestNodeLinear:
 
     def test_learned_weight_used(self):
         """None coefficient — learned weight should be used."""
-        cfg = LinearNodeConfig(use_bias=False)
+        cfg = LinearNodeConfig(use_intercept=False)
         node = self._make([None], cfg=cfg)
         with torch.no_grad():
             node.linear.weight.fill_(5.0)
@@ -219,7 +219,7 @@ class TestNodeLinear:
 
     def test_mixed_fixed_and_learned(self):
         """Mix of fixed and learned in same node."""
-        cfg = LinearNodeConfig(use_bias=False)
+        cfg = LinearNodeConfig(use_intercept=False)
         node = self._make([1.0, None], cfg=cfg)
         # fix_weights: [True, False]
         assert node.fix_weights[0, 0].item() is True
@@ -227,13 +227,13 @@ class TestNodeLinear:
 
     def test_fix_weights_mask_shape_multi_output(self):
         """Mask must broadcast correctly when out_dim > 1."""
-        cfg = LinearNodeConfig(output_dim=2, use_bias=False)
+        cfg = LinearNodeConfig(output_dim=2, use_intercept=False)
         node = self._make([1.0, None], cfg=cfg)
         assert node.fix_weights.shape == (1, 2)
 
     def test_fix_weights_expanded_for_multidim_predecessor(self):
         """Fixed flag must expand across all dims of a multi-output predecessor."""
-        cfg = LinearNodeConfig(use_bias=False)
+        cfg = LinearNodeConfig(use_intercept=False)
         node = self._make([1.0, None], cfg=cfg, out_dims=[2, 1])
         # p0 has out_dim=2 (fixed), p1 has out_dim=1 (learned)
         assert node.fix_weights.shape == (1, 3)
@@ -242,7 +242,7 @@ class TestNodeLinear:
         assert node.fix_weights[0, 2].item() is False
 
     def test_no_bias(self):
-        cfg = LinearNodeConfig(use_bias=False)
+        cfg = LinearNodeConfig(use_intercept=False)
         node = self._make([None], cfg=cfg)
         assert node.linear.bias is None
 
@@ -596,7 +596,7 @@ class TestSEM2Forward:
     def test_fixed_coeff_one_passthrough(self):
         """y <- 1*e with no bias — output should equal input."""
         m = make_model("e ~ Normal(0,1); y <- 1*e",
-                       cfgs={"y": LinearNodeConfig(use_bias=False)})
+                       cfgs={"y": LinearNodeConfig(use_intercept=False)})
         e_val = torch.tensor([[1.0], [2.0], [3.0], [4.0]])
         out = run(m, set_nodes=batch(e_val, "e"))
         assert torch.allclose(out.select("y"), e_val)
@@ -604,7 +604,7 @@ class TestSEM2Forward:
     def test_fixed_coeff_negative(self):
         """y <- -1*e with no bias — output should be negated input."""
         m = make_model("e ~ Normal(0,1); y <- -1*e",
-                       cfgs={"y": LinearNodeConfig(use_bias=False)})
+                       cfgs={"y": LinearNodeConfig(use_intercept=False)})
         e_val = torch.tensor([[1.0], [2.0], [3.0], [4.0]])
         out = run(m, set_nodes=batch(e_val, "e"))
         assert torch.allclose(out.select("y"), -e_val)
@@ -612,7 +612,7 @@ class TestSEM2Forward:
     def test_fixed_coeff_fractional(self):
         """y <- 0.5*e with no bias — output should be halved input."""
         m = make_model("e ~ Normal(0,1); y <- 0.5*e",
-                       cfgs={"y": LinearNodeConfig(use_bias=False)})
+                       cfgs={"y": LinearNodeConfig(use_intercept=False)})
         e_val = torch.ones(BS, 1)
         out = run(m, set_nodes=batch(e_val, "e"))
         assert torch.allclose(out.select("y"), e_val * 0.5)
@@ -620,7 +620,7 @@ class TestSEM2Forward:
     def test_fixed_sum(self):
         """y <- 1*e1 + -1*e2 — should be e1 - e2."""
         m = make_model("e1, e2 ~ Normal(0,1); y <- 1*e1 + -1*e2",
-                       cfgs={"y": LinearNodeConfig(use_bias=False)})
+                       cfgs={"y": LinearNodeConfig(use_intercept=False)})
         e1 = torch.ones(BS, 1) * 3
         e2 = torch.ones(BS, 1) * 1
         out = run(m, set_nodes=batch(torch.cat([e1, e2], dim=-1), "e1", "e2"))
@@ -643,7 +643,7 @@ class TestSEM2Forward:
         """1*x where x has out_dim=2 — both columns must use fixed value 1."""
         m = make_model("e ~ Normal(0,1); x <- e; y <- 1*x",
                        cfgs={"x": LinearNodeConfig(output_dim=2),
-                              "y": LinearNodeConfig(use_bias=False)})
+                              "y": LinearNodeConfig(use_intercept=False)})
         node_y = m.node_dict["y"]
         with torch.no_grad():
             node_y.linear.weight.fill_(99.0)
@@ -1076,7 +1076,7 @@ def _chain_linear():
     """x = e1; y = 2x + ey, all noise N(0,1), no bias. Cov[x,y] = [[1,2],[2,5]]."""
     return SEM2Linear(
         "e1, ey ~ Normal(0,1); x <- 1*e1; y <- 2*x + 1*ey",
-        node_cfgs={"x": LinearNodeConfig(use_bias=False), "y": LinearNodeConfig(use_bias=False)},
+        node_cfgs={"x": LinearNodeConfig(use_intercept=False), "y": LinearNodeConfig(use_intercept=False)},
     )
 
 
@@ -1084,7 +1084,7 @@ def _chain_linear_nongaussian():
     """x = e1; y = 2x + ey, all noise Beta(0.5,0.5), no bias."""
     return SEM2Linear(
         "e1, ey ~ Beta(0.5,0.5); x <- 1*e1; y <- 2*x + 1*ey",
-        node_cfgs={"x": LinearNodeConfig(use_bias=False), "y": LinearNodeConfig(use_bias=False)},
+        node_cfgs={"x": LinearNodeConfig(use_intercept=False), "y": LinearNodeConfig(use_intercept=False)},
     )
 
 
@@ -1149,7 +1149,7 @@ class TestSEM2Linear:
     def test_cov_matrix_works_for_non_gaussian_linear_second_moments(self):
         m = SEM2Linear(
             "e1, ey ~ Uniform(-1,1); x <- 1*e1; y <- 2*x + 1*ey",
-            node_cfgs={"x": LinearNodeConfig(use_bias=False), "y": LinearNodeConfig(use_bias=False)},
+            node_cfgs={"x": LinearNodeConfig(use_intercept=False), "y": LinearNodeConfig(use_intercept=False)},
         )
         S = m.cov_matrix(["x", "y"])
         expected = torch.tensor([[1 / 3, 2 / 3], [2 / 3, 5 / 3]])
@@ -1187,7 +1187,7 @@ class TestLinearOperators:
     def test_loglikelihood_uses_batch_observed_vars(self):
         m = SEM2Linear(
             "e1, ey ~ Normal(0,1); x <- 1*e1; y <- 2*x + 1*ey",
-            node_cfgs={"x": LinearNodeConfig(use_bias=False), "y": LinearNodeConfig(use_bias=False)},
+            node_cfgs={"x": LinearNodeConfig(use_intercept=False), "y": LinearNodeConfig(use_intercept=False)},
         )
         data = self._data(m)
         implicit, _ = LogLikelihood(m, centered=True).evaluate(data)
@@ -1201,7 +1201,7 @@ class TestLinearOperators:
 
     def test_centered_loglikelihood_matches_zero_loc(self):
         m = SEM2Linear("e ~ Normal(2,1); x <- 1*e",
-                       node_cfgs={"x": LinearNodeConfig(use_bias=False)})
+                       node_cfgs={"x": LinearNodeConfig(use_intercept=False)})
         data = batch(torch.zeros(4, 1), "x")
         centered, _ = LogLikelihood(m, centered=True).evaluate(data)
         explicit, _ = LogLikelihood(m, loc=torch.zeros(1)).evaluate(data)
@@ -1211,7 +1211,7 @@ class TestLinearOperators:
 
     def test_centered_and_loc_are_mutually_exclusive(self):
         m = SEM2Linear("e ~ Normal(0,1); x <- 1*e",
-                       node_cfgs={"x": LinearNodeConfig(use_bias=False)})
+                       node_cfgs={"x": LinearNodeConfig(use_intercept=False)})
         with pytest.raises(ValueError, match="centered"):
             LogLikelihood(m, centered=True, loc=torch.zeros(1))
 
@@ -1235,7 +1235,7 @@ class TestLinearOperators:
 
     def test_loglikelihood_requires_finite_second_moments(self):
         m = SEM2Linear("e ~ Cauchy(0,1); y <- 1*e",
-                       node_cfgs={"y": LinearNodeConfig(use_bias=False)})
+                       node_cfgs={"y": LinearNodeConfig(use_intercept=False)})
         with pytest.warns(UserWarning, match="pseudo-log-likelihood"):
             op = LogLikelihood(m, ["y"], loc=torch.zeros(1))
         with pytest.raises(ValueError, match="finite second moments"):

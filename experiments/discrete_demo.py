@@ -9,10 +9,10 @@ logging.basicConfig(level=logging.INFO)
 
 # Base setup
 formula1 = "U ~ Normal(0,1); eps_d ~ Uniform(0,1); eps_y ~ Uniform(0,1); Z ~ Categorical(probs=[1, 1, 1]);"
-formula2 = "D <- d(Z, U, eps_d); Y <- d(D, U, eps_y)"
+formula2 = "D <- d(Z, U, eps_d; levels=2); Y <- d(D, U, eps_y; levels=3)"
 node_cfgs = {"U": 2, "eps_d": 2, "eps_y": 2,
-            "D": MLPConfig(hidden_dims=[1024, 1024, 1024], output_dim=2),
-            "Y": MLPConfig(hidden_dims=[1024, 1024, 1024], output_dim=3)}
+            "D": MLPConfig(hidden_dims=[1024, 1024, 1024]),
+            "Y": MLPConfig(hidden_dims=[1024, 1024, 1024])}
 # Continuous SEM
 print("===== Test SEM2 Continuous =====")
 
@@ -28,10 +28,10 @@ print(f'{all_states = }')
 print("===== Test SEM2 Discrete =====")
 # Base setup
 formula1 = "U ~ Normal(0,1); eps_d ~ Uniform(0,1); eps_y ~ Uniform(0,1); Z ~ Categorical(probs=[1, 1, 1]);"
-formula2 = "D <- d(Z, U, eps_d); Y <- d(D, U, eps_y)"
+formula2 = "D <- d(Z, U, eps_d; levels=2); Y <- d(D, U, eps_y; levels=3)"
 node_cfgs = {"U": 2, "eps_d": 2, "eps_y": 2,
-            "D": MLPConfig(hidden_dims=[1024, 1024, 1024], output_dim=2),
-            "Y": MLPConfig(hidden_dims=[1024, 1024, 1024], output_dim=3)}
+            "D": MLPConfig(hidden_dims=[1024, 1024, 1024]),
+            "Y": MLPConfig(hidden_dims=[1024, 1024, 1024])}
 print(node_cfgs)
 model = SEM2Discrete(formula1 + formula2, node_cfgs=node_cfgs, device="cpu")
 model.eval()

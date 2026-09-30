@@ -132,6 +132,7 @@ class FormulaParser:
 
         if "<-" in formula:
             lhs, rhs = formula.split("<-")
+            # Expansion gives private helper equations colon-separated names.
             is_helper = ":" in lhs
             if rhs.startswith("n("):
                 # Continuous neural network node
@@ -142,10 +143,13 @@ class FormulaParser:
                     is_helper=is_helper,
                 )
             if rhs.startswith("d("):
-                parents = rhs[2:-1].split(",")
+                match = re.fullmatch(r"d\(([^;]+);levels=([1-9]\d*)\)", rhs)
+                if match is None:
+                    raise ValueError("Discrete nodes require d(parents; levels=N), with positive integer N.")
+                parents = match.group(1).split(",")
                 return EndogenousDecl(
                     name=lhs, rhs=rhs, node_type="discrete",
-                    mechanism=MechanismTerm(kind="discrete", parents=parents),
+                    mechanism=MechanismTerm(kind="discrete", parents=parents, levels=int(match.group(2))),
                     is_helper=is_helper,
                 )
             # Linear node: parse coefficients and predecessors
@@ -185,6 +189,7 @@ class FormulaParser:
         return NodeSpec(
             name=st.name, rhs=st.rhs, node_type=st.node_type,
             predecessors=list(st.mechanism.parents),
+            levels=st.mechanism.levels,
             is_helper=st.is_helper,
         )
 
@@ -274,7 +279,8 @@ class FormulaParser:
     # ── Formula parsing ───────────────────────────────────────────────────────
 
     def _parse_formula(self, model_formula: str):
-        formula_list = re.sub(r"\s+", "", model_formula).split(";")
+        # Semicolons inside d(...; levels=N) belong to that mechanism, not the statement list.
+        formula_list = self._split_rhs(re.sub(r"\s+", "", model_formula), ";")
 
         expanded_list = []
         input_node = set()
@@ -313,7 +319,9 @@ class FormulaParser:
         rhs = rhs.replace(" ", "")
         terms, current, depth = [], "", 0
         for ch in rhs:
-            # Signs after an operator or in a numeric exponent are not separators.
+            # Split x-2 into x and -2, but keep the signs in -2*x and 1e-3.
+            # Parenthesis depth protects nested expressions; other separators
+            # (commas and statement semicolons) need only that depth check.
             exponent_sign = current.endswith(("e", "E")) and re.fullmatch(_NUMBER, current[:-1])
             additive_sep = (
                 sep == "+" and ch in "+-" and current

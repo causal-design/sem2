@@ -24,6 +24,8 @@ class RandomVariableSupport:
     values is an enumeration with native batch/event dimensions when available;
     None means unenumerated, not necessarily infinite. These are not observations
     or numeric mappings assigned to categories.
+    For example, Bernoulli enumerates 0 and 1. Normal and Poisson have no
+    enumeration here; values=None alone does not distinguish continuous from discrete.
     """
     constraint: constraints.Constraint | None = None
     values: torch.Tensor | None = None
@@ -162,7 +164,9 @@ class NodeLinear(NodeEndogenous):
 
     fix_weights, _fixed_vals, and _ones are registered as buffers so they move
     correctly with model.to(device) and are not counted as learnable parameters.
-    An explicit intercept is also a buffer and takes precedence over cfg.use_bias.
+    An explicit formula constant is a fixed intercept, including zero. Without
+    one, use_intercept selects a learned intercept or no intercept. Formula
+    constants take precedence over that flag; neural offsets are separate.
     """
     _support_constraint = constraints.real  # Domain bound, not propagated parent support.
 
@@ -178,7 +182,9 @@ class NodeLinear(NodeEndogenous):
     ):
         super().__init__(name, rhs, predecessor_nodes, device=device)
         self.out_dim = cfg.output_dim if cfg is not None else 1
-        self.use_bias = cfg.use_bias if cfg is not None else True
+        self.use_intercept = cfg.use_intercept if cfg is not None else True
+        # Public configuration describes the node; private storage is exposed
+        # through intercept(), which handles fixed and learned values uniformly.
         self._fixed_intercept = (
             nn.parameter.Buffer(torch.full((self.out_dim,), float(intercept), device=device))
             if intercept is not None else None
@@ -203,10 +209,11 @@ class NodeLinear(NodeEndogenous):
         self._fixed_vals = nn.parameter.Buffer(torch.tensor(fix_vals, dtype=torch.float32, device=device).unsqueeze(0))
         self._ones = nn.parameter.Buffer(torch.ones(1, input_dim, device=device))
 
+        # The private linear backend retains PyTorch's "bias" terminology.
         internal_cfg = _LinearConfig(
             input_dim=input_dim,
             output_dim=self.out_dim,
-            use_bias=self.use_bias and intercept is None,
+            use_bias=self.use_intercept and intercept is None,
         )
         self.linear = _LinearModel(internal_cfg, device=device)
 
@@ -222,13 +229,13 @@ class NodeLinear(NodeEndogenous):
         """
         return self._effective_weight()
 
-    def bias(self) -> torch.Tensor | None:
+    def intercept(self) -> torch.Tensor | None:
         """Effective fixed or learned intercept [out_dim], or None if absent."""
         return self._fixed_intercept if self._fixed_intercept is not None else self.linear.bias
 
     def _forward_inner(self, x: list[torch.Tensor], batch_size: int = 1) -> torch.Tensor:
         x_cat = self._collate_fn(x) if x else self.linear.weight.new_empty(batch_size, 0)
-        return F.linear(x_cat.to(self.linear.weight), self._effective_weight(), self.bias())
+        return F.linear(x_cat.to(self.linear.weight), self._effective_weight(), self.intercept())
 
 
 # ── Nonlinear (abstract) ──────────────────────────────────────────────────────
@@ -327,7 +334,9 @@ class NodeMLPDiscrete(SEM2Node):
                 if DiscreteModes.SAMPLE_ONEHOT:
                     return.shape = TBD
         """
-        x = self._collate_fn(x).to(next(self.nn_module.parameters()))
+        # Integer state IDs must match the network's floating dtype and device.
+        parameter = next(self.nn_module.parameters())
+        x = self._collate_fn(x).to(parameter)
         out = self.nn_module(x)
         out = self._discretize(out, mode)
         return out

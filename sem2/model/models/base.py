@@ -2,6 +2,7 @@
 # on Python < 3.14.
 from __future__ import annotations
 import warnings
+from dataclasses import replace
 import torch
 from torch import nn
 from torch import Tensor
@@ -9,6 +10,7 @@ from torch import Tensor
 from ..components.nodes import NodeExogenous, NodeLinear, NodeMLP, NodeMLPDiscrete, SEM2Node
 from ..construction import _DAG, SEMType
 from ...data import DataBatch, VariableInfo
+from ...default_configs import MLPConfig
 
 
 # ════════════════════════════════════════════════════════════════════════════════════
@@ -119,6 +121,8 @@ class SEM2(_DAG, nn.Module):
                 node = NodeMLP(node_name, ns.rhs, cfg, predecessor_nodes, device=device)
 
             elif ns.node_type == "discrete":
+                # Category count belongs to the formula; copy the architecture config.
+                cfg = replace(cfg if cfg is not None else MLPConfig(), output_dim=ns.levels)
                 node = NodeMLPDiscrete(node_name, ns.rhs, cfg, predecessor_nodes, device=device)
 
             elif ns.node_type == "linear":
@@ -166,7 +170,13 @@ class SEM2(_DAG, nn.Module):
         # Share the sampling loop with queries that stop at a specific target.
         return self._sample(batch_size, set_nodes)
 
-    def _sample(self, batch_size: int, set_nodes: DataBatch | None, target: str | None = None):
+    def _sample(self, batch_size: int, set_nodes: DataBatch | None,
+                target: str | None = None) -> tuple[DataBatch, dict]:
+        """One traversal for full samples and target-only queries.
+
+        The private target option lets queries stop early without duplicating
+        intervention handling or expanding the public sample interface.
+        """
         if target is not None and target not in self.input_node:
             raise ValueError(f"Unknown or internal target node: {target!r}")
         # Unwrap interventions once and retain their supplied variable metadata.
