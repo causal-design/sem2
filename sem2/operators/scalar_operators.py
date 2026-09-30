@@ -1,11 +1,10 @@
 """Scalar operators consuming named data and returning ScalarResult."""
 from __future__ import annotations
 import torch
-from .operators_base import OperatorInput, OperatorOutput, SEM2Operator, _numeric_values
-from .vector_operators import PotentialOutcome
+from .operators_base import OperatorInput, OperatorOutput, SEM2Operator, _apply_numeric_mapping
+from .vector_operators import PotentialOutcomeSample
 from .discrete_energy_loss import DiscreteEnergyLoss
 from ..model.construction.sem_types import SEMType
-from ..model.components.nodes import NodeExogenous
 from ..data import DataBatch, ScalarResult, VariableInfo
 
 
@@ -19,20 +18,7 @@ class EnergyLoss(SEM2Operator):
         self.device = cfg.device
         self.bs = cfg.sample_bs
         self.beta = cfg.energy_score_beta
-        self.instrument = cfg.instrument_node
         self.discrete_loss = DiscreteEnergyLoss(self.beta)
-        if self.instrument is not None:
-            if not SEMType.is_discrete(model.sem_type):
-                raise ValueError("The IV objective requires a discrete model.")
-            node = model.node_dict[self.instrument] if self.instrument in model.input_node else None
-            if not isinstance(node, NodeExogenous) or node.out_dim != 1:
-                raise ValueError("The instrument must be a scalar exogenous discrete node.")
-            support = node.support
-            if support.constraint is None or not support.constraint.is_discrete or support.values is None:
-                raise ValueError("The instrument requires enumerated discrete support.")
-            self.levels = support.values.reshape(-1)
-            if len(self.levels) < 2:
-                raise ValueError("The instrument requires at least two declared levels.")
 
     def evaluate(self, observations: DataBatch, **kwargs) -> tuple[ScalarResult, dict]:
         if not isinstance(observations, DataBatch):
@@ -47,32 +33,13 @@ class EnergyLoss(SEM2Operator):
         names = [name for name in observations.names if name in self.model.state_node_names
                  and not self.model.node_specs[name].is_helper]
         outcomes = observations.subset(names)
-        if self.instrument is None:
-            prediction, _ = self.model.sample(batch_size=self.bs)
-            return self.discrete_loss.energy_dist(outcomes, prediction)
-
-        instrument = observations.subset(self.instrument)
-        if instrument.values.shape[1] != 1:
-            raise ValueError("The instrument must be scalar.")
-        z = instrument.values[:, 0]
-        total = observations.values.new_zeros((), dtype=torch.float32)
-        metrics = {}
-        # Group valid instrument values once; the kernel checks each group's size.
-        for level in self.levels:
-            group = outcomes[z == level]
-            intervention = DataBatch(level.expand(self.bs, 1), instrument.variables)
-            prediction, _ = self.model.sample(batch_size=self.bs, set_nodes=intervention)
-            result, details = self.discrete_loss.energy_dist(group, prediction)
-            weight = len(group) / len(observations)
-            total = total + weight * result.value
-            for name, value in details.items():
-                metrics[name] = metrics.get(name, 0) + weight * value
-        return ScalarResult(total, "energy_distance", outcomes.variables), metrics
+        prediction, _ = self.model.sample(batch_size=self.bs)
+        return self.discrete_loss.energy_dist(outcomes, prediction)
 
     def _energy_score(self, observations: DataBatch, prediction: DataBatch) -> tuple[ScalarResult, dict]:
         """Compare observations [N, D] with named draws [M, D], allowing N != M."""
-        targets = _numeric_values(observations)
-        draws = _numeric_values(DataBatch(prediction.select(observations.names), observations.variables)).to(targets)
+        targets = _apply_numeric_mapping(observations)
+        draws = _apply_numeric_mapping(DataBatch(prediction.select(observations.names), observations.variables)).to(targets)
         n = draws.shape[0]
         if not len(observations) or n < 2:
             raise ValueError("Energy score requires observations and at least two model draws.")
@@ -91,7 +58,7 @@ class EnergyLoss(SEM2Operator):
 class MeanPotentialOutcome(SEM2Operator):
     """Mean of a scalar outcome under a named intervention.
 
-    Supply outcome metadata to interpret categories using explicit scores.
+    Supply outcome metadata to interpret categories using an explicit numeric mapping.
     Otherwise the existing code-valued mean is retained with a warning.
     """
     input_type = OperatorInput.SELF
@@ -109,19 +76,19 @@ class MeanPotentialOutcome(SEM2Operator):
         if model.node_dict[intervene_node].out_dim != 1:
             raise ValueError("MeanPotentialOutcome requires a scalar intervention node.")
         if SEMType.is_continuous(model.sem_type):
-            self.sampler = PotentialOutcome(model, target_node)
+            self.sampler = PotentialOutcomeSample(model, target_node)
 
     def evaluate(self, set_value: DataBatch, **kwargs) -> tuple[ScalarResult, dict]:
         if not isinstance(set_value, DataBatch) or set_value.names != (self.intervene_node,):
             raise TypeError("set_value must be a DataBatch containing the intervention variable.")
         if SEMType.is_continuous(self.model.sem_type):
             draws, details = self.sampler.evaluate(batch_size=len(set_value), set_nodes=set_value)
-            value = _numeric_values(DataBatch(draws.values, (self.variable,))).mean()
+            value = _apply_numeric_mapping(DataBatch(draws.values, (self.variable,))).mean()
         else:
             prediction, details = self.model.sample(batch_size=len(set_value), set_nodes=set_value)
             prediction = prediction.marginalize([self.target_node])
             states = DataBatch(prediction.states.values, (self.variable,))
-            numeric = _numeric_values(states)[:, 0].to(prediction.probabilities)
+            numeric = _apply_numeric_mapping(states)[:, 0].to(prediction.probabilities)
             value = (prediction.probabilities @ numeric).mean()
         return ScalarResult(value, "mean_potential_outcome", (self.variable,)), details
 

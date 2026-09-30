@@ -36,9 +36,7 @@ FORMULA = (
     "y1 <- dem60 + ey1 + e15; y2 <- dem60 + ey2 + e24 + e26;"
     "y3 <- dem60 + ey3 + e37; y4 <- dem60 + ey4 + e24 + e48;"
     "y5 <- dem65 + ey5 + e15; y6 <- dem65 + ey6 + e26 + e68;"
-    "y7 <- dem65 + ey7 + e37; y8 <- dem65 + ey8 + e48 + e68;"
-    "unobs(ex1,ex2,ex3,ey1,ey2,ey3,ey4,ey5,ey6,ey7,ey8,edem60,edem65,"
-    "e15,e24,e26,e37,e48,e68,ind60,dem60,dem65)"
+    "y7 <- dem65 + ey7 + e37; y8 <- dem65 + ey8 + e48 + e68"
 )
 OBS = ["x1", "x2", "x3", "y1", "y2", "y3", "y4", "y5", "y6", "y7", "y8"]
 
@@ -97,11 +95,11 @@ class TestPoliticalDemocracy:
     def test_model_is_linear_gaussian(self):
         m = SEM2Linear(FORMULA)
         assert m.inferred_sem_type == SEMType.LINEAR_GAUSSIAN
-        assert m.observed_vars == OBS
+        assert set(OBS).issubset(m.input_node)
 
     def test_cov_matrix_symmetric_and_pd(self):
         m = SEM2Linear(FORMULA)
-        sigma = m.cov_matrix(m.observed_vars).detach()
+        sigma = m.cov_matrix(OBS).detach()
         assert sigma.shape == (len(OBS), len(OBS))
         assert torch.allclose(sigma, sigma.T, atol=1e-5)
         # Cholesky succeeds iff positive definite.

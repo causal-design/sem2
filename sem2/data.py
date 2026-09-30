@@ -16,26 +16,26 @@ if TYPE_CHECKING:
 class VariableInfo:
     """Column meaning, separate from node support.
 
-    encoding maps external labels to stored codes; scores maps those labels
-    (or stored values without an encoding) to explicitly supplied numeric scores.
+    encoding maps external labels to stored codes; numeric_mapping maps those labels
+    (or stored values without an encoding) to explicitly supplied numeric values.
     width preserves existing low-level vector nodes, not vector DataFrame cells.
     """
     name: str
     width: int = 1
     categorical: bool | None = None
     encoding: dict | None = None
-    scores: dict | None = None
+    numeric_mapping: dict | None = None
 
 
 @dataclass
 class DataBatch:
-    """Rows of values with shared metadata in column order."""
+    """Rows with ordered metadata; strings create scalar VariableInfo defaults."""
     values: torch.Tensor
-    variables: tuple[VariableInfo, ...]
+    variables: tuple[VariableInfo | str, ...] | list[VariableInfo | str]
 
     def __post_init__(self):
         """Keep ordered metadata and check alignment so named selection cannot mislabel columns."""
-        self.variables = tuple(self.variables)
+        self.variables = tuple(VariableInfo(v) if isinstance(v, str) else v for v in self.variables)
         if not isinstance(self.values, torch.Tensor) or self.values.ndim != 2:
             raise ValueError("DataBatch values must be a two-dimensional tensor.")
         if any(not isinstance(v.name, str) or not v.name or not isinstance(v.width, int) or v.width < 1
@@ -189,7 +189,7 @@ def _validate_column(
     variable: VariableInfo,
     support: RandomVariableSupport,
 ) -> None:
-    """Check original numeric values, encoding codes and score coverage before dtype conversion."""
+    """Check original values, encoding codes and numeric mapping coverage before conversion."""
     name = variable.name
     if not torch.isfinite(value).all() or (
         support.constraint is not None and not support.constraint.check(value).all()
@@ -199,22 +199,22 @@ def _validate_column(
         codes = value.new_tensor(list(variable.encoding.values()))
         if not support.constraint.check(codes).all():
             raise ValueError(f"Encoding codes outside the declared domain of {name!r}.")
-    if variable.scores is None:
+    if variable.numeric_mapping is None:
         return
 
     labels = variable.encoding if variable.encoding is not None else series.unique().tolist()
-    missing = set(labels) - variable.scores.keys()
+    missing = set(labels) - variable.numeric_mapping.keys()
     if missing:
-        raise ValueError(f"Scores are missing labels for {name!r}: {sorted(missing, key=repr)}")
-    scores = value.new_tensor(list(variable.scores.values()))
-    if not torch.isfinite(scores).all():
-        raise ValueError(f"Scores for {name!r} must be finite.")
+        raise ValueError(f"Numeric mapping is missing labels for {name!r}: {sorted(missing, key=repr)}")
+    mapped = value.new_tensor(list(variable.numeric_mapping.values()))
+    if not torch.isfinite(mapped).all():
+        raise ValueError(f"Numeric mapping for {name!r} must be finite.")
     if support.values is not None:
-        scored_codes = {variable.encoding[label] if variable.encoding is not None else label
-                        for label in variable.scores}
-        missing = set(support.values.tolist()) - scored_codes
+        mapped_codes = {variable.encoding[label] if variable.encoding is not None else label
+                        for label in variable.numeric_mapping}
+        missing = set(support.values.tolist()) - mapped_codes
         if missing:
-            raise ValueError(f"Scores are missing declared states of {name!r}: {sorted(missing, key=repr)}")
+            raise ValueError(f"Numeric mapping is missing declared states of {name!r}: {sorted(missing, key=repr)}")
 
 
 def prepare_data(
@@ -228,7 +228,7 @@ def prepare_data(
     Metadata uses normalized model names. Numeric columns contain stored values;
     pandas categorical columns contain labels, with declared category order used
     for default encoding. Other label columns require an explicit encoding.
-    Supplied scores are preserved, not applied or inferred here.
+    Supplied numeric mappings are preserved, not applied or inferred here.
 
     Rows missing any supplied variable are dropped and counted in the report.
     Observation status belongs to this batch, not the structural graph.

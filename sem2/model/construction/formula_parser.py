@@ -2,9 +2,8 @@
 
 FormulaParser turns a formula string into an AST (see sem_ast), validates it,
 and lowers it to NodeSpec objects. This is the natural home for everything that
-knows about the *surface syntax* of the language, including which distributions
-exist and which nodes are declared hidden via unobs(...) — so _DAG can stay a
-pure graph structure with no pytorch knowledge.
+knows about the *surface syntax* of the language and available distributions,
+so _DAG can stay a pure graph structure with no pytorch knowledge.
 """
 from __future__ import annotations
 import re
@@ -104,8 +103,6 @@ class FormulaParser:
     def __init__(self, model_formula: str):
         self.model_formula = model_formula
         self.statements: list[Statement] = []
-        self.unobserved_vars: list[str] = []
-        self._unobserved_declared = False
 
     def parse(self) -> tuple[dict[str, NodeSpec], set[str]]:
         """Parse the formula, returning (node_specs, input_node).
@@ -116,7 +113,9 @@ class FormulaParser:
         formula_list, input_node = self._parse_formula(self.model_formula)
         self.statements = [self._parse_statement(f) for f in formula_list]
         node_specs = {st.name: self._lower(st) for st in self.statements}
-        self._validate_unobserved_vars(node_specs)
+        for spec in node_specs.values():
+            if len(set(spec.predecessors)) != len(spec.predecessors):
+                raise ValueError(f"Repeated parent in equation for {spec.name!r}.")
         return node_specs, input_node
 
     # ── Statement parsing (string -> AST) ─────────────────────────────────────
@@ -282,9 +281,6 @@ class FormulaParser:
         for formula in formula_list:
             if ":" in formula:
                 raise ValueError("':' is reserved for internal helper names.")
-            if formula.startswith("unobs("):
-                self._parse_unobserved_statement(formula)
-                continue
             vars_, formulas = self._expand_lhs(formula)
             for name in vars_:
                 if not name.isidentifier() or keyword.iskeyword(name):
@@ -299,36 +295,6 @@ class FormulaParser:
             formula_list.extend(self._expand_rhs(formula))
 
         return formula_list, input_node
-
-    def _parse_unobserved_statement(self, formula: str):
-        match = re.match(r"^unobs\((.*)\)$", formula)
-        if match is None:
-            raise ValueError(
-                f"Could not parse unobserved-variable statement: {formula!r}. "
-                "Expected unobs(x1,x2,...)."
-            )
-        body = match.group(1)
-        variables = [] if body == "" else body.split(",")
-        if any(v == "" for v in variables):
-            raise ValueError(
-                f"Could not parse unobserved-variable statement: {formula!r}. "
-                "Expected comma-separated variable names."
-            )
-        seen = set(self.unobserved_vars)
-        duplicates = []
-        for v in variables:
-            if v in seen:
-                duplicates.append(v)
-            seen.add(v)
-        if duplicates:
-            raise ValueError(f"Duplicate unobserved variables: {duplicates}")
-        self._unobserved_declared = True
-        self.unobserved_vars.extend(variables)
-
-    def _validate_unobserved_vars(self, node_specs: dict[str, NodeSpec]):
-        missing = [v for v in self.unobserved_vars if v not in node_specs]
-        if missing:
-            raise ValueError(f"Unobserved variables are not defined in the formula: {missing}")
 
     def _expand_lhs(self, formula: str):
         if "~" in formula:

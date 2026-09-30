@@ -19,6 +19,7 @@ class OperatorInput(StrEnum):
 
 class OperatorOutput(StrEnum):
     SCALAR = "Scalar"   # ScalarResult, retaining gradients
+    MATRIX = "Matrix"   # Tensor with axis metadata in diagnostics
     DATA_BATCH = "DataBatch"
     FINITE_DISTRIBUTION = "FiniteDistribution"
 
@@ -29,34 +30,34 @@ class SEM2Operator(ABC):
     output_type: OperatorOutput
 
     @abstractmethod
-    def evaluate(self, *args, **kwargs) -> tuple[ScalarResult | DataBatch | FiniteDistribution, dict]:
+    def evaluate(self, *args, **kwargs) -> tuple[ScalarResult | DataBatch | FiniteDistribution | torch.Tensor, dict]:
         """Return a typed result and a dictionary of diagnostics."""
 
 
-def _numeric_values(batch: DataBatch) -> torch.Tensor:
-    """Use caller-supplied scores without replacing stored category identities.
+def _apply_numeric_mapping(batch: DataBatch) -> torch.Tensor:
+    """Apply numeric mappings without replacing stored category identities.
 
-    Score mappings are assumed complete; unmapped values propagate as NaN.
+    Mappings are assumed complete; unmapped values propagate as NaN.
     """
     columns = []
     blocks = batch.values.split([v.width for v in batch.variables], dim=-1)
     for variable, values in zip(batch.variables, blocks):
         if not values.is_floating_point():
             values = values.float()
-        if variable.scores is not None:
+        if variable.numeric_mapping is not None:
             if variable.width != 1:
-                raise ValueError("Category scores require scalar variables.")
-            scored = torch.full_like(values, float("nan"))
-            for label, score in variable.scores.items():
+                raise ValueError("Numeric mappings require scalar variables.")
+            mapped = torch.full_like(values, float("nan"))
+            for label, value in variable.numeric_mapping.items():
                 code = variable.encoding[label] if variable.encoding is not None else label
                 mask = values == code
-                scored = torch.where(mask, score, scored)
+                mapped = torch.where(mask, value, mapped)
 
-            values = scored
+            values = mapped
         elif variable.categorical:
             warnings.warn(
                 f"Using stored category codes numerically for {variable.name!r}; "
-                "supply explicit scores or use category-probability contrasts.",
+                "supply a numeric mapping or use category-probability contrasts.",
                 stacklevel=3,
             )
         columns.append(values)
