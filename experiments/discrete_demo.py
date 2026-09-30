@@ -3,7 +3,7 @@ import logging
 
 from sem2.model.models import SEM2, SEM2Discrete
 from sem2.default_configs import MLPConfig
-from sem2.data import DataBatch, VariableInfo
+from sem2.data import DataBatch
 
 logging.basicConfig(level=logging.INFO)
 
@@ -20,7 +20,7 @@ model = SEM2(formula1 + formula2, node_cfgs=node_cfgs, device="cpu")
 model.eval()
 
 set_nodes = DataBatch(torch.tensor([[1., 1.], [0., 0.], [2., 0.]]),
-                      (VariableInfo("Z"), VariableInfo("D")))
+                      ["Z", "D"])
 all_states, _ = model.sample(3, set_nodes=set_nodes)
 print(f'{all_states = }')
 
@@ -37,7 +37,7 @@ model = SEM2Discrete(formula1 + formula2, node_cfgs=node_cfgs, device="cpu")
 model.eval()
 
 set_nodes = DataBatch(torch.tensor([[1., 1.], [0., 0.], [2., 0.]]),
-                      (VariableInfo("Z"), VariableInfo("D")))
+                      ["Z", "D"])
 all_states, _ = model.sample(3, set_nodes=set_nodes)
 print("===== Test SEM2 =====")
 print(f'{all_states = }')

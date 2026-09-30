@@ -5,14 +5,14 @@ from ..model.construction import SEMType
 from ..data import DataBatch
 
 
-class PotentialOutcome(SEM2Operator):
+class PotentialOutcomeSample(SEM2Operator):
     """Sample a continuous model, stopping as soon as the target is computed."""
     input_type = OperatorInput.SELF
     output_type = OperatorOutput.DATA_BATCH
 
     def __init__(self, model, target_node: str):
         if not SEMType.is_continuous(model.sem_type):
-            raise NotImplementedError("PotentialOutcome requires a continuous model.")
+            raise NotImplementedError("PotentialOutcomeSample requires a continuous model.")
         if target_node not in model.input_node:
             raise ValueError(f"Unknown or internal target node: {target_node!r}")
         self.model = model

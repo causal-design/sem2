@@ -893,22 +893,21 @@ class TestFormulaParserAST:
         assert specs["y"].coefficients == dag.node_specs["y"].coefficients
         assert specs["y"].predecessors == dag.node_specs["y"].predecessors
 
-    def test_unobs_statement_sets_observed_vars(self):
-        dag = _DAG("e ~ Normal(0,1); x <- e; y <- x; unobs(e)")
-        assert dag.unobserved_vars == ["e"]
-        assert dag.observed_vars == ["x", "y"]
+    def test_graph_has_no_observation_status(self):
+        dag = _DAG("e ~ Normal(0,1); x <- e; y <- x")
+        assert not hasattr(dag, "unobserved_vars")
+        assert not hasattr(dag, "observed_vars")
 
-    def test_unobs_statement_can_be_empty(self):
-        dag = _DAG("e ~ Normal(0,1); x <- e; unobs()")
-        assert dag.unobserved_vars == []
-        assert dag.observed_vars == ["e", "x"]
+    def test_empty_unobs_statement_is_rejected(self):
+        with pytest.raises(ValueError, match="Formula must contain"):
+            _DAG("e ~ Normal(0,1); x <- e; unobs()")
 
     def test_unobs_statement_rejects_unknown_node(self):
-        with pytest.raises(ValueError, match="Unobserved variables"):
+        with pytest.raises(ValueError, match="Formula must contain"):
             _DAG("unobs(z); e ~ Normal(0,1); x <- e")
 
     def test_unobs_statement_rejects_duplicates(self):
-        with pytest.raises(ValueError, match="Duplicate unobserved"):
+        with pytest.raises(ValueError, match="Formula must contain"):
             _DAG("unobs(e,e); e ~ Normal(0,1); x <- e")
 
 
@@ -1185,9 +1184,9 @@ class TestLinearOperators:
         mvn = torch.distributions.MultivariateNormal(torch.zeros(2), Sigma)
         assert ll.value.item() == pytest.approx(mvn.log_prob(data.values).mean().item(), abs=1e-4)
 
-    def test_loglikelihood_uses_formula_observed_vars(self):
+    def test_loglikelihood_uses_batch_observed_vars(self):
         m = SEM2Linear(
-            "e1, ey ~ Normal(0,1); x <- 1*e1; y <- 2*x + 1*ey; unobs(e1,ey)",
+            "e1, ey ~ Normal(0,1); x <- 1*e1; y <- 2*x + 1*ey",
             node_cfgs={"x": LinearNodeConfig(use_bias=False), "y": LinearNodeConfig(use_bias=False)},
         )
         data = self._data(m)
@@ -1195,13 +1194,13 @@ class TestLinearOperators:
         explicit, _ = LogLikelihood(m, ["x", "y"], centered=True).evaluate(data)
         assert implicit.value.item() == pytest.approx(explicit.value.item(), abs=1e-6)
 
-    def test_loglikelihood_requires_observed_vars_without_formula_mapping(self):
+    def test_loglikelihood_rejects_empty_observed_vars(self):
         m = _chain_linear()
-        with pytest.raises(ValueError, match="observed variables"):
-            LogLikelihood(m)
+        with pytest.raises(ValueError, match="observed variable"):
+            LogLikelihood(m, [])
 
     def test_centered_loglikelihood_matches_zero_loc(self):
-        m = SEM2Linear("e ~ Normal(2,1); x <- 1*e; unobs(e)",
+        m = SEM2Linear("e ~ Normal(2,1); x <- 1*e",
                        node_cfgs={"x": LinearNodeConfig(use_bias=False)})
         data = batch(torch.zeros(4, 1), "x")
         centered, _ = LogLikelihood(m, centered=True).evaluate(data)
@@ -1211,7 +1210,7 @@ class TestLinearOperators:
         assert centered.value.item() > model_mean.value.item()
 
     def test_centered_and_loc_are_mutually_exclusive(self):
-        m = SEM2Linear("e ~ Normal(0,1); x <- 1*e; unobs(e)",
+        m = SEM2Linear("e ~ Normal(0,1); x <- 1*e",
                        node_cfgs={"x": LinearNodeConfig(use_bias=False)})
         with pytest.raises(ValueError, match="centered"):
             LogLikelihood(m, centered=True, loc=torch.zeros(1))

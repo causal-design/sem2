@@ -1,7 +1,7 @@
 """Energy calculations for named finite distributions."""
 import torch
 from ..data import DataBatch, FiniteDistribution, ScalarResult
-from .operators_base import _numeric_values
+from .operators_base import _apply_numeric_mapping
 
 
 class DiscreteEnergyLoss:
@@ -44,7 +44,7 @@ class DiscreteEnergyLoss:
         states = prediction.states.values
         # Match stored identities directly, without coercing them to integer indices.
         empirical = (observations.values[:, None, :] == states[None, :, :]).all(-1).to(probabilities)
-        numeric = _numeric_values(DataBatch(states, observations.variables)).to(probabilities)
+        numeric = _apply_numeric_mapping(DataBatch(states, observations.variables)).to(probabilities)
         distances = torch.cdist(numeric, numeric) ** self.p
         cross = empirical.mean(0) @ distances @ probabilities.mean(0)
         pair = self._pair_distance(probabilities, distances)

@@ -96,15 +96,18 @@ def main():
     from .dataloader import DummyDiscreteDataloader
     from .default_configs import MLPConfig
     from .model import SEM2Discrete
+    from .operators.discrete_iv import DiscreteIVEnergyLoss
 
     torch.manual_seed(0)
     logging.basicConfig(level=logging.INFO)
-    cfg = TrainingConfig(device="cpu", epochs=1, sample_bs=32, instrument_node="Z")
+    cfg = TrainingConfig(device="cpu", epochs=1, sample_bs=32)
     model = SEM2Discrete("Z ~ Categorical(probs=[1,1]); X <- d(Z); Y <- d(X)", node_cfgs={
         "X": MLPConfig(hidden_dims=[8], output_dim=2),
         "Y": MLPConfig(hidden_dims=[8], output_dim=2),
     })
-    SEM2Trainer(cfg, model, DummyDiscreteDataloader(2, batch_size=64)).train()
+    trainer = SEM2Trainer(cfg, model, DummyDiscreteDataloader(2, batch_size=64))
+    trainer.loss_fn = SEM2Loss([(DiscreteIVEnergyLoss(cfg, model, instrument="Z"), cfg.energy_score_weight)])
+    trainer.train()
 
 
 if __name__ == "__main__":

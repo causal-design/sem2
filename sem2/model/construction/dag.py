@@ -30,9 +30,6 @@ class _DAG:
         model_formula:     The original formula string.
         input_node:        Set of node names that appear on any LHS.
         statements:        The parsed AST (list of Statement) for downstream tooling.
-        unobserved_vars:   Ordered node names declared by unobs(...), if any.
-        observed_vars:     Topological node order excluding helpers and unobserved_vars when
-                           unobs(...) is declared; empty otherwise.
         node_specs:        Dict of node_name -> NodeSpec. Single source of
                            truth for graph structure : built once, read by SEM2.
         graph:             Dict of node_name -> list of predecessor names.
@@ -57,8 +54,6 @@ class _DAG:
         parser = FormulaParser(model_formula)
         self.node_specs, self.input_node = parser.parse()
         self.statements = parser.statements  # AST, for downstream tooling
-        self.unobserved_vars = list(parser.unobserved_vars)
-        self._unobserved_declared = parser._unobserved_declared
 
         self._validate_referenced_nodes()
 
@@ -80,15 +75,6 @@ class _DAG:
         # (topological order makes coefficient matrices strictly lower-triangular).
         self.node_order: list[str] = list(self.topological_order)
         self._node_index: dict[str, int] = {n: i for i, n in enumerate(self.node_order)}
-
-        if self._unobserved_declared:
-            hidden = set(self.unobserved_vars)
-            self.observed_vars = [
-                n for n in self.topological_order
-                if n not in hidden and not self.node_specs[n].is_helper
-            ]
-        else:
-            self.observed_vars = []
 
         # Infer and store the SEM type from the formula. The desired-vs-inferred
         # comparison (and any warning/error) is handled by the SEM2 layer, which

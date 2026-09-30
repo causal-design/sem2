@@ -23,7 +23,7 @@ class RandomVariableSupport:
     constraint is a PyTorch membership constraint, or None if unknown.
     values is an enumeration with native batch/event dimensions when available;
     None means unenumerated, not necessarily infinite. These are not observations
-    or numerical scores assigned to categories.
+    or numeric mappings assigned to categories.
     """
     constraint: constraints.Constraint | None = None
     values: torch.Tensor | None = None
