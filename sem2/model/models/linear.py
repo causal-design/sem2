@@ -8,6 +8,7 @@ from torch import Tensor
 from ..components.nodes import NodeExogenous, NodeLinear
 from ..construction import SEMType
 from .base import SEM2
+from ...default_configs import LinearNodeConfig, MLPConfig
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -42,7 +43,8 @@ class SEM2Linear(SEM2):
             )
         logging.info("Building a linear SEM2 model.")
 
-    def __init__(self, model_formula: str, node_cfgs: dict | None = None, device="cpu"):
+    def __init__(self, model_formula: str,
+                 node_cfgs: dict[str, int | LinearNodeConfig | MLPConfig] | None = None, device="cpu"):
         super().__init__(model_formula, node_cfgs, device=device)
         self.device = device
 

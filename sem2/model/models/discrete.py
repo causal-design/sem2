@@ -11,6 +11,7 @@ from ..components.nodes import NodeMLPDiscrete, SEM2Node, DiscreteModes
 from ..construction import SEMType
 from .base import SEM2
 from ...data import DataBatch, DiscreteDistribution
+from ...default_configs import LinearNodeConfig, MLPConfig
 
 
 class SEM2Discrete(SEM2):
@@ -30,7 +31,8 @@ class SEM2Discrete(SEM2):
             )
         logging.info("Building a discrete SEM2 model.")
 
-    def __init__(self, model_formula: str, node_cfgs: dict = None, device="cpu"):
+    def __init__(self, model_formula: str,
+                 node_cfgs: dict[str, int | LinearNodeConfig | MLPConfig] | None = None, device="cpu"):
         super().__init__(model_formula, node_cfgs, device=device)
         self.device = device
 

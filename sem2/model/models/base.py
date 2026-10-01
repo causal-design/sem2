@@ -10,7 +10,7 @@ from torch import Tensor
 from ..components.nodes import NodeExogenous, NodeLinear, NodeMLP, NodeMLPDiscrete, SEM2Node
 from ..construction import _DAG, SEMType
 from ...data import DataBatch, VariableInfo
-from ...default_configs import MLPConfig
+from ...default_configs import LinearNodeConfig, MLPConfig
 
 
 # ════════════════════════════════════════════════════════════════════════════════════
@@ -26,7 +26,8 @@ class SEM2(_DAG, nn.Module):
     node_dict: nn.ModuleDict[str, SEM2Node]  # Maps node name to its SEM2Node object, registered as submodule for PyTorch tracking
     sem_type = SEMType.NONLINEAR
 
-    def __init__(self, model_formula: str, node_cfgs:dict|None = None, device="cpu"):
+    def __init__(self, model_formula: str,
+                 node_cfgs: dict[str, int | LinearNodeConfig | MLPConfig] | None = None, device="cpu"):
         """
         Args:
             model_formula: Semicolon-separated formulas defining the SEM.
@@ -79,7 +80,8 @@ class SEM2(_DAG, nn.Module):
                     stacklevel=3,
                 )
 
-    def _build_and_initialize_nodes(self, node_cfgs: dict, device: str) -> dict[str, SEM2Node]:
+    def _build_and_initialize_nodes(self, node_cfgs: dict[str, int | LinearNodeConfig | MLPConfig],
+                                    device: str) -> dict[str, SEM2Node]:
         """Build all SEM2Node objects from DAG.node_specs in topological order.
 
         Because we iterate in topological order, every node's predecessors are

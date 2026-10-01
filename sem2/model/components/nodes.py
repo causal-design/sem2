@@ -270,7 +270,7 @@ class NodeMLP(NodeNonlinear):
         device="cpu",
     ):
         super().__init__(name, rhs, predecessor_nodes, device=device)
-        self.cfg = cfg if cfg is not None else MLPConfig()
+        self.cfg: MLPConfig = cfg if cfg is not None else MLPConfig()
 
         self.cfg.input_dim = self.input_dim
         self.mlp = _MLP(self.cfg, device=device)
@@ -299,9 +299,9 @@ class NodeMLPDiscrete(SEM2Node):
     id: int = 0
     out_dim = 1         # The discrete node outputs 1 value, with n_classes categories.
 
-    def __init__(self, name: str, rhs: str, cfg: MLPConfig, predecessor_nodes: list[SEM2Node], mode=None, device="cpu"):
+    def __init__(self, name: str, rhs: str, cfg: MLPConfig | None, predecessor_nodes: list[SEM2Node], mode=None, device="cpu"):
         super().__init__(name, rhs, predecessor_nodes, device=device)
-        self.cfg = cfg if cfg is not None else MLPConfig()
+        self.cfg: MLPConfig = cfg if cfg is not None else MLPConfig()
 
         cfg = self.cfg
         cfg.input_dim = self.input_dim

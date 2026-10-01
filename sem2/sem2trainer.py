@@ -13,7 +13,7 @@ from .utils import set_seed
 logger = logging.getLogger(__name__)
 
 
-def get_optimiser(model: nn.Module, cfg) -> torch.optim.Optimizer:
+def get_optimiser(model: nn.Module, cfg: TrainingConfig) -> torch.optim.Optimizer:
     if cfg.optim == "AdamW":
         return torch.optim.AdamW(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
     elif cfg.optim == "Adam":
@@ -33,7 +33,7 @@ class SEM2Trainer:
             ds: Iterable dataset to train on. Each element should be a batch of data.
         """
 
-        self.cfg = cfg
+        self.cfg: TrainingConfig = cfg
         self.sem = sem
         self.ds = ds
         self.device = cfg.device
