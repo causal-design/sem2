@@ -74,7 +74,7 @@ class SEM2Node(RandomVariable, ABC, nn.Module):
     out_dim: int
     predecessors: list[str]
 
-    def __init__(self, name: str, rhs: str, predecessor_nodes: list[SEM2Node], device="cpu"):
+    def __init__(self, name: str, rhs: str, predecessor_nodes: list[SEM2Node], device: str | torch.device = "cpu") -> None:
         super().__init__()
         self.name = name
         self.rhs = rhs
@@ -87,23 +87,23 @@ class SEM2Node(RandomVariable, ABC, nn.Module):
         # Number of input variables.
         self.input_dim = sum(p.out_dim for p in predecessor_nodes)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f'SEM2Node: {self.formula}'
 
-    def set_value(self, value: torch.Tensor):
+    def set_value(self, value: torch.Tensor) -> None:
         self.value = value
 
     def get_value(self) -> torch.Tensor:
         return self.value
 
-    def reset_value(self):
+    def reset_value(self) -> None:
         self.value = None
 
     def _collate_fn(self, x: list[torch.Tensor]) -> torch.Tensor:
         """Concatenate predecessor values along the last dimension."""
         return torch.cat(x, dim=-1)
 
-    def forward(self, x: list[torch.Tensor], batch_size: int = 1, **kwargs):
+    def forward(self, x: list[torch.Tensor], batch_size: int = 1, **kwargs) -> torch.Tensor:
         self.value = self._forward_inner(x, batch_size=batch_size, **kwargs)
         return self.value
 
@@ -129,8 +129,8 @@ class NodeExogenous(SEM2Node):
         rhs: str,
         dist: Distribution,
         out_dim: int = 1,
-        device="cpu",
-    ):
+        device: str | torch.device = "cpu",
+    ) -> None:
         super().__init__(name, rhs, predecessor_nodes=[], device=device)
         self.out_dim = out_dim
         self.dist = dist
@@ -146,7 +146,7 @@ class NodeEndogenous(SEM2Node, ABC):
     An endogenous node is a deterministic function of its parent nodes.
     """
 
-    def __init__(self, name: str, rhs: str, predecessor_nodes: list['SEM2Node'], device="cpu"):
+    def __init__(self, name: str, rhs: str, predecessor_nodes: list['SEM2Node'], device: str | torch.device = "cpu") -> None:
         super().__init__(name, rhs, predecessor_nodes, device=device)
 
 
@@ -177,9 +177,9 @@ class NodeLinear(NodeEndogenous):
         coefficients: list[float | None],
         cfg: LinearNodeConfig | None,
         predecessor_nodes: list[SEM2Node],
-        device="cpu",
+        device: str | torch.device = "cpu",
         intercept: float | None = None,
-    ):
+    ) -> None:
         super().__init__(name, rhs, predecessor_nodes, device=device)
         self.out_dim = cfg.output_dim if cfg is not None else 1
         self.use_intercept = cfg.use_intercept if cfg is not None else True
@@ -245,7 +245,7 @@ class NodeNonlinear(NodeEndogenous, ABC):
     Subclass this to plug in a different linking function (e.g. GP, spline).
     """
 
-    def __init__(self, name: str, rhs: str, predecessor_nodes: list[SEM2Node], device="cpu"):
+    def __init__(self, name: str, rhs: str, predecessor_nodes: list[SEM2Node], device: str | torch.device = "cpu") -> None:
         super().__init__(name, rhs, predecessor_nodes, device=device)
 
     @abstractmethod
@@ -267,8 +267,8 @@ class NodeMLP(NodeNonlinear):
         rhs: str,
         cfg: MLPConfig | None,
         predecessor_nodes: list[SEM2Node],
-        device="cpu",
-    ):
+        device: str | torch.device = "cpu",
+    ) -> None:
         super().__init__(name, rhs, predecessor_nodes, device=device)
         self.cfg: MLPConfig = cfg if cfg is not None else MLPConfig()
 
@@ -299,7 +299,7 @@ class NodeMLPDiscrete(SEM2Node):
     id: int = 0
     out_dim = 1         # The discrete node outputs 1 value, with n_classes categories.
 
-    def __init__(self, name: str, rhs: str, cfg: MLPConfig | None, predecessor_nodes: list[SEM2Node], mode=None, device="cpu"):
+    def __init__(self, name: str, rhs: str, cfg: MLPConfig | None, predecessor_nodes: list[SEM2Node], mode=None, device: str | torch.device = "cpu") -> None:
         super().__init__(name, rhs, predecessor_nodes, device=device)
         self.cfg: MLPConfig = cfg if cfg is not None else MLPConfig()
 

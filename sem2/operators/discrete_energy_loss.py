@@ -13,12 +13,12 @@ class DiscreteEnergyLoss:
     not rechecked here on each evaluation.
     """
 
-    def __init__(self, p: float, unbiased=True):
+    def __init__(self, p: float, unbiased: bool = True) -> None:
         """Set the distance power and whether to exclude same-draw pairs."""
         self.p = p
         self.unbiased = unbiased
 
-    def _validate(self, observations, prediction, observed_pairs=False):
+    def _validate(self, observations: DataBatch, prediction: DiscreteDistribution, observed_pairs: bool = False) -> None:
         """Check sizes only, avoiding empty means and zero pair denominators."""
         n, m = len(observations), prediction.probabilities.shape[0]
         if not observations.variables or n < 1 or m < 1:
@@ -26,7 +26,7 @@ class DiscreteEnergyLoss:
         if self.unbiased and (m < 2 or (observed_pairs and n < 2)):
             raise ValueError("Unbiased pair distances require at least two rows.")
 
-    def _pair_distance(self, probabilities, distances):
+    def _pair_distance(self, probabilities: torch.Tensor, distances: torch.Tensor) -> torch.Tensor:
         """Average pair distance for probabilities [M, S] and distances [S, S].
 
         The uncorrected term is mean(p).T @ D @ mean(p). Multiply by M*M
@@ -43,7 +43,9 @@ class DiscreteEnergyLoss:
             pair = (pair * n * n - diagonal.sum()) / (n * (n - 1))
         return pair
 
-    def _energy_components(self, observations: DataBatch, prediction: DiscreteDistribution):
+    def _energy_components(
+        self, observations: DataBatch, prediction: DiscreteDistribution,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """Return scalar cross/pair distances, empirical rows [N, S] and distances [S, S]."""
         # Sum over unobserved state coordinates and align the remainder by name.
         prediction = prediction.marginalize(observations.names)

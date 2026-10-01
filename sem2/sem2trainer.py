@@ -25,7 +25,7 @@ def get_optimiser(model: nn.Module, cfg: TrainingConfig) -> torch.optim.Optimize
 
 
 class SEM2Trainer:
-    def __init__(self, cfg: TrainingConfig, sem: SEM2, ds: Iterable):
+    def __init__(self, cfg: TrainingConfig, sem: SEM2, ds: Iterable[DataBatch]) -> None:
         """ Trainer class. Handles training a SEM2 model.
         Args:
             cfg: TrainingConfig object containing training configuration.
@@ -49,7 +49,7 @@ class SEM2Trainer:
         self.loss_fn = SEM2Loss(components)
         self.optim = get_optimiser(sem, cfg)
 
-    def train(self):
+    def train(self) -> None:
         """ Train the model. """
         cfg = self.cfg
 
@@ -71,7 +71,7 @@ class SEM2Trainer:
             average_loss = torch.stack(losses).mean().item()
             logger.info(f'{average_loss=:.4g}')
 
-    def _fit_batch(self, batch):
+    def _fit_batch(self, batch: DataBatch) -> tuple[torch.Tensor, dict]:
         """ Fit model on a single batch.
             Includes making predictions, calculating gradients, and updating model parameters.
         """
@@ -93,7 +93,7 @@ class SEM2Trainer:
         return loss, loss_metrics
 
 
-def main():
+def main() -> None:
     from .dataloader import DummyDiscreteDataloader
     from .default_configs import MLPConfig
     from .model import SEM2Discrete

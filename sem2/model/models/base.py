@@ -27,7 +27,7 @@ class SEM2(_DAG, nn.Module):
     sem_type = SEMType.NONLINEAR
 
     def __init__(self, model_formula: str,
-                 node_cfgs: dict[str, int | LinearNodeConfig | MLPConfig] | None = None, device="cpu"):
+                 node_cfgs: dict[str, int | LinearNodeConfig | MLPConfig] | None = None, device: str | torch.device = "cpu") -> None:
         """
         Args:
             model_formula: Semicolon-separated formulas defining the SEM.
@@ -55,7 +55,7 @@ class SEM2(_DAG, nn.Module):
         self.node_dict = nn.ModuleDict(name_to_node)
         self.node_dict.to(device)
 
-    def _check_sem_type(self):
+    def _check_sem_type(self) -> None:
         """Warn if the formula's inferred sem_type differs from the sem_type this
         class is specialised for, nudging the user toward a more suitable SEM2
         subclass. Subclasses (e.g. SEM2Discrete, SEM2Linear) may override this to
@@ -81,7 +81,7 @@ class SEM2(_DAG, nn.Module):
                 )
 
     def _build_and_initialize_nodes(self, node_cfgs: dict[str, int | LinearNodeConfig | MLPConfig],
-                                    device: str) -> dict[str, SEM2Node]:
+                                    device: str | torch.device) -> dict[str, SEM2Node]:
         """Build all SEM2Node objects from DAG.node_specs in topological order.
 
         Because we iterate in topological order, every node's predecessors are

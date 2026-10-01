@@ -59,7 +59,7 @@ class DistributionRegistry:
     the language frontend rather than scattered through node construction.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         import torch.distributions as D
 
         self._names = {
@@ -73,7 +73,7 @@ class DistributionRegistry:
     def __contains__(self, name: str) -> bool:
         return name in self._names
 
-    def validate(self, name: str):
+    def validate(self, name: str) -> None:
         """Raise ValueError (with a typo suggestion if possible) for an unknown name."""
         if name not in self._names:
             suggestion = difflib.get_close_matches(name, self._names, n=1)
@@ -100,7 +100,7 @@ class FormulaParser:
     formula), which downstream tooling (interventions, queries) can build on.
     """
 
-    def __init__(self, model_formula: str):
+    def __init__(self, model_formula: str) -> None:
         self.model_formula = model_formula
         self.statements: list[Statement] = []
 
@@ -278,7 +278,7 @@ class FormulaParser:
 
     # ── Formula parsing ───────────────────────────────────────────────────────
 
-    def _parse_formula(self, model_formula: str):
+    def _parse_formula(self, model_formula: str) -> tuple[list[str], set[str]]:
         # Semicolons inside d(...; levels=N) belong to that mechanism, not the statement list.
         formula_list = self._split_rhs(re.sub(r"\s+", "", model_formula), ";")
 
@@ -302,7 +302,7 @@ class FormulaParser:
 
         return formula_list, input_node
 
-    def _expand_lhs(self, formula: str):
+    def _expand_lhs(self, formula: str) -> tuple[list[str], list[str]]:
         if "~" in formula:
             sep = "~"
         elif "<-" in formula:
@@ -314,7 +314,7 @@ class FormulaParser:
         variables = lhs.split(",")
         return variables, [var + sep + rhs for var in variables]
 
-    def _split_rhs(self, rhs: str, sep: str):
+    def _split_rhs(self, rhs: str, sep: str) -> list[str]:
         """Split outside parentheses, retaining minus signs in additive terms."""
         rhs = rhs.replace(" ", "")
         terms, current, depth = [], "", 0
@@ -340,7 +340,7 @@ class FormulaParser:
             terms.append(current)
         return terms
 
-    def _expand_rhs(self, formula: str):
+    def _expand_rhs(self, formula: str) -> list[str]:
         formula = formula.replace(" ", "")
 
         if "~" in formula:

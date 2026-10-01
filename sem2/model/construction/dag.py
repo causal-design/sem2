@@ -45,7 +45,7 @@ class _DAG:
     # re-exported here for convenience.
     NodeSpec = NodeSpec
 
-    def __init__(self, model_formula: str):
+    def __init__(self, model_formula: str) -> None:
         self.model_formula = model_formula
 
         # Parse the formula into lowered NodeSpec objects. All surface-syntax
@@ -88,7 +88,7 @@ class _DAG:
         nodes = nodes if nodes is not None else self.node_order
         return [self._node_index[n] for n in nodes]
 
-    def _validate_referenced_nodes(self):
+    def _validate_referenced_nodes(self) -> None:
         defined = set(self.node_specs)
         referenced = {
             parent

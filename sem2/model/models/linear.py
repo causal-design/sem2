@@ -31,7 +31,7 @@ class SEM2Linear(SEM2):
     """
     sem_type = SEMType.LINEAR
 
-    def _check_sem_type(self):
+    def _check_sem_type(self) -> None:
         """A linear SEM requires only linear endogenous mechanisms. Validate
         against the type inferred from the formula (LINEAR or LINEAR_GAUSSIAN),
         rejecting nonlinear/discrete formulas up front.
@@ -44,7 +44,7 @@ class SEM2Linear(SEM2):
         logging.info("Building a linear SEM2 model.")
 
     def __init__(self, model_formula: str,
-                 node_cfgs: dict[str, int | LinearNodeConfig | MLPConfig] | None = None, device="cpu"):
+                 node_cfgs: dict[str, int | LinearNodeConfig | MLPConfig] | None = None, device: str | torch.device = "cpu") -> None:
         super().__init__(model_formula, node_cfgs, device=device)
         self.device = device
 
@@ -54,7 +54,7 @@ class SEM2Linear(SEM2):
 
     # ── helpers ───────────────────────────────────────────────────────────────
 
-    def _assert_scalar_nodes(self):
+    def _assert_scalar_nodes(self) -> None:
         """coef_matrix / cov_matrix assume every node is scalar (out_dim == 1)."""
         bad = [n for n in self.node_order if self.node_dict[n].out_dim != 1]
         if bad:

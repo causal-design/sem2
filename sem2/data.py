@@ -1,6 +1,7 @@
 """Small records shared by loaders, samplers and operators."""
 from __future__ import annotations
 from dataclasses import dataclass, replace
+from collections.abc import Iterable
 import keyword
 from numbers import Integral
 from typing import TYPE_CHECKING
@@ -33,7 +34,7 @@ class DataBatch:
     values: torch.Tensor
     variables: tuple[VariableInfo | str, ...] | list[VariableInfo | str]
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Keep ordered metadata and check alignment so named selection cannot mislabel columns."""
         self.variables = tuple(VariableInfo(v) if isinstance(v, str) else v for v in self.variables)
         if not isinstance(self.values, torch.Tensor) or self.values.ndim != 2:
@@ -50,10 +51,10 @@ class DataBatch:
     def names(self) -> tuple[str, ...]:
         return tuple(v.name for v in self.variables)
 
-    def __len__(self):
+    def __len__(self) -> int:
         return self.values.shape[0]
 
-    def select(self, names) -> torch.Tensor:
+    def select(self, names: str | Iterable[str]) -> torch.Tensor:
         """Select whole variable blocks in the requested order."""
         names = (names,) if isinstance(names, str) else tuple(names)
         if len(set(names)) != len(names):
@@ -68,7 +69,7 @@ class DataBatch:
             raise ValueError(f"Unknown variables: {sorted(missing)}")
         return self.values[:, [i for name in names for i in columns[name]]]
 
-    def subset(self, names) -> DataBatch:
+    def subset(self, names: str | Iterable[str]) -> DataBatch:
         names = (names,) if isinstance(names, str) else tuple(names)
         variables = dict(zip(self.names, self.variables))
         values = self.select(names)
@@ -99,7 +100,7 @@ class DiscreteDistribution:
     states: DataBatch
     probabilities: torch.Tensor
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Check that probability columns index the state table on the same device."""
         if not isinstance(self.states, DataBatch):
             raise TypeError("states must be a DataBatch.")
@@ -112,7 +113,7 @@ class DiscreteDistribution:
         probabilities = self.probabilities.to(*args, **kwargs)
         return DiscreteDistribution(self.states.to(device=probabilities.device), probabilities)
 
-    def marginalize(self, names) -> DiscreteDistribution:
+    def marginalize(self, names: str | Iterable[str]) -> DiscreteDistribution:
         """Combine equal projected states; retain the exogenous-draw axis."""
         states = self.states.subset(names)
         if states.values.shape[1] == 0:
@@ -132,7 +133,7 @@ class ScalarResult:
     name: str
     variables: tuple[VariableInfo, ...] = ()
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Require one tensor-valued quantity without detaching its gradient graph."""
         if not isinstance(self.value, torch.Tensor) or self.value.ndim != 0:
             raise ValueError("ScalarResult value must be a scalar tensor.")

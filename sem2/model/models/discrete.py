@@ -19,7 +19,7 @@ class SEM2Discrete(SEM2):
     node_dict: nn.ModuleDict[str, SEM2Node]  # Maps node name to its SEM2Node object, registered as submodule for PyTorch tracking
     sem_type = SEMType.DISCRETE
 
-    def _check_sem_type(self):
+    def _check_sem_type(self) -> None:
         """A discrete SEM requires discrete endogenous nodes. Validate against the
         type inferred from the formula (not the class's desired type) so a non-
         discrete formula is rejected up front rather than failing later in sampling.
@@ -32,7 +32,7 @@ class SEM2Discrete(SEM2):
         logging.info("Building a discrete SEM2 model.")
 
     def __init__(self, model_formula: str,
-                 node_cfgs: dict[str, int | LinearNodeConfig | MLPConfig] | None = None, device="cpu"):
+                 node_cfgs: dict[str, int | LinearNodeConfig | MLPConfig] | None = None, device: str | torch.device = "cpu") -> None:
         super().__init__(model_formula, node_cfgs, device=device)
         self.device = device
 
