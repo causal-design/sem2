@@ -19,7 +19,7 @@ class EnergyLoss(SEM2Operator):
     input_type = OperatorInput.DATA
     output_type = OperatorOutput.SCALAR
 
-    def __init__(self, cfg: TrainingConfig, model):
+    def __init__(self, cfg: TrainingConfig, model: SEM2) -> None:
         self.model = model
         self.device = cfg.device
         self.bs = cfg.sample_bs
@@ -59,7 +59,7 @@ class EnergyLoss(SEM2Operator):
             "energy_score": value, "estimated-true distance": cross, "estimated-estimated distance": pair
         }
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return "EnergyLoss"
 
 
@@ -120,7 +120,7 @@ class ATE(SEM2Operator):
     input_type = OperatorInput.SELF
     output_type = OperatorOutput.SCALAR
 
-    def __init__(self, cfg: TrainingConfig, model, variable: VariableInfo | None = None):
+    def __init__(self, cfg: TrainingConfig, model: SEM2, variable: VariableInfo | None = None) -> None:
         self.model = model
         # Fixed 1-versus-0 treatment contrast, not a general multilevel effect.
         # An explicit seed pairs the exogenous draws; otherwise use the current stream.
@@ -136,7 +136,7 @@ class ATE(SEM2Operator):
             "control": control["interventions"], "treatment": treatment["interventions"]
         }
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return "ATE"
 
 

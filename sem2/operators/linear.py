@@ -25,7 +25,7 @@ class SEM2LinearModelOperator(SEM2Operator):
     not "a linear operator".
     """
 
-    def __init__(self, model: SEM2Linear, observed_vars: list[str] | None = None):
+    def __init__(self, model: SEM2Linear, observed_vars: list[str] | None = None) -> None:
         inferred_type = getattr(model, "inferred_sem_type", None)
 
         if not isinstance(model, SEM2Linear):
@@ -68,7 +68,7 @@ class SEM2LinearModelOperator(SEM2Operator):
         self.observed_vars = vars_
 
 
-def _check_observation_shape(observations: torch.Tensor, n_vars: int, operator_name: str):
+def _check_observation_shape(observations: torch.Tensor, n_vars: int, operator_name: str) -> None:
     if observations.ndim != 2:
         raise ValueError(
             f"{operator_name} expects observations with shape [n, p]; "
@@ -108,7 +108,7 @@ class LogLikelihood(SEM2LinearModelOperator):
         observed_vars: list[str] | None = None,
         loc: torch.Tensor | None = None,
         centered: bool = False,
-    ):
+    ) -> None:
         super().__init__(model, observed_vars)
         if centered and loc is not None:
             raise ValueError("Pass either centered=True or loc=..., not both.")
@@ -184,7 +184,7 @@ class LogLikelihood(SEM2LinearModelOperator):
             "log_likelihood": ll.detach(), "log_likelihood_sum": log_probs.sum().detach()
         }
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return "LogLikelihood"
 
 
@@ -234,7 +234,7 @@ class WeightedFrobeniusDistance(SEM2Operator):
             "weighted_frobenius_distance": loss.detach()
         }
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return "WeightedFrobeniusDistance"
 
 
@@ -249,5 +249,5 @@ class PathAnalysis(SEM2LinearModelOperator):
             "enumeration still need to be designed."
         )
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return "PathAnalysis"

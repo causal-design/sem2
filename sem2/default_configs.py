@@ -38,7 +38,7 @@ class MLPConfig:
     dropout: float = 0.0                                                    # 0 = no dropout
     activation: str = "relu"                                                # relu | tanh | sigmoid | ... https://docs.pytorch.org/docs/2.12/nn.html
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Copy layer widths so this config does not share the caller's mutable list."""
         self.hidden_dims = list(self.hidden_dims)
 
