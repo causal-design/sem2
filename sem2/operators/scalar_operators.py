@@ -8,6 +8,7 @@ from .discrete_energy_loss import DiscreteEnergyLoss
 from ..model.construction.sem_types import SEMType
 from ..data import DataBatch, ScalarResult, VariableInfo
 from ..utils import set_seed
+from ..default_configs import TrainingConfig
 
 if TYPE_CHECKING:
     from ..model.models.base import SEM2
@@ -18,7 +19,7 @@ class EnergyLoss(SEM2Operator):
     input_type = OperatorInput.DATA
     output_type = OperatorOutput.SCALAR
 
-    def __init__(self, cfg, model):
+    def __init__(self, cfg: TrainingConfig, model):
         self.model = model
         self.device = cfg.device
         self.bs = cfg.sample_bs
@@ -119,7 +120,7 @@ class ATE(SEM2Operator):
     input_type = OperatorInput.SELF
     output_type = OperatorOutput.SCALAR
 
-    def __init__(self, cfg, model, variable: VariableInfo | None = None):
+    def __init__(self, cfg: TrainingConfig, model, variable: VariableInfo | None = None):
         self.model = model
         # Fixed 1-versus-0 treatment contrast, not a general multilevel effect.
         # An explicit seed pairs the exogenous draws; otherwise use the current stream.

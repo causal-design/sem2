@@ -38,7 +38,7 @@ class _LinearModel(nn.Module):
 
     def __init__(self, cfg: _LinearConfig, device="cpu"):
         super().__init__()
-        self.cfg = cfg
+        self.cfg: _LinearConfig = cfg
         input_dim = cfg.input_dim
         output_dim = cfg.output_dim
 
@@ -109,7 +109,7 @@ class _MLP(nn.Module):
 
         # Wrap the layers in a Sequential module
         self.net = nn.Sequential(*layers)
-        self.cfg = config
+        self.cfg: MLPConfig = config
         self.to(device)
 
     def forward(self, x: Tensor) -> Tensor:

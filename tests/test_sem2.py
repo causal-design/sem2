@@ -34,7 +34,7 @@ from sem2.model.construction import NodeSpec
 BS = 4
 
 
-def make_model(formula, cfgs=None, device="cpu"):
+def make_model(formula, cfgs: dict[str, int | LinearNodeConfig | MLPConfig] | None = None, device="cpu"):
     return SEM2(formula, node_cfgs=cfgs, device=device)
 
 
@@ -163,7 +163,7 @@ class TestNodeExogenous:
 
 class TestNodeLinear:
 
-    def _make(self, coefficients, cfg=None, out_dims=None):
+    def _make(self, coefficients, cfg: LinearNodeConfig | None = None, out_dims=None):
         """Build a NodeLinear with fake predecessor nodes."""
         n_preds = len(coefficients)
         out_dims = out_dims or [1] * n_preds
@@ -250,7 +250,7 @@ class TestNodeLinear:
 
 class TestNodeMLP:
 
-    def _make(self, n_preds=2, out_dims=None, cfg=None):
+    def _make(self, n_preds=2, out_dims=None, cfg: MLPConfig | None = None):
         out_dims = out_dims or [1] * n_preds
         predecessors = [f"p{i}" for i in range(n_preds)]
         rhs = "n(" + ",".join(predecessors) + ")"
