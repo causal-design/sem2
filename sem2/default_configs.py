@@ -76,7 +76,7 @@ class TrainingConfig(BaseModel):
     # Training loop
     batch_size: int = 1024
     epochs: int = 12
-    rng_seed: int = 42
+    rng_seed: int | None = None
     sample_bs: int = 512                           # Sample batch size for distribution sampling
 
     # Energy score loss
