@@ -7,7 +7,7 @@ from .vector_operators import PotentialOutcomeSample
 from .discrete_energy_loss import DiscreteEnergyLoss
 from ..model.construction.sem_types import SEMType
 from ..data import DataBatch, ScalarResult, VariableInfo
-from ..utils import seeded_rng
+from ..utils import set_seed
 
 if TYPE_CHECKING:
     from ..model.models.base import SEM2
@@ -66,15 +66,15 @@ class MeanPotentialOutcome(SEM2Operator):
     """Mean of a scalar outcome under constant named interventions.
 
     n_samples counts Monte Carlo samples; discrete outcomes are integrated over
-    their states. seed=None means seed=0. Evaluation restores the surrounding
-    RNG state, so repeated queries are reproducible without reseeding training.
+    their states. By default, sampling uses the existing RNG stream. An explicit
+    seed reseeds each evaluation; the previous RNG state is not restored.
     Supply variable metadata for an explicit category-to-number mapping.
     """
     input_type = OperatorInput.SELF
     output_type = OperatorOutput.SCALAR
 
     def __init__(self, model: SEM2, *, outcome: str, intervention: dict[str, float],
-                 n_samples: int = 1000, seed: int | None = 0,
+                 n_samples: int = 1000, seed: int | None = None,
                  variable: VariableInfo | None = None) -> None:
         self.model = model
         self.outcome = outcome
@@ -92,7 +92,7 @@ class MeanPotentialOutcome(SEM2Operator):
             self.sampler = PotentialOutcomeSample(model, outcome)
 
     def evaluate(self, **kwargs) -> tuple[ScalarResult, dict]:
-        """Evaluate the configured intervention without changing global RNG state."""
+        """Evaluate the configured intervention, reseeding only if requested."""
         parameter = next(self.model.parameters(), None)
         device = parameter.device if parameter is not None else torch.device(self.model.device)
         dtype = parameter.dtype if parameter is not None else torch.get_default_dtype()
@@ -102,16 +102,16 @@ class MeanPotentialOutcome(SEM2Operator):
         set_nodes = DataBatch(torch.cat(values, dim=1),
                               tuple(self.model._variable_info(n) for n in self.intervention)) if values else None
 
-        with seeded_rng(self.seed, device=device):
-            if SEMType.is_continuous(self.model.sem_type):
-                draws, details = self.sampler.evaluate(batch_size=self.n_samples, set_nodes=set_nodes)
-                value = _apply_numeric_mapping(DataBatch(draws.values, (self.variable,))).mean()
-            else:
-                prediction, details = self.model.sample(batch_size=self.n_samples, set_nodes=set_nodes)
-                prediction = prediction.marginalize([self.outcome])
-                states = DataBatch(prediction.states.values, (self.variable,))
-                numeric = _apply_numeric_mapping(states)[:, 0].to(prediction.probabilities)
-                value = (prediction.probabilities @ numeric).mean()
+        set_seed(self.seed, device=device)
+        if SEMType.is_continuous(self.model.sem_type):
+            draws, details = self.sampler.evaluate(batch_size=self.n_samples, set_nodes=set_nodes)
+            value = _apply_numeric_mapping(DataBatch(draws.values, (self.variable,))).mean()
+        else:
+            prediction, details = self.model.sample(batch_size=self.n_samples, set_nodes=set_nodes)
+            prediction = prediction.marginalize([self.outcome])
+            states = DataBatch(prediction.states.values, (self.variable,))
+            numeric = _apply_numeric_mapping(states)[:, 0].to(prediction.probabilities)
+            value = (prediction.probabilities @ numeric).mean()
         return ScalarResult(value, "mean_potential_outcome", (self.variable,)), details
 
 
@@ -122,7 +122,7 @@ class ATE(SEM2Operator):
     def __init__(self, cfg, model, variable: VariableInfo | None = None):
         self.model = model
         # Fixed 1-versus-0 treatment contrast, not a general multilevel effect.
-        # Both queries use the same seed for paired exogenous Monte Carlo samples.
+        # An explicit seed pairs the exogenous draws; otherwise use the current stream.
         self.control = MeanPotentialOutcome(model, outcome=cfg.Y_node, intervention={cfg.T_node: 0},
                                             n_samples=cfg.sample_bs, seed=cfg.rng_seed, variable=variable)
         self.treatment = MeanPotentialOutcome(model, outcome=cfg.Y_node, intervention={cfg.T_node: 1},
