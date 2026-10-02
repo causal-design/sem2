@@ -1,6 +1,7 @@
 """Small records shared by loaders, samplers and operators."""
 from __future__ import annotations
 from dataclasses import dataclass, replace
+from collections.abc import Iterable
 import keyword
 from numbers import Integral
 from typing import TYPE_CHECKING
@@ -16,26 +17,26 @@ if TYPE_CHECKING:
 class VariableInfo:
     """Column meaning, separate from node support.
 
-    encoding maps external labels to stored codes; scores maps those labels
-    (or stored values without an encoding) to explicitly supplied numeric scores.
+    encoding maps external labels to stored codes; numeric_mapping maps those labels
+    (or stored values without an encoding) to explicitly supplied numeric values.
     width preserves existing low-level vector nodes, not vector DataFrame cells.
     """
     name: str
     width: int = 1
     categorical: bool | None = None
     encoding: dict | None = None
-    scores: dict | None = None
+    numeric_mapping: dict | None = None
 
 
 @dataclass
 class DataBatch:
-    """Rows of values with shared metadata in column order."""
+    """Rows with ordered metadata; strings create scalar VariableInfo defaults."""
     values: torch.Tensor
-    variables: tuple[VariableInfo, ...]
+    variables: tuple[VariableInfo | str, ...] | list[VariableInfo | str]
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Keep ordered metadata and check alignment so named selection cannot mislabel columns."""
-        self.variables = tuple(self.variables)
+        self.variables = tuple(VariableInfo(v) if isinstance(v, str) else v for v in self.variables)
         if not isinstance(self.values, torch.Tensor) or self.values.ndim != 2:
             raise ValueError("DataBatch values must be a two-dimensional tensor.")
         if any(not isinstance(v.name, str) or not v.name or not isinstance(v.width, int) or v.width < 1
@@ -50,10 +51,10 @@ class DataBatch:
     def names(self) -> tuple[str, ...]:
         return tuple(v.name for v in self.variables)
 
-    def __len__(self):
+    def __len__(self) -> int:
         return self.values.shape[0]
 
-    def select(self, names) -> torch.Tensor:
+    def select(self, names: str | Iterable[str]) -> torch.Tensor:
         """Select whole variable blocks in the requested order."""
         names = (names,) if isinstance(names, str) else tuple(names)
         if len(set(names)) != len(names):
@@ -68,7 +69,7 @@ class DataBatch:
             raise ValueError(f"Unknown variables: {sorted(missing)}")
         return self.values[:, [i for name in names for i in columns[name]]]
 
-    def subset(self, names) -> DataBatch:
+    def subset(self, names: str | Iterable[str]) -> DataBatch:
         names = (names,) if isinstance(names, str) else tuple(names)
         variables = dict(zip(self.names, self.variables))
         values = self.select(names)
@@ -88,12 +89,18 @@ class DataBatch:
 
 
 @dataclass
-class FiniteDistribution:
-    """Named states and probabilities [exogenous draws, states]."""
+class DiscreteDistribution:
+    """Finite named states and probabilities, not realized observations.
+
+    probabilities has shape [exogenous draws, states]. Each row is a conditional
+    distribution for one Monte Carlo sample of the exogenous inputs. Averaging
+    rows estimates the marginal law.
+    This record represents either a joint distribution or a selected marginal.
+    """
     states: DataBatch
     probabilities: torch.Tensor
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Check that probability columns index the state table on the same device."""
         if not isinstance(self.states, DataBatch):
             raise TypeError("states must be a DataBatch.")
@@ -102,11 +109,11 @@ class FiniteDistribution:
         if self.probabilities.device != self.states.values.device:
             raise ValueError("States and probabilities must be on the same device.")
 
-    def to(self, *args, **kwargs) -> FiniteDistribution:
+    def to(self, *args, **kwargs) -> DiscreteDistribution:
         probabilities = self.probabilities.to(*args, **kwargs)
-        return FiniteDistribution(self.states.to(device=probabilities.device), probabilities)
+        return DiscreteDistribution(self.states.to(device=probabilities.device), probabilities)
 
-    def marginalize(self, names) -> FiniteDistribution:
+    def marginalize(self, names: str | Iterable[str]) -> DiscreteDistribution:
         """Combine equal projected states; retain the exogenous-draw axis."""
         states = self.states.subset(names)
         if states.values.shape[1] == 0:
@@ -116,7 +123,7 @@ class FiniteDistribution:
             values, inverse = torch.unique(states.values, dim=0, return_inverse=True)
             probabilities = self.probabilities.new_zeros((self.probabilities.shape[0], len(values)))
             probabilities = probabilities.index_add(1, inverse, self.probabilities)
-        return FiniteDistribution(DataBatch(values, states.variables), probabilities)
+        return DiscreteDistribution(DataBatch(values, states.variables), probabilities)
 
 
 @dataclass
@@ -126,7 +133,7 @@ class ScalarResult:
     name: str
     variables: tuple[VariableInfo, ...] = ()
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Require one tensor-valued quantity without detaching its gradient graph."""
         if not isinstance(self.value, torch.Tensor) or self.value.ndim != 0:
             raise ValueError("ScalarResult value must be a scalar tensor.")
@@ -189,7 +196,7 @@ def _validate_column(
     variable: VariableInfo,
     support: RandomVariableSupport,
 ) -> None:
-    """Check original numeric values, encoding codes and score coverage before dtype conversion."""
+    """Check original values, encoding codes and numeric mapping coverage before conversion."""
     name = variable.name
     if not torch.isfinite(value).all() or (
         support.constraint is not None and not support.constraint.check(value).all()
@@ -199,22 +206,22 @@ def _validate_column(
         codes = value.new_tensor(list(variable.encoding.values()))
         if not support.constraint.check(codes).all():
             raise ValueError(f"Encoding codes outside the declared domain of {name!r}.")
-    if variable.scores is None:
+    if variable.numeric_mapping is None:
         return
 
     labels = variable.encoding if variable.encoding is not None else series.unique().tolist()
-    missing = set(labels) - variable.scores.keys()
+    missing = set(labels) - variable.numeric_mapping.keys()
     if missing:
-        raise ValueError(f"Scores are missing labels for {name!r}: {sorted(missing, key=repr)}")
-    scores = value.new_tensor(list(variable.scores.values()))
-    if not torch.isfinite(scores).all():
-        raise ValueError(f"Scores for {name!r} must be finite.")
+        raise ValueError(f"Numeric mapping is missing labels for {name!r}: {sorted(missing, key=repr)}")
+    mapped = value.new_tensor(list(variable.numeric_mapping.values()))
+    if not torch.isfinite(mapped).all():
+        raise ValueError(f"Numeric mapping for {name!r} must be finite.")
     if support.values is not None:
-        scored_codes = {variable.encoding[label] if variable.encoding is not None else label
-                        for label in variable.scores}
-        missing = set(support.values.tolist()) - scored_codes
+        mapped_codes = {variable.encoding[label] if variable.encoding is not None else label
+                        for label in variable.numeric_mapping}
+        missing = set(support.values.tolist()) - mapped_codes
         if missing:
-            raise ValueError(f"Scores are missing declared states of {name!r}: {sorted(missing, key=repr)}")
+            raise ValueError(f"Numeric mapping is missing declared states of {name!r}: {sorted(missing, key=repr)}")
 
 
 def prepare_data(
@@ -228,7 +235,7 @@ def prepare_data(
     Metadata uses normalized model names. Numeric columns contain stored values;
     pandas categorical columns contain labels, with declared category order used
     for default encoding. Other label columns require an explicit encoding.
-    Supplied scores are preserved, not applied or inferred here.
+    Supplied numeric mappings are preserved, not applied or inferred here.
 
     Rows missing any supplied variable are dropped and counted in the report.
     Observation status belongs to this batch, not the structural graph.

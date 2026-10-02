@@ -31,7 +31,7 @@ class SEMType(Enum):
     MIXED               = "mixed"
 
     @staticmethod
-    def is_continuous(sem_type: SEMType):
+    def is_continuous(sem_type: SEMType) -> bool:
         """ If SEM is purely continuous"""
         return sem_type in {
             SEMType.LINEAR_GAUSSIAN,
@@ -40,14 +40,14 @@ class SEMType(Enum):
         }
 
     @staticmethod
-    def is_discrete(sem_type: SEMType):
+    def is_discrete(sem_type: SEMType) -> bool:
         """ If SEM is purely discrete"""
         return sem_type in {
             SEMType.DISCRETE
         }
 
     @staticmethod
-    def is_linear(sem_type: SEMType):
+    def is_linear(sem_type: SEMType) -> bool:
         """ If SEM has only linear endogenous mechanisms (Gaussian or not)."""
         return sem_type in {
             SEMType.LINEAR_GAUSSIAN,

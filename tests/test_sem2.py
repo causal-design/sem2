@@ -9,6 +9,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import pytest
 import torch
 import torch.nn as nn
+from sem2.utils import set_seed
 
 from sem2.model.components.nn_models import _LinearConfig, _LinearModel, _MLP
 from sem2.dataloader.data import DataBatch, VariableInfo
@@ -33,7 +34,7 @@ from sem2.model.construction import NodeSpec
 BS = 4
 
 
-def make_model(formula, cfgs=None, device="cpu"):
+def make_model(formula, cfgs: dict[str, int | LinearNodeConfig | MLPConfig] | None = None, device="cpu"):
     return SEM2(formula, node_cfgs=cfgs, device=device)
 
 
@@ -162,7 +163,7 @@ class TestNodeExogenous:
 
 class TestNodeLinear:
 
-    def _make(self, coefficients, cfg=None, out_dims=None):
+    def _make(self, coefficients, cfg: LinearNodeConfig | None = None, out_dims=None):
         """Build a NodeLinear with fake predecessor nodes."""
         n_preds = len(coefficients)
         out_dims = out_dims or [1] * n_preds
@@ -187,7 +188,7 @@ class TestNodeLinear:
 
     def test_fixed_coeff_one(self):
         """Fixed coefficient 1.0 — output should be 1*input regardless of learned weight."""
-        cfg = LinearNodeConfig(use_bias=False)
+        cfg = LinearNodeConfig(use_intercept=False)
         node = self._make([1.0], cfg=cfg)
         with torch.no_grad():
             node.linear.weight.fill_(99.0)
@@ -195,7 +196,7 @@ class TestNodeLinear:
 
     def test_fixed_coeff_negative(self):
         """Fixed coefficient -1.0 — output should be -1*input."""
-        cfg = LinearNodeConfig(use_bias=False)
+        cfg = LinearNodeConfig(use_intercept=False)
         node = self._make([-1.0], cfg=cfg)
         with torch.no_grad():
             node.linear.weight.fill_(99.0)
@@ -203,7 +204,7 @@ class TestNodeLinear:
 
     def test_fixed_coeff_fractional(self):
         """Fixed coefficient 0.5 — output should be 0.5*input."""
-        cfg = LinearNodeConfig(use_bias=False)
+        cfg = LinearNodeConfig(use_intercept=False)
         node = self._make([0.5], cfg=cfg)
         with torch.no_grad():
             node.linear.weight.fill_(99.0)
@@ -211,7 +212,7 @@ class TestNodeLinear:
 
     def test_learned_weight_used(self):
         """None coefficient — learned weight should be used."""
-        cfg = LinearNodeConfig(use_bias=False)
+        cfg = LinearNodeConfig(use_intercept=False)
         node = self._make([None], cfg=cfg)
         with torch.no_grad():
             node.linear.weight.fill_(5.0)
@@ -219,7 +220,7 @@ class TestNodeLinear:
 
     def test_mixed_fixed_and_learned(self):
         """Mix of fixed and learned in same node."""
-        cfg = LinearNodeConfig(use_bias=False)
+        cfg = LinearNodeConfig(use_intercept=False)
         node = self._make([1.0, None], cfg=cfg)
         # fix_weights: [True, False]
         assert node.fix_weights[0, 0].item() is True
@@ -227,13 +228,13 @@ class TestNodeLinear:
 
     def test_fix_weights_mask_shape_multi_output(self):
         """Mask must broadcast correctly when out_dim > 1."""
-        cfg = LinearNodeConfig(output_dim=2, use_bias=False)
+        cfg = LinearNodeConfig(output_dim=2, use_intercept=False)
         node = self._make([1.0, None], cfg=cfg)
         assert node.fix_weights.shape == (1, 2)
 
     def test_fix_weights_expanded_for_multidim_predecessor(self):
         """Fixed flag must expand across all dims of a multi-output predecessor."""
-        cfg = LinearNodeConfig(use_bias=False)
+        cfg = LinearNodeConfig(use_intercept=False)
         node = self._make([1.0, None], cfg=cfg, out_dims=[2, 1])
         # p0 has out_dim=2 (fixed), p1 has out_dim=1 (learned)
         assert node.fix_weights.shape == (1, 3)
@@ -242,14 +243,14 @@ class TestNodeLinear:
         assert node.fix_weights[0, 2].item() is False
 
     def test_no_bias(self):
-        cfg = LinearNodeConfig(use_bias=False)
+        cfg = LinearNodeConfig(use_intercept=False)
         node = self._make([None], cfg=cfg)
         assert node.linear.bias is None
 
 
 class TestNodeMLP:
 
-    def _make(self, n_preds=2, out_dims=None, cfg=None):
+    def _make(self, n_preds=2, out_dims=None, cfg: MLPConfig | None = None):
         out_dims = out_dims or [1] * n_preds
         predecessors = [f"p{i}" for i in range(n_preds)]
         rhs = "n(" + ",".join(predecessors) + ")"
@@ -596,7 +597,7 @@ class TestSEM2Forward:
     def test_fixed_coeff_one_passthrough(self):
         """y <- 1*e with no bias — output should equal input."""
         m = make_model("e ~ Normal(0,1); y <- 1*e",
-                       cfgs={"y": LinearNodeConfig(use_bias=False)})
+                       cfgs={"y": LinearNodeConfig(use_intercept=False)})
         e_val = torch.tensor([[1.0], [2.0], [3.0], [4.0]])
         out = run(m, set_nodes=batch(e_val, "e"))
         assert torch.allclose(out.select("y"), e_val)
@@ -604,7 +605,7 @@ class TestSEM2Forward:
     def test_fixed_coeff_negative(self):
         """y <- -1*e with no bias — output should be negated input."""
         m = make_model("e ~ Normal(0,1); y <- -1*e",
-                       cfgs={"y": LinearNodeConfig(use_bias=False)})
+                       cfgs={"y": LinearNodeConfig(use_intercept=False)})
         e_val = torch.tensor([[1.0], [2.0], [3.0], [4.0]])
         out = run(m, set_nodes=batch(e_val, "e"))
         assert torch.allclose(out.select("y"), -e_val)
@@ -612,7 +613,7 @@ class TestSEM2Forward:
     def test_fixed_coeff_fractional(self):
         """y <- 0.5*e with no bias — output should be halved input."""
         m = make_model("e ~ Normal(0,1); y <- 0.5*e",
-                       cfgs={"y": LinearNodeConfig(use_bias=False)})
+                       cfgs={"y": LinearNodeConfig(use_intercept=False)})
         e_val = torch.ones(BS, 1)
         out = run(m, set_nodes=batch(e_val, "e"))
         assert torch.allclose(out.select("y"), e_val * 0.5)
@@ -620,7 +621,7 @@ class TestSEM2Forward:
     def test_fixed_sum(self):
         """y <- 1*e1 + -1*e2 — should be e1 - e2."""
         m = make_model("e1, e2 ~ Normal(0,1); y <- 1*e1 + -1*e2",
-                       cfgs={"y": LinearNodeConfig(use_bias=False)})
+                       cfgs={"y": LinearNodeConfig(use_intercept=False)})
         e1 = torch.ones(BS, 1) * 3
         e2 = torch.ones(BS, 1) * 1
         out = run(m, set_nodes=batch(torch.cat([e1, e2], dim=-1), "e1", "e2"))
@@ -643,7 +644,7 @@ class TestSEM2Forward:
         """1*x where x has out_dim=2 — both columns must use fixed value 1."""
         m = make_model("e ~ Normal(0,1); x <- e; y <- 1*x",
                        cfgs={"x": LinearNodeConfig(output_dim=2),
-                              "y": LinearNodeConfig(use_bias=False)})
+                              "y": LinearNodeConfig(use_intercept=False)})
         node_y = m.node_dict["y"]
         with torch.no_grad():
             node_y.linear.weight.fill_(99.0)
@@ -893,22 +894,21 @@ class TestFormulaParserAST:
         assert specs["y"].coefficients == dag.node_specs["y"].coefficients
         assert specs["y"].predecessors == dag.node_specs["y"].predecessors
 
-    def test_unobs_statement_sets_observed_vars(self):
-        dag = _DAG("e ~ Normal(0,1); x <- e; y <- x; unobs(e)")
-        assert dag.unobserved_vars == ["e"]
-        assert dag.observed_vars == ["x", "y"]
+    def test_graph_has_no_observation_status(self):
+        dag = _DAG("e ~ Normal(0,1); x <- e; y <- x")
+        assert not hasattr(dag, "unobserved_vars")
+        assert not hasattr(dag, "observed_vars")
 
-    def test_unobs_statement_can_be_empty(self):
-        dag = _DAG("e ~ Normal(0,1); x <- e; unobs()")
-        assert dag.unobserved_vars == []
-        assert dag.observed_vars == ["e", "x"]
+    def test_empty_unobs_statement_is_rejected(self):
+        with pytest.raises(ValueError, match="Formula must contain"):
+            _DAG("e ~ Normal(0,1); x <- e; unobs()")
 
     def test_unobs_statement_rejects_unknown_node(self):
-        with pytest.raises(ValueError, match="Unobserved variables"):
+        with pytest.raises(ValueError, match="Formula must contain"):
             _DAG("unobs(z); e ~ Normal(0,1); x <- e")
 
     def test_unobs_statement_rejects_duplicates(self):
-        with pytest.raises(ValueError, match="Duplicate unobserved"):
+        with pytest.raises(ValueError, match="Formula must contain"):
             _DAG("unobs(e,e); e ~ Normal(0,1); x <- e")
 
 
@@ -1077,7 +1077,7 @@ def _chain_linear():
     """x = e1; y = 2x + ey, all noise N(0,1), no bias. Cov[x,y] = [[1,2],[2,5]]."""
     return SEM2Linear(
         "e1, ey ~ Normal(0,1); x <- 1*e1; y <- 2*x + 1*ey",
-        node_cfgs={"x": LinearNodeConfig(use_bias=False), "y": LinearNodeConfig(use_bias=False)},
+        node_cfgs={"x": LinearNodeConfig(use_intercept=False), "y": LinearNodeConfig(use_intercept=False)},
     )
 
 
@@ -1085,7 +1085,7 @@ def _chain_linear_nongaussian():
     """x = e1; y = 2x + ey, all noise Beta(0.5,0.5), no bias."""
     return SEM2Linear(
         "e1, ey ~ Beta(0.5,0.5); x <- 1*e1; y <- 2*x + 1*ey",
-        node_cfgs={"x": LinearNodeConfig(use_bias=False), "y": LinearNodeConfig(use_bias=False)},
+        node_cfgs={"x": LinearNodeConfig(use_intercept=False), "y": LinearNodeConfig(use_intercept=False)},
     )
 
 
@@ -1130,7 +1130,7 @@ class TestSEM2Linear:
         assert torch.allclose(S, expected, atol=1e-5)
 
     def test_cov_matrix_matches_empirical(self):
-        torch.manual_seed(0)
+        set_seed(0)
         m = _chain_linear()
         samp, _ = m.sample(batch_size=100000)
         data = samp.select(["x", "y"]).detach()
@@ -1150,7 +1150,7 @@ class TestSEM2Linear:
     def test_cov_matrix_works_for_non_gaussian_linear_second_moments(self):
         m = SEM2Linear(
             "e1, ey ~ Uniform(-1,1); x <- 1*e1; y <- 2*x + 1*ey",
-            node_cfgs={"x": LinearNodeConfig(use_bias=False), "y": LinearNodeConfig(use_bias=False)},
+            node_cfgs={"x": LinearNodeConfig(use_intercept=False), "y": LinearNodeConfig(use_intercept=False)},
         )
         S = m.cov_matrix(["x", "y"])
         expected = torch.tensor([[1 / 3, 2 / 3], [2 / 3, 5 / 3]])
@@ -1160,7 +1160,7 @@ class TestSEM2Linear:
 class TestLinearOperators:
 
     def _data(self, m, n=5000, seed=0):
-        torch.manual_seed(seed)
+        set_seed(seed)
         samp, _ = m.sample(batch_size=n)
         return batch(samp.select(["x", "y"]).detach(), "x", "y")
 
@@ -1185,24 +1185,24 @@ class TestLinearOperators:
         mvn = torch.distributions.MultivariateNormal(torch.zeros(2), Sigma)
         assert ll.value.item() == pytest.approx(mvn.log_prob(data.values).mean().item(), abs=1e-4)
 
-    def test_loglikelihood_uses_formula_observed_vars(self):
+    def test_loglikelihood_uses_batch_observed_vars(self):
         m = SEM2Linear(
-            "e1, ey ~ Normal(0,1); x <- 1*e1; y <- 2*x + 1*ey; unobs(e1,ey)",
-            node_cfgs={"x": LinearNodeConfig(use_bias=False), "y": LinearNodeConfig(use_bias=False)},
+            "e1, ey ~ Normal(0,1); x <- 1*e1; y <- 2*x + 1*ey",
+            node_cfgs={"x": LinearNodeConfig(use_intercept=False), "y": LinearNodeConfig(use_intercept=False)},
         )
         data = self._data(m)
         implicit, _ = LogLikelihood(m, centered=True).evaluate(data)
         explicit, _ = LogLikelihood(m, ["x", "y"], centered=True).evaluate(data)
         assert implicit.value.item() == pytest.approx(explicit.value.item(), abs=1e-6)
 
-    def test_loglikelihood_requires_observed_vars_without_formula_mapping(self):
+    def test_loglikelihood_rejects_empty_observed_vars(self):
         m = _chain_linear()
-        with pytest.raises(ValueError, match="observed variables"):
-            LogLikelihood(m)
+        with pytest.raises(ValueError, match="observed variable"):
+            LogLikelihood(m, [])
 
     def test_centered_loglikelihood_matches_zero_loc(self):
-        m = SEM2Linear("e ~ Normal(2,1); x <- 1*e; unobs(e)",
-                       node_cfgs={"x": LinearNodeConfig(use_bias=False)})
+        m = SEM2Linear("e ~ Normal(2,1); x <- 1*e",
+                       node_cfgs={"x": LinearNodeConfig(use_intercept=False)})
         data = batch(torch.zeros(4, 1), "x")
         centered, _ = LogLikelihood(m, centered=True).evaluate(data)
         explicit, _ = LogLikelihood(m, loc=torch.zeros(1)).evaluate(data)
@@ -1211,8 +1211,8 @@ class TestLinearOperators:
         assert centered.value.item() > model_mean.value.item()
 
     def test_centered_and_loc_are_mutually_exclusive(self):
-        m = SEM2Linear("e ~ Normal(0,1); x <- 1*e; unobs(e)",
-                       node_cfgs={"x": LinearNodeConfig(use_bias=False)})
+        m = SEM2Linear("e ~ Normal(0,1); x <- 1*e",
+                       node_cfgs={"x": LinearNodeConfig(use_intercept=False)})
         with pytest.raises(ValueError, match="centered"):
             LogLikelihood(m, centered=True, loc=torch.zeros(1))
 
@@ -1236,7 +1236,7 @@ class TestLinearOperators:
 
     def test_loglikelihood_requires_finite_second_moments(self):
         m = SEM2Linear("e ~ Cauchy(0,1); y <- 1*e",
-                       node_cfgs={"y": LinearNodeConfig(use_bias=False)})
+                       node_cfgs={"y": LinearNodeConfig(use_intercept=False)})
         with pytest.warns(UserWarning, match="pseudo-log-likelihood"):
             op = LogLikelihood(m, ["y"], loc=torch.zeros(1))
         with pytest.raises(ValueError, match="finite second moments"):

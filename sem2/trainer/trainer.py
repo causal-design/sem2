@@ -8,11 +8,12 @@ from ..operators.operators_base import OperatorInput, OperatorOutput, SEM2Operat
 from ..default_configs import TrainingConfig
 from ..dataloader.data import DataBatch, VariableInfo
 from ..dataloader import prepare_dataloader
+from ..utils import set_seed
 
 logger = logging.getLogger(__name__)
 
 
-def get_optimiser(model: nn.Module, cfg) -> torch.optim.Optimizer:
+def get_optimiser(model: nn.Module, cfg: TrainingConfig) -> torch.optim.Optimizer:
     if cfg.optim == "AdamW":
         return torch.optim.AdamW(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
     elif cfg.optim == "Adam":
@@ -35,7 +36,7 @@ class SEM2Trainer:
             raise TypeError("Training requires a data-taking scalar objective.")
         if torch.device(sem.device) != torch.device(cfg.device):
             raise ValueError("Construct the model on the same device as TrainingConfig.device.")
-        self.cfg = cfg
+        self.cfg: TrainingConfig = cfg
         self.sem = sem
         self.loss_fn = objective
         self.loader, self.variables, self.preparation_report = prepare_dataloader(
@@ -47,11 +48,12 @@ class SEM2Trainer:
     def train(self) -> SEM2:
         """Run the epoch budget, returning the same model with updated parameters.
 
-        Each call resets the fitting RNG and optimizer, not model parameters.
+        Each call creates a fresh optimizer and reseeds only if cfg.rng_seed is set.
+        Model parameters are not reset.
         No histories, final evaluation or convergence claim are produced.
         """
         cfg = self.cfg
-        torch.manual_seed(cfg.rng_seed)
+        set_seed(cfg.rng_seed, device=cfg.device)
         self.optim = get_optimiser(self.sem, cfg)
         self.sem.train()
         for epoch in range(cfg.epochs):
@@ -83,18 +85,18 @@ def main():
     from ..dataloader import DummyDiscreteDataloader
     from ..default_configs import MLPConfig
     from ..model import SEM2Discrete
-    from ..operators.scalar_operators import EnergyLoss
+    from ..operators.discrete_iv import DiscreteIVEnergyLoss
 
-    torch.manual_seed(0)
+    set_seed(0)
     logging.basicConfig(level=logging.INFO)
-    cfg = TrainingConfig(device="cpu", epochs=1, batch_size=64)
-    model = SEM2Discrete("Z ~ Categorical(probs=[1,1]); X <- d(Z); Y <- d(X)", node_cfgs={
-        "X": MLPConfig(hidden_dims=[8], output_dim=2),
-        "Y": MLPConfig(hidden_dims=[8], output_dim=2),
+    cfg = TrainingConfig(device="cpu", epochs=1, batch_size=64, sample_bs=32)
+    model = SEM2Discrete("Z ~ Categorical(probs=[1,1]); X <- d(Z; levels=2); Y <- d(X; levels=2)", node_cfgs={
+        "X": MLPConfig(hidden_dims=[8]),
+        "Y": MLPConfig(hidden_dims=[8]),
     })
     batch = next(iter(DummyDiscreteDataloader(1, batch_size=128)))
     data = pd.DataFrame(batch.values.numpy(), columns=batch.names)
-    objective = EnergyLoss(model, sample_bs=32, instrument_node="Z")
+    objective = DiscreteIVEnergyLoss(cfg, model, instrument="Z")
     fit(model, data, objective, cfg, variables=batch.variables)
 
 

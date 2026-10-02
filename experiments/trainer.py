@@ -2,39 +2,40 @@
 import logging
 import pandas as pd
 import torch
-from sem2.dataloader.data import DataBatch, VariableInfo
+from sem2.dataloader.data import VariableInfo
 from sem2.dataloader import DummyDiscreteDataloader
 from sem2.default_configs import TrainingConfig, MLPConfig
 from sem2.model import SEM2Discrete
 from sem2.trainer import SEM2Trainer
-from sem2.operators.scalar_operators import EnergyLoss, MeanPotentialOutcome
+from sem2.operators.scalar_operators import MeanPotentialOutcome, SEM2Loss
+from sem2.operators.discrete_iv import DiscreteIVEnergyLoss
+from sem2.utils import set_seed
 
 
 def main():
-    torch.manual_seed(0)
+    set_seed(0)
     logging.basicConfig(level=logging.INFO)
-    cfg = TrainingConfig(device="cpu", epochs=2, batch_size=64)
-    formula = "U ~ Uniform(0,1); Z ~ Categorical(probs=[1,1]); X <- d(Z,U); Y <- d(X,U)"
+    cfg = TrainingConfig(device="cpu", epochs=2, batch_size=64, sample_bs=32)
+    formula = "U ~ Uniform(0,1); Z ~ Categorical(probs=[1,1]); X <- d(Z,U; levels=2); Y <- d(X,U; levels=2)"
     model = SEM2Discrete(formula, node_cfgs={
-        "X": MLPConfig(hidden_dims=[8], output_dim=2),
-        "Y": MLPConfig(hidden_dims=[8], output_dim=2),
+        "X": MLPConfig(hidden_dims=[8]),
+        "Y": MLPConfig(hidden_dims=[8]),
     })
     batch = next(iter(DummyDiscreteDataloader(1, batch_size=128)))
     data = pd.DataFrame(batch.values.numpy(), columns=batch.names)
-    objective = EnergyLoss(model, sample_bs=32, instrument_node="Z")
+    objective = SEM2Loss([(DiscreteIVEnergyLoss(cfg, model, instrument="Z"), cfg.energy_score_weight)])
     trainer = SEM2Trainer(cfg, model, data, objective, variables=batch.variables)
     print("Batch:", batch.names, batch.values.shape)
-    rng = torch.get_rng_state()
+    set_seed(0)
     result, _ = trainer.loss_fn.evaluate(batch)
-    torch.set_rng_state(rng)
+    set_seed(0)
     reordered, _ = trainer.loss_fn.evaluate(batch.subset(["Y", "Z", "X"]))
     torch.testing.assert_close(result.value, reordered.value)
     print("Named-column reorder check passed.")
     trainer.train()
-    intervention = DataBatch(torch.ones(32, 1), (VariableInfo("X"),))
-    outcome = MeanPotentialOutcome("Y", "X", model,
-                                   variable=VariableInfo("Y", categorical=True, scores={0: 0., 1: 1.}))
-    result, _ = outcome.evaluate(intervention)
+    outcome = MeanPotentialOutcome(model, outcome="Y", intervention={"X": 1}, n_samples=cfg.sample_bs,
+                                   variable=VariableInfo("Y", categorical=True, numeric_mapping={0: 0., 1: 1.}))
+    result, _ = outcome.evaluate()
     print(result.name, result.value.detach(), result.variables)
 
 

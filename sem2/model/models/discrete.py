@@ -10,7 +10,8 @@ from collections import defaultdict
 from ..components.nodes import NodeMLPDiscrete, SEM2Node, DiscreteModes
 from ..construction import SEMType
 from .base import SEM2
-from ...dataloader.data import DataBatch, FiniteDistribution
+from ...dataloader.data import DataBatch, DiscreteDistribution
+from ...default_configs import LinearNodeConfig, MLPConfig
 
 
 class SEM2Discrete(SEM2):
@@ -18,7 +19,7 @@ class SEM2Discrete(SEM2):
     node_dict: nn.ModuleDict[str, SEM2Node]  # Maps node name to its SEM2Node object, registered as submodule for PyTorch tracking
     sem_type = SEMType.DISCRETE
 
-    def _check_sem_type(self):
+    def _check_sem_type(self) -> None:
         """A discrete SEM requires discrete endogenous nodes. Validate against the
         type inferred from the formula (not the class's desired type) so a non-
         discrete formula is rejected up front rather than failing later in sampling.
@@ -30,7 +31,8 @@ class SEM2Discrete(SEM2):
             )
         logging.info("Building a discrete SEM2 model.")
 
-    def __init__(self, model_formula: str, node_cfgs: dict = None, device="cpu"):
+    def __init__(self, model_formula: str,
+                 node_cfgs: dict[str, int | LinearNodeConfig | MLPConfig] | None = None, device: str | torch.device = "cpu") -> None:
         super().__init__(model_formula, node_cfgs, device=device)
         self.device = device
 
@@ -81,12 +83,14 @@ class SEM2Discrete(SEM2):
                     else:
                         self.cont_parents[node_name].append(pn)
 
-    def sample(self, batch_size=1, set_nodes: DataBatch | None = None) -> tuple[FiniteDistribution, dict]:
-        """ Discrete sampling: Sample every possible discrete outcome.
-            This involves sampling continuous variables, and computing every permutation of discrete variables.
+    def sample(self, batch_size: int = 1, set_nodes: DataBatch | None = None) -> tuple[DiscreteDistribution, dict]:
+        """Enumerate discrete states and compute their conditional probabilities.
+
+            Exogenous inputs are sampled; the returned DiscreteDistribution
+            integrates discrete outcomes rather than drawing categorical observations.
 
             Args:
-                batch_size: Number of samples to draw.
+                batch_size: Number of exogenous Monte Carlo samples.
                 set_nodes: Optional DataBatch of named intervention values.
         """
 
@@ -182,7 +186,7 @@ class SEM2Discrete(SEM2):
         supplied = {} if set_nodes is None else dict(zip(set_nodes.names, set_nodes.variables))
         variables = tuple(supplied[name] if name in supplied else self._variable_info(name)
                           for name in self.state_node_names)
-        result = FiniteDistribution(DataBatch(all_states, variables), probs)
+        result = DiscreteDistribution(DataBatch(all_states, variables), probs)
         names = [name for name in self.state_node_names if not self.node_specs[name].is_helper]
         if len(names) != len(self.state_node_names):
             # Sum over internal helpers rather than exposing their state coordinates.
