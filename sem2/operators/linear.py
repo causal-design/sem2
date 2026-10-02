@@ -99,6 +99,8 @@ class LogLikelihood(SEM2LinearModelOperator):
     evaluate() returns the mean log-likelihood over the batch. observed_vars
     defaults to the input batch's names. loc defaults to the
     model-implied mean; use centered=True for centred covariance-style fits.
+    sample_bs and beta are accepted for scalar-objective composition but do not
+    affect this analytic calculation.
     """
     input_type = OperatorInput.DATA
     output_type = OperatorOutput.SCALAR
@@ -142,7 +144,8 @@ class LogLikelihood(SEM2LinearModelOperator):
             )
         return loc
 
-    def evaluate(self, observations: DataBatch, **kwargs) -> tuple[ScalarResult, dict]:
+    def evaluate(self, observations: DataBatch, *, sample_bs: int | None = None,
+                 beta: float | None = None) -> tuple[ScalarResult, dict]:
         """
         Args:
             observations: named data, selected in observed_vars order.
@@ -198,19 +201,21 @@ class WeightedFrobeniusDistance(SEM2Operator):
     With W all-ones this is the (squared) Frobenius / unweighted-least-squares
     discrepancy used in SEM estimation (cf. lavaan's ULS objective). A weight
     matrix W can be supplied to recover weighted/GLS-style discrepancies.
+    beta is accepted for scalar-objective composition but does not affect this loss.
     """
     input_type = OperatorInput.DATA
     output_type = OperatorOutput.SCALAR
 
     def __init__(self, model: SEM2, observed_vars: list[str] | None = None,
-                 weight: torch.Tensor | None = None, n_samples: int | None = None,
+                 weight: torch.Tensor | None = None, sample_bs: int | None = None,
                  *, cfg: TrainingConfig | None = None) -> None:
         self.model = model
         self.observed_vars = observed_vars
-        self.covariance = Covariance(model, n_samples=n_samples, cfg=cfg)
+        self.covariance = Covariance(model, sample_bs=sample_bs, cfg=cfg)
         self.weight = weight
 
-    def evaluate(self, observations: DataBatch, **kwargs) -> tuple[ScalarResult, dict]:
+    def evaluate(self, observations: DataBatch, *, sample_bs: int | None = None,
+                 beta: float | None = None) -> tuple[ScalarResult, dict]:
         """
         Args:
             observations: named data, selected in observed_vars order.
@@ -220,7 +225,7 @@ class WeightedFrobeniusDistance(SEM2Operator):
         if not isinstance(observations, DataBatch):
             raise TypeError("observations must be a DataBatch.")
         batch = observations if self.observed_vars is None else observations.subset(self.observed_vars)
-        covariance, _ = self.covariance.evaluate(**kwargs)
+        covariance, _ = self.covariance.evaluate(sample_bs=sample_bs)
         indices = [i for n in batch.names for i in self.covariance.columns[n]]
         model_cov = covariance[indices][:, indices]
         if len(batch) < 2:
@@ -245,7 +250,8 @@ class PathAnalysis(SEM2LinearModelOperator):
     input_type = OperatorInput.SELF
     output_type = OperatorOutput.SCALAR
 
-    def evaluate(self, *args, **kwargs) -> tuple[torch.Tensor, dict]:
+    def evaluate(self, *, sample_bs: int | None = None,
+                 beta: float | None = None) -> tuple[torch.Tensor, dict]:
         raise NotImplementedError(
             "PathAnalysis is not implemented yet; the API and automatic path "
             "enumeration still need to be designed."

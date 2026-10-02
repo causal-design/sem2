@@ -19,5 +19,5 @@ class PotentialOutcomeSample(SEM2Operator):
         self.model = model
         self.target_node = target_node
 
-    def evaluate(self, batch_size: int = 1, set_nodes: DataBatch | None = None) -> tuple[DataBatch, dict]:
-        return self.model._sample(batch_size, set_nodes, target=self.target_node)
+    def evaluate(self, sample_bs: int = 1, set_nodes: DataBatch | None = None) -> tuple[DataBatch, dict]:
+        return self.model._sample(sample_bs, set_nodes, target=self.target_node)

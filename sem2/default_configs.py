@@ -79,18 +79,8 @@ class TrainingConfig(BaseModel):
     rng_seed: int | None = None
     sample_bs: int = 512                           # Sample batch size for distribution sampling
 
-    # Energy score loss
-    use_energy_score: bool = True
-    energy_score_weight: float = 1.
+    # Energy score
     energy_score_beta: float = 1.
-
-    # ATE loss
-    use_ate: bool = False
-    ate_weight: float = -0.05
-
-    # MMD loss  # TODO
-    use_mmd: bool = False
-    mmd_weight: float = 1.
 
     @model_validator(mode="after")
     def _resolve_device(self) -> "TrainingConfig":

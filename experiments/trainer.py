@@ -23,7 +23,7 @@ def main():
     })
     batch = next(iter(DummyDiscreteDataloader(1, batch_size=128)))
     data = pd.DataFrame(batch.values.numpy(), columns=batch.names)
-    objective = SEM2Loss([(DiscreteIVEnergyLoss(cfg, model, instrument="Z"), cfg.energy_score_weight)])
+    objective = SEM2Loss([(DiscreteIVEnergyLoss(cfg, model, instrument="Z"), 1.)])
     trainer = SEM2Trainer(cfg, model, data, objective, variables=batch.variables)
     print("Batch:", batch.names, batch.values.shape)
     set_seed(0)

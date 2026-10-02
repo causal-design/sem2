@@ -27,13 +27,14 @@ class EnergyLoss(SEM2Operator):
                  sample_bs: int | None = None, beta: float | None = None) -> None:
         self.model = model
         self.device = cfg.device
-        self.bs = cfg.sample_bs if sample_bs is None else sample_bs
+        self.sample_bs = cfg.sample_bs if sample_bs is None else sample_bs
         self.beta = cfg.energy_score_beta if beta is None else beta
-        self.discrete_loss = DiscreteEnergyLoss(self.beta)
+        self.discrete_loss = DiscreteEnergyLoss()
 
     def evaluate(self, observations: DataBatch, *, sample_bs: int | None = None,
-                 beta: float | None = None, **kwargs) -> tuple[ScalarResult, dict]:
-        sample_bs = self.bs if sample_bs is None else sample_bs
+                 beta: float | None = None) -> tuple[ScalarResult, dict]:
+        sample_bs = self.sample_bs if sample_bs is None else sample_bs
+        beta = self.beta if beta is None else beta
         if not isinstance(observations, DataBatch):
             raise TypeError("observations must be a DataBatch.")
         observations = observations.to(self.device)
@@ -47,12 +48,11 @@ class EnergyLoss(SEM2Operator):
                  and not self.model.node_specs[name].is_helper]
         outcomes = observations.subset(names)
         prediction, _ = self.model.sample(batch_size=sample_bs)
-        return self.discrete_loss.energy_dist(outcomes, prediction, p=beta)
+        return self.discrete_loss.energy_dist(outcomes, prediction, beta=beta)
 
     def _energy_score(self, observations: DataBatch, prediction: DataBatch,
-                      *, beta: float | None = None) -> tuple[ScalarResult, dict]:
+                      *, beta: float) -> tuple[ScalarResult, dict]:
         """Compare observations [N, D] with named draws [M, D], allowing N != M."""
-        beta = self.beta if beta is None else beta
         targets = _apply_numeric_mapping(observations)
         draws = _apply_numeric_mapping(DataBatch(prediction.select(observations.names), observations.variables)).to(targets)
         n = draws.shape[0]
@@ -75,23 +75,24 @@ class EnergyLoss(SEM2Operator):
 class MeanPotentialOutcome(SEM2Operator):
     """Mean of a scalar outcome under constant named interventions.
 
-    n_samples counts Monte Carlo samples; discrete outcomes are integrated over
+    sample_bs counts Monte Carlo samples; discrete outcomes are integrated over
     their states. By default, sampling uses the existing RNG stream. An explicit
     seed reseeds each evaluation; the previous RNG state is not restored.
     Supply variable metadata for an explicit category-to-number mapping.
-    n_samples overrides cfg.sample_bs; evaluate(sample_bs=...) overrides one call.
+    sample_bs overrides cfg.sample_bs; evaluate(sample_bs=...) overrides one call.
+    beta is accepted for scalar-objective composition but does not affect this query.
     """
     input_type = OperatorInput.SELF
     output_type = OperatorOutput.SCALAR
 
     def __init__(self, model: SEM2, *, outcome: str, intervention: dict[str, float],
-                 n_samples: int | None = None, seed: int | None = None,
+                 sample_bs: int | None = None, seed: int | None = None,
                  variable: VariableInfo | None = None, cfg: TrainingConfig | None = None) -> None:
         cfg = cfg if cfg is not None else TrainingConfig(device=model.device)
         self.model = model
         self.outcome = outcome
         self.intervention = dict(intervention)
-        self.n_samples = cfg.sample_bs if n_samples is None else n_samples
+        self.sample_bs = cfg.sample_bs if sample_bs is None else sample_bs
         self.seed = seed
         if outcome not in model.input_node or set(intervention) - model.input_node:
             raise ValueError("Query nodes must be user-declared model variables.")
@@ -103,9 +104,10 @@ class MeanPotentialOutcome(SEM2Operator):
         if SEMType.is_continuous(model.sem_type):
             self.sampler = PotentialOutcomeSample(model, outcome)
 
-    def evaluate(self, *, sample_bs: int | None = None, **kwargs) -> tuple[ScalarResult, dict]:
+    def evaluate(self, *, sample_bs: int | None = None,
+                 beta: float | None = None) -> tuple[ScalarResult, dict]:
         """Evaluate the configured intervention, reseeding only if requested."""
-        sample_bs = self.n_samples if sample_bs is None else sample_bs
+        sample_bs = self.sample_bs if sample_bs is None else sample_bs
         parameter = next(self.model.parameters(), None)
         device = parameter.device if parameter is not None else torch.device(self.model.device)
         dtype = parameter.dtype if parameter is not None else torch.get_default_dtype()
@@ -117,7 +119,7 @@ class MeanPotentialOutcome(SEM2Operator):
 
         set_seed(self.seed, device=device)
         if SEMType.is_continuous(self.model.sem_type):
-            draws, details = self.sampler.evaluate(batch_size=sample_bs, set_nodes=set_nodes)
+            draws, details = self.sampler.evaluate(sample_bs=sample_bs, set_nodes=set_nodes)
             value = _apply_numeric_mapping(DataBatch(draws.values, (self.variable,))).mean()
         else:
             prediction, details = self.model.sample(batch_size=sample_bs, set_nodes=set_nodes)
@@ -132,6 +134,7 @@ class ATE(SEM2Operator):
     """One-versus-zero treatment contrast with explicit graph roles.
 
     sample_bs overrides cfg.sample_bs; evaluate(sample_bs=...) affects one call.
+    beta is accepted for scalar-objective composition but does not affect this contrast.
     """
     input_type = OperatorInput.SELF
     output_type = OperatorOutput.SCALAR
@@ -142,11 +145,12 @@ class ATE(SEM2Operator):
         # Fixed 1-versus-0 treatment contrast, not a general multilevel effect.
         # An explicit seed pairs the exogenous draws; otherwise use the current stream.
         self.control = MeanPotentialOutcome(model, outcome=outcome, intervention={treatment: 0},
-                                            n_samples=sample_bs, seed=cfg.rng_seed, variable=variable, cfg=cfg)
+                                            sample_bs=sample_bs, seed=cfg.rng_seed, variable=variable, cfg=cfg)
         self.treatment = MeanPotentialOutcome(model, outcome=outcome, intervention={treatment: 1},
-                                              n_samples=sample_bs, seed=cfg.rng_seed, variable=variable, cfg=cfg)
+                                              sample_bs=sample_bs, seed=cfg.rng_seed, variable=variable, cfg=cfg)
 
-    def evaluate(self, *, sample_bs: int | None = None, **kwargs) -> tuple[ScalarResult, dict]:
+    def evaluate(self, *, sample_bs: int | None = None,
+                 beta: float | None = None) -> tuple[ScalarResult, dict]:
         y0, control = self.control.evaluate(sample_bs=sample_bs)
         y1, treatment = self.treatment.evaluate(sample_bs=sample_bs)
         return ScalarResult(y1.value - y0.value, "ATE", y1.variables), {
@@ -162,6 +166,8 @@ class SEM2Loss(SEM2Operator):
 
     Component conventions are unchanged: a negative log-likelihood weight gives
     a minimization objective. Diagnostics use index:class prefixes to avoid collisions.
+    sample_bs overrides Monte Carlo counts and beta overrides energy exponents;
+    components not using a setting leave their calculation unchanged.
     """
     input_type = OperatorInput.DATA
     output_type = OperatorOutput.SCALAR
@@ -174,7 +180,8 @@ class SEM2Loss(SEM2Operator):
             if component.output_type != OperatorOutput.SCALAR:
                 raise TypeError("Loss components must return ScalarResult.")
 
-    def evaluate(self, observations: DataBatch, **kwargs) -> tuple[ScalarResult, dict]:
+    def evaluate(self, observations: DataBatch, *, sample_bs: int | None = None,
+                 beta: float | None = None) -> tuple[ScalarResult, dict]:
         if not isinstance(observations, DataBatch):
             raise TypeError("observations must be a DataBatch.")
         # Start with a Python zero so the components determine tensor dtype/device.
@@ -182,9 +189,9 @@ class SEM2Loss(SEM2Operator):
         metrics, variables = {}, {}
         for index, (component, weight) in enumerate(self.loss_components):
             if component.input_type == OperatorInput.DATA:
-                result, details = component.evaluate(observations, **kwargs)
+                result, details = component.evaluate(observations, sample_bs=sample_bs, beta=beta)
             else:
-                result, details = component.evaluate(**kwargs)
+                result, details = component.evaluate(sample_bs=sample_bs, beta=beta)
             total = total + weight * result.value
             variables.update((v.name, v) for v in result.variables)
             label = f"{index}:{type(component).__name__}"
