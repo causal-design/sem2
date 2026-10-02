@@ -13,9 +13,8 @@ class DiscreteEnergyLoss:
     not rechecked here on each evaluation.
     """
 
-    def __init__(self, p: float, unbiased: bool = True) -> None:
-        """Set the distance power and whether to exclude same-draw pairs."""
-        self.p = p
+    def __init__(self, *, unbiased: bool = True) -> None:
+        """Set pair correction; the caller supplies the resolved beta per evaluation."""
         self.unbiased = unbiased
 
     def _validate(self, observations: DataBatch, prediction: DiscreteDistribution, observed_pairs: bool = False) -> None:
@@ -45,10 +44,9 @@ class DiscreteEnergyLoss:
 
     def _energy_components(
         self, observations: DataBatch, prediction: DiscreteDistribution,
-        *, p: float | None = None,
+        *, beta: float,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """Return scalar cross/pair distances, empirical rows [N, S] and distances [S, S]."""
-        p = self.p if p is None else p
         # Sum over unobserved state coordinates and align the remainder by name.
         prediction = prediction.marginalize(observations.names)
         probabilities = prediction.probabilities
@@ -58,15 +56,15 @@ class DiscreteEnergyLoss:
         # Match stored identities directly, without coercing them to integer indices.
         empirical = (observations.values[:, None, :] == states[None, :, :]).all(-1).to(probabilities)
         numeric = _apply_numeric_mapping(DataBatch(states, observations.variables)).to(probabilities)
-        # D[i,j] = ||state_i - state_j||_2**p, using the chosen numeric mapping.
-        distances = torch.cdist(numeric, numeric) ** p
+        # D[i,j] = ||state_i - state_j||_2**beta, using the chosen numeric mapping.
+        distances = torch.cdist(numeric, numeric) ** beta
         # Average the cross-distance over independent data and model draws.
         cross = empirical.mean(0) @ distances @ probabilities.mean(0)
         pair = self._pair_distance(probabilities, distances)
         return cross, pair, empirical, distances
 
     def energy_score(self, observations: DataBatch, prediction: DiscreteDistribution,
-                     *, p: float | None = None) -> tuple[ScalarResult, dict]:
+                     *, beta: float) -> tuple[ScalarResult, dict]:
         """Energy score from observations [N, D] and predictions [M, S].
 
         The prediction owns its named state table [S, D]; N and M may differ.
@@ -74,12 +72,12 @@ class DiscreteEnergyLoss:
         Returns a ScalarResult and scalar distance diagnostics.
         """
         self._validate(observations, prediction)
-        cross, pair, _, _ = self._energy_components(observations, prediction, p=p)
+        cross, pair, _, _ = self._energy_components(observations, prediction, beta=beta)
         result = ScalarResult(cross - pair / 2, "energy_score", observations.variables)
         return result, {"estimated-true distance": cross, "estimated-estimated distance": pair}
 
     def energy_dist(self, observations: DataBatch, prediction: DiscreteDistribution,
-                    *, p: float | None = None) -> tuple[ScalarResult, dict]:
+                    *, beta: float) -> tuple[ScalarResult, dict]:
         """Half-energy distance from observations [N, D] and predictions [M, S].
 
         The prediction owns its named state table [S, D]; each pair correction
@@ -88,7 +86,7 @@ class DiscreteEnergyLoss:
         The unbiased estimate can be negative at finite sample sizes.
         """
         self._validate(observations, prediction, observed_pairs=True)
-        cross, pair, empirical, distances = self._energy_components(observations, prediction, p=p)
+        cross, pair, empirical, distances = self._energy_components(observations, prediction, beta=beta)
         observed_pair = self._pair_distance(empirical, distances)
         result = ScalarResult(cross - pair / 2 - observed_pair / 2, "energy_distance", observations.variables)
         return result, {"estimated-true distance": cross, "estimated-estimated distance": pair,

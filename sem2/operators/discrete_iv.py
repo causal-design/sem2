@@ -32,8 +32,9 @@ class DiscreteIVEnergyLoss(EnergyLoss):
             raise ValueError("The instrument requires at least two declared levels.")
 
     def evaluate(self, observations: DataBatch, *, sample_bs: int | None = None,
-                 beta: float | None = None, **kwargs) -> tuple[ScalarResult, dict]:
-        sample_bs = self.bs if sample_bs is None else sample_bs
+                 beta: float | None = None) -> tuple[ScalarResult, dict]:
+        sample_bs = self.sample_bs if sample_bs is None else sample_bs
+        beta = self.beta if beta is None else beta
         observations = observations.to(self.device)
         unknown = set(observations.names) - self.model.input_node
         if unknown:
@@ -49,7 +50,7 @@ class DiscreteIVEnergyLoss(EnergyLoss):
             group = outcomes[z == level]
             intervention = DataBatch(level.expand(sample_bs, 1), instrument.variables)
             prediction, _ = self.model.sample(batch_size=sample_bs, set_nodes=intervention)
-            result, details = self.discrete_loss.energy_dist(group, prediction, p=beta)
+            result, details = self.discrete_loss.energy_dist(group, prediction, beta=beta)
             weight = len(group) / len(observations)
             total = total + weight * result.value
             for name, value in details.items():

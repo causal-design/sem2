@@ -25,6 +25,12 @@ class OperatorOutput(StrEnum):
 
 
 class SEM2Operator(ABC):
+    """Common result contract; concrete evaluators declare explicit arguments.
+
+    Scalar objectives share optional sample_bs and beta keywords for composition.
+    sample_bs applies to Monte Carlo sampling, beta only to energy calculations.
+    Other terms accept these known settings without changing their calculation.
+    """
     model: SEM2
     input_type: OperatorInput
     output_type: OperatorOutput
