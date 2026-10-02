@@ -15,18 +15,25 @@ if TYPE_CHECKING:
 
 
 class EnergyLoss(SEM2Operator):
-    """Compare named observations with model draws or finite probabilities."""
+    """Compare named observations with model draws or finite probabilities.
+
+    Settings resolve as evaluation override > constructor override > config.
+    Per-call overrides do not change the stored defaults.
+    """
     input_type = OperatorInput.DATA
     output_type = OperatorOutput.SCALAR
 
-    def __init__(self, cfg: TrainingConfig, model: SEM2) -> None:
+    def __init__(self, cfg: TrainingConfig, model: SEM2, *,
+                 sample_bs: int | None = None, beta: float | None = None) -> None:
         self.model = model
         self.device = cfg.device
-        self.bs = cfg.sample_bs
-        self.beta = cfg.energy_score_beta
+        self.bs = cfg.sample_bs if sample_bs is None else sample_bs
+        self.beta = cfg.energy_score_beta if beta is None else beta
         self.discrete_loss = DiscreteEnergyLoss(self.beta)
 
-    def evaluate(self, observations: DataBatch, **kwargs) -> tuple[ScalarResult, dict]:
+    def evaluate(self, observations: DataBatch, *, sample_bs: int | None = None,
+                 beta: float | None = None, **kwargs) -> tuple[ScalarResult, dict]:
+        sample_bs = self.bs if sample_bs is None else sample_bs
         if not isinstance(observations, DataBatch):
             raise TypeError("observations must be a DataBatch.")
         observations = observations.to(self.device)
@@ -34,24 +41,26 @@ class EnergyLoss(SEM2Operator):
         if unknown:
             raise ValueError(f"Unknown or internal observed variables: {sorted(unknown)}")
         if SEMType.is_continuous(self.model.sem_type):
-            prediction, _ = self.model.sample(batch_size=self.bs)
-            return self._energy_score(observations, prediction)
+            prediction, _ = self.model.sample(batch_size=sample_bs)
+            return self._energy_score(observations, prediction, beta=beta)
         names = [name for name in observations.names if name in self.model.state_node_names
                  and not self.model.node_specs[name].is_helper]
         outcomes = observations.subset(names)
-        prediction, _ = self.model.sample(batch_size=self.bs)
-        return self.discrete_loss.energy_dist(outcomes, prediction)
+        prediction, _ = self.model.sample(batch_size=sample_bs)
+        return self.discrete_loss.energy_dist(outcomes, prediction, p=beta)
 
-    def _energy_score(self, observations: DataBatch, prediction: DataBatch) -> tuple[ScalarResult, dict]:
+    def _energy_score(self, observations: DataBatch, prediction: DataBatch,
+                      *, beta: float | None = None) -> tuple[ScalarResult, dict]:
         """Compare observations [N, D] with named draws [M, D], allowing N != M."""
+        beta = self.beta if beta is None else beta
         targets = _apply_numeric_mapping(observations)
         draws = _apply_numeric_mapping(DataBatch(prediction.select(observations.names), observations.variables)).to(targets)
         n = draws.shape[0]
         if not len(observations) or n < 2:
             raise ValueError("Energy score requires observations and at least two model draws.")
         # Cross term: average every observation/model pair, even when N != M.
-        cross = (torch.cdist(targets, draws) ** self.beta).mean()
-        distances = torch.cdist(draws, draws) ** self.beta
+        cross = (torch.cdist(targets, draws) ** beta).mean()
+        distances = torch.cdist(draws, draws) ** beta
         # Model pair term: omit self-pairs for the unbiased finite-sample estimate.
         pair = (distances.sum() - distances.diagonal().sum()) / (n * (n - 1))
         value = cross - pair / 2
@@ -70,17 +79,19 @@ class MeanPotentialOutcome(SEM2Operator):
     their states. By default, sampling uses the existing RNG stream. An explicit
     seed reseeds each evaluation; the previous RNG state is not restored.
     Supply variable metadata for an explicit category-to-number mapping.
+    n_samples overrides cfg.sample_bs; evaluate(sample_bs=...) overrides one call.
     """
     input_type = OperatorInput.SELF
     output_type = OperatorOutput.SCALAR
 
     def __init__(self, model: SEM2, *, outcome: str, intervention: dict[str, float],
-                 n_samples: int = 1000, seed: int | None = None,
-                 variable: VariableInfo | None = None) -> None:
+                 n_samples: int | None = None, seed: int | None = None,
+                 variable: VariableInfo | None = None, cfg: TrainingConfig | None = None) -> None:
+        cfg = cfg if cfg is not None else TrainingConfig(device=model.device)
         self.model = model
         self.outcome = outcome
         self.intervention = dict(intervention)
-        self.n_samples = n_samples
+        self.n_samples = cfg.sample_bs if n_samples is None else n_samples
         self.seed = seed
         if outcome not in model.input_node or set(intervention) - model.input_node:
             raise ValueError("Query nodes must be user-declared model variables.")
@@ -92,23 +103,24 @@ class MeanPotentialOutcome(SEM2Operator):
         if SEMType.is_continuous(model.sem_type):
             self.sampler = PotentialOutcomeSample(model, outcome)
 
-    def evaluate(self, **kwargs) -> tuple[ScalarResult, dict]:
+    def evaluate(self, *, sample_bs: int | None = None, **kwargs) -> tuple[ScalarResult, dict]:
         """Evaluate the configured intervention, reseeding only if requested."""
+        sample_bs = self.n_samples if sample_bs is None else sample_bs
         parameter = next(self.model.parameters(), None)
         device = parameter.device if parameter is not None else torch.device(self.model.device)
         dtype = parameter.dtype if parameter is not None else torch.get_default_dtype()
         # Broadcast constant assignments once; samplers still consume named batches.
-        values = [torch.as_tensor(value, device=device, dtype=dtype).expand(self.n_samples, 1)
+        values = [torch.as_tensor(value, device=device, dtype=dtype).expand(sample_bs, 1)
                   for value in self.intervention.values()]
         set_nodes = DataBatch(torch.cat(values, dim=1),
                               tuple(self.model._variable_info(n) for n in self.intervention)) if values else None
 
         set_seed(self.seed, device=device)
         if SEMType.is_continuous(self.model.sem_type):
-            draws, details = self.sampler.evaluate(batch_size=self.n_samples, set_nodes=set_nodes)
+            draws, details = self.sampler.evaluate(batch_size=sample_bs, set_nodes=set_nodes)
             value = _apply_numeric_mapping(DataBatch(draws.values, (self.variable,))).mean()
         else:
-            prediction, details = self.model.sample(batch_size=self.n_samples, set_nodes=set_nodes)
+            prediction, details = self.model.sample(batch_size=sample_bs, set_nodes=set_nodes)
             prediction = prediction.marginalize([self.outcome])
             states = DataBatch(prediction.states.values, (self.variable,))
             numeric = _apply_numeric_mapping(states)[:, 0].to(prediction.probabilities)
@@ -117,21 +129,26 @@ class MeanPotentialOutcome(SEM2Operator):
 
 
 class ATE(SEM2Operator):
+    """One-versus-zero treatment contrast with explicit graph roles.
+
+    sample_bs overrides cfg.sample_bs; evaluate(sample_bs=...) affects one call.
+    """
     input_type = OperatorInput.SELF
     output_type = OperatorOutput.SCALAR
 
-    def __init__(self, cfg: TrainingConfig, model: SEM2, variable: VariableInfo | None = None) -> None:
+    def __init__(self, cfg: TrainingConfig, model: SEM2, variable: VariableInfo | None = None,
+                 *, outcome: str, treatment: str, sample_bs: int | None = None) -> None:
         self.model = model
         # Fixed 1-versus-0 treatment contrast, not a general multilevel effect.
         # An explicit seed pairs the exogenous draws; otherwise use the current stream.
-        self.control = MeanPotentialOutcome(model, outcome=cfg.Y_node, intervention={cfg.T_node: 0},
-                                            n_samples=cfg.sample_bs, seed=cfg.rng_seed, variable=variable)
-        self.treatment = MeanPotentialOutcome(model, outcome=cfg.Y_node, intervention={cfg.T_node: 1},
-                                              n_samples=cfg.sample_bs, seed=cfg.rng_seed, variable=variable)
+        self.control = MeanPotentialOutcome(model, outcome=outcome, intervention={treatment: 0},
+                                            n_samples=sample_bs, seed=cfg.rng_seed, variable=variable, cfg=cfg)
+        self.treatment = MeanPotentialOutcome(model, outcome=outcome, intervention={treatment: 1},
+                                              n_samples=sample_bs, seed=cfg.rng_seed, variable=variable, cfg=cfg)
 
-    def evaluate(self, **kwargs) -> tuple[ScalarResult, dict]:
-        y0, control = self.control.evaluate()
-        y1, treatment = self.treatment.evaluate()
+    def evaluate(self, *, sample_bs: int | None = None, **kwargs) -> tuple[ScalarResult, dict]:
+        y0, control = self.control.evaluate(sample_bs=sample_bs)
+        y1, treatment = self.treatment.evaluate(sample_bs=sample_bs)
         return ScalarResult(y1.value - y0.value, "ATE", y1.variables), {
             "control": control["interventions"], "treatment": treatment["interventions"]
         }

@@ -14,6 +14,7 @@ from ..model.construction import SEMType
 from ..model.models import SEM2Linear
 from ..dataloader.data import DataBatch, ScalarResult
 from ..model.models.base import SEM2
+from ..default_configs import TrainingConfig
 
 
 class SEM2LinearModelOperator(SEM2Operator):
@@ -202,10 +203,11 @@ class WeightedFrobeniusDistance(SEM2Operator):
     output_type = OperatorOutput.SCALAR
 
     def __init__(self, model: SEM2, observed_vars: list[str] | None = None,
-                 weight: torch.Tensor | None = None, n_samples: int = 1024) -> None:
+                 weight: torch.Tensor | None = None, n_samples: int | None = None,
+                 *, cfg: TrainingConfig | None = None) -> None:
         self.model = model
         self.observed_vars = observed_vars
-        self.covariance = Covariance(model, n_samples=n_samples)
+        self.covariance = Covariance(model, n_samples=n_samples, cfg=cfg)
         self.weight = weight
 
     def evaluate(self, observations: DataBatch, **kwargs) -> tuple[ScalarResult, dict]:
@@ -218,7 +220,7 @@ class WeightedFrobeniusDistance(SEM2Operator):
         if not isinstance(observations, DataBatch):
             raise TypeError("observations must be a DataBatch.")
         batch = observations if self.observed_vars is None else observations.subset(self.observed_vars)
-        covariance, _ = self.covariance.evaluate()
+        covariance, _ = self.covariance.evaluate(**kwargs)
         indices = [i for n in batch.names for i in self.covariance.columns[n]]
         model_cov = covariance[indices][:, indices]
         if len(batch) < 2:

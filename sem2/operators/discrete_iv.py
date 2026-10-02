@@ -15,8 +15,9 @@ class DiscreteIVEnergyLoss(EnergyLoss):
     establish identification. Group losses use empirical instrument frequencies.
     """
 
-    def __init__(self, cfg: TrainingConfig, model: SEM2Discrete, instrument: str) -> None:
-        super().__init__(cfg, model)
+    def __init__(self, cfg: TrainingConfig, model: SEM2Discrete, instrument: str, *,
+                 sample_bs: int | None = None, beta: float | None = None) -> None:
+        super().__init__(cfg, model, sample_bs=sample_bs, beta=beta)
         if not isinstance(model, SEM2Discrete):
             raise TypeError("DiscreteIVEnergyLoss requires SEM2Discrete.")
         node = model.node_dict[instrument] if instrument in model.input_node else None
@@ -30,7 +31,9 @@ class DiscreteIVEnergyLoss(EnergyLoss):
         if len(self.levels) < 2:
             raise ValueError("The instrument requires at least two declared levels.")
 
-    def evaluate(self, observations: DataBatch, **kwargs) -> tuple[ScalarResult, dict]:
+    def evaluate(self, observations: DataBatch, *, sample_bs: int | None = None,
+                 beta: float | None = None, **kwargs) -> tuple[ScalarResult, dict]:
+        sample_bs = self.bs if sample_bs is None else sample_bs
         observations = observations.to(self.device)
         unknown = set(observations.names) - self.model.input_node
         if unknown:
@@ -44,9 +47,9 @@ class DiscreteIVEnergyLoss(EnergyLoss):
         # Keep group-size checks in the energy kernel, not in the sampling loop.
         for level in self.levels:
             group = outcomes[z == level]
-            intervention = DataBatch(level.expand(self.bs, 1), instrument.variables)
-            prediction, _ = self.model.sample(batch_size=self.bs, set_nodes=intervention)
-            result, details = self.discrete_loss.energy_dist(group, prediction)
+            intervention = DataBatch(level.expand(sample_bs, 1), instrument.variables)
+            prediction, _ = self.model.sample(batch_size=sample_bs, set_nodes=intervention)
+            result, details = self.discrete_loss.energy_dist(group, prediction, p=beta)
             weight = len(group) / len(observations)
             total = total + weight * result.value
             for name, value in details.items():
