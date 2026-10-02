@@ -8,6 +8,7 @@ from torch import Tensor
 from ..components.nodes import NodeExogenous, NodeLinear
 from ..construction import SEMType
 from .base import SEM2
+from ...default_configs import LinearNodeConfig, MLPConfig
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -30,7 +31,7 @@ class SEM2Linear(SEM2):
     """
     sem_type = SEMType.LINEAR
 
-    def _check_sem_type(self):
+    def _check_sem_type(self) -> None:
         """A linear SEM requires only linear endogenous mechanisms. Validate
         against the type inferred from the formula (LINEAR or LINEAR_GAUSSIAN),
         rejecting nonlinear/discrete formulas up front.
@@ -42,7 +43,8 @@ class SEM2Linear(SEM2):
             )
         logging.info("Building a linear SEM2 model.")
 
-    def __init__(self, model_formula: str, node_cfgs: dict | None = None, device="cpu"):
+    def __init__(self, model_formula: str,
+                 node_cfgs: dict[str, int | LinearNodeConfig | MLPConfig] | None = None, device: str | torch.device = "cpu") -> None:
         super().__init__(model_formula, node_cfgs, device=device)
         self.device = device
 
@@ -52,7 +54,7 @@ class SEM2Linear(SEM2):
 
     # ── helpers ───────────────────────────────────────────────────────────────
 
-    def _assert_scalar_nodes(self):
+    def _assert_scalar_nodes(self) -> None:
         """coef_matrix / cov_matrix assume every node is scalar (out_dim == 1)."""
         bad = [n for n in self.node_order if self.node_dict[n].out_dim != 1]
         if bad:
@@ -90,15 +92,15 @@ class SEM2Linear(SEM2):
                 # effective_weight is [1, input_dim]; scalar parents -> one col each.
                 w = node.effective_weight().reshape(-1)
                 for col, parent in enumerate(node.predecessors):
-                    B[self._node_index[name], self._node_index[parent]] += w[col]
+                    B[self._node_index[name], self._node_index[parent]] = w[col]
         return B
 
     # ── model-implied mean and covariance ─────────────────────────────────────
 
     def mean_vector(self) -> Tensor:
         """Model-implied mean over all nodes: mu = (I - B)^-1 c, where c[i] is the
-        exogenous distribution mean for exogenous nodes and the bias term for
-        linear nodes (0 if the node has no bias).
+        exogenous distribution mean for exogenous nodes and the intercept for
+        linear nodes (0 if the node has no intercept).
         """
         N = len(self.node_order)
         B = self.coef_matrix()
@@ -114,8 +116,8 @@ class SEM2Linear(SEM2):
                         f"Node '{name}' has mean {mean}."
                     )
                 c[i] = mean
-            elif isinstance(node, NodeLinear) and node.bias() is not None:
-                c[i] = node.bias().reshape(-1)[0]
+            elif isinstance(node, NodeLinear) and node.intercept() is not None:
+                c[i] = node.intercept().reshape(-1)[0]
         eye = torch.eye(N, device=self.device)
         return torch.linalg.solve(eye - B, c)
 

@@ -2,6 +2,7 @@
 # on Python < 3.14.
 from __future__ import annotations
 import warnings
+from dataclasses import replace
 import torch
 from torch import nn
 from torch import Tensor
@@ -9,6 +10,7 @@ from torch import Tensor
 from ..components.nodes import NodeExogenous, NodeLinear, NodeMLP, NodeMLPDiscrete, SEM2Node
 from ..construction import _DAG, SEMType
 from ...dataloader.data import DataBatch, VariableInfo
+from ...default_configs import LinearNodeConfig, MLPConfig
 
 
 # ════════════════════════════════════════════════════════════════════════════════════
@@ -24,7 +26,8 @@ class SEM2(_DAG, nn.Module):
     node_dict: nn.ModuleDict[str, SEM2Node]  # Maps node name to its SEM2Node object, registered as submodule for PyTorch tracking
     sem_type = SEMType.NONLINEAR
 
-    def __init__(self, model_formula: str, node_cfgs:dict|None = None, device="cpu"):
+    def __init__(self, model_formula: str,
+                 node_cfgs: dict[str, int | LinearNodeConfig | MLPConfig] | None = None, device: str | torch.device = "cpu") -> None:
         """
         Args:
             model_formula: Semicolon-separated formulas defining the SEM.
@@ -52,7 +55,7 @@ class SEM2(_DAG, nn.Module):
         self.node_dict = nn.ModuleDict(name_to_node)
         self.node_dict.to(device)
 
-    def _check_sem_type(self):
+    def _check_sem_type(self) -> None:
         """Warn if the formula's inferred sem_type differs from the sem_type this
         class is specialised for, nudging the user toward a more suitable SEM2
         subclass. Subclasses (e.g. SEM2Discrete, SEM2Linear) may override this to
@@ -77,7 +80,8 @@ class SEM2(_DAG, nn.Module):
                     stacklevel=3,
                 )
 
-    def _build_and_initialize_nodes(self, node_cfgs: dict, device: str) -> dict[str, SEM2Node]:
+    def _build_and_initialize_nodes(self, node_cfgs: dict[str, int | LinearNodeConfig | MLPConfig],
+                                    device: str | torch.device) -> dict[str, SEM2Node]:
         """Build all SEM2Node objects from DAG.node_specs in topological order.
 
         Because we iterate in topological order, every node's predecessors are
@@ -119,6 +123,8 @@ class SEM2(_DAG, nn.Module):
                 node = NodeMLP(node_name, ns.rhs, cfg, predecessor_nodes, device=device)
 
             elif ns.node_type == "discrete":
+                # Category count belongs to the formula; copy the architecture config.
+                cfg = replace(cfg if cfg is not None else MLPConfig(), output_dim=ns.levels)
                 node = NodeMLPDiscrete(node_name, ns.rhs, cfg, predecessor_nodes, device=device)
 
             elif ns.node_type == "linear":
@@ -166,7 +172,13 @@ class SEM2(_DAG, nn.Module):
         # Share the sampling loop with queries that stop at a specific target.
         return self._sample(batch_size, set_nodes)
 
-    def _sample(self, batch_size: int, set_nodes: DataBatch | None, target: str | None = None):
+    def _sample(self, batch_size: int, set_nodes: DataBatch | None,
+                target: str | None = None) -> tuple[DataBatch, dict]:
+        """One traversal for full samples and target-only queries.
+
+        The private target option lets queries stop early without duplicating
+        intervention handling or expanding the public sample interface.
+        """
         if target is not None and target not in self.input_node:
             raise ValueError(f"Unknown or internal target node: {target!r}")
         # Unwrap interventions once and retain their supplied variable metadata.

@@ -19,20 +19,18 @@ class LinearNodeConfig:
     keeping the model formula self-contained and readable.
     """
 
-    # output_dim > 1 lets a linear node output probabilities over discrete
-    # states (e.g. a discrete latent variable), essentially a linear
-    # classifier / softmax layer useful for exact marginalisation.
+    # Number of real-valued output coordinates. Discrete category counts belong
+    # to d(...; levels=N), not to a linear node's output dimension.
     output_dim: int = 1
 
-    # Without bias the linear relationship is forced through the origin
-    # a strong structural constraint. Set False only when your model
-    # explicitly requires it.
-    use_bias: bool = True
+    # Estimate an intercept when the formula omits a constant. Explicit formula
+    # constants always win; otherwise False forces the equation through the origin.
+    use_intercept: bool = True
 
 
 @dataclass
 class MLPConfig:
-    """Public configuration for MLP nodes."""
+    """Network architecture; discrete output_dim is set by the formula's levels."""
 
     input_dim: int = None                                                   # Inferred from graph
     hidden_dims: list = field(default_factory=lambda: [512, 512, 512])      # Hidden layer widths
@@ -40,7 +38,7 @@ class MLPConfig:
     dropout: float = 0.0                                                    # 0 = no dropout
     activation: str = "relu"                                                # relu | tanh | sigmoid | ... https://docs.pytorch.org/docs/2.12/nn.html
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Copy layer widths so this config does not share the caller's mutable list."""
         self.hidden_dims = list(self.hidden_dims)
 
@@ -78,7 +76,23 @@ class TrainingConfig(BaseModel):
     # Training loop
     batch_size: int = Field(default=1024, gt=0)
     epochs: int = Field(default=12, gt=0)
-    rng_seed: int = 42
+    rng_seed: int | None = None
+    sample_bs: int = 512                           # Sample batch size for distribution sampling
+
+    # Energy score loss
+    use_energy_score: bool = True
+    energy_score_weight: float = 1.
+    energy_score_beta: float = 1.
+
+    # ATE loss
+    use_ate: bool = False
+    ate_weight: float = -0.05
+    T_node: str = "X"
+    Y_node: str = "Y"
+
+    # MMD loss  # TODO
+    use_mmd: bool = False
+    mmd_weight: float = 1.
 
     @model_validator(mode="after")
     def _resolve_device(self) -> "TrainingConfig":

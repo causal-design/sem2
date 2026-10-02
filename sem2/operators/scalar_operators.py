@@ -1,12 +1,17 @@
 """Scalar operators consuming named data and returning ScalarResult."""
 from __future__ import annotations
+from typing import TYPE_CHECKING
 import torch
-from .operators_base import OperatorInput, OperatorOutput, SEM2Operator, _numeric_values
-from .vector_operators import PotentialOutcome
+from .operators_base import OperatorInput, OperatorOutput, SEM2Operator, _apply_numeric_mapping
+from .vector_operators import PotentialOutcomeSample
 from .discrete_energy_loss import DiscreteEnergyLoss
 from ..model.construction.sem_types import SEMType
-from ..model.components.nodes import NodeExogenous
 from ..dataloader.data import DataBatch, ScalarResult, VariableInfo
+from ..utils import set_seed
+from ..default_configs import TrainingConfig
+
+if TYPE_CHECKING:
+    from ..model.models.base import SEM2
 
 
 class EnergyLoss(SEM2Operator):
@@ -14,150 +19,100 @@ class EnergyLoss(SEM2Operator):
     input_type = OperatorInput.DATA
     output_type = OperatorOutput.SCALAR
 
-    def __init__(self, model, sample_bs: int = 512, beta: float = 1., instrument_node: str | None = None):
+    def __init__(self, cfg: TrainingConfig, model: SEM2) -> None:
         self.model = model
-        self.device = model.device
-        self.bs = sample_bs
-        self.beta = beta
-        self.instrument = instrument_node
+        self.device = cfg.device
+        self.bs = cfg.sample_bs
+        self.beta = cfg.energy_score_beta
         self.discrete_loss = DiscreteEnergyLoss(self.beta)
-        if self.instrument is not None:
-            if not SEMType.is_discrete(model.sem_type):
-                raise ValueError("The IV objective requires a discrete model.")
-            node = model.node_dict[self.instrument] if self.instrument in model.input_node else None
-            if not isinstance(node, NodeExogenous) or node.out_dim != 1:
-                raise ValueError("The instrument must be a scalar exogenous discrete node.")
-            support = node.support
-            if support.constraint is None or not support.constraint.is_discrete or support.values is None:
-                raise ValueError("The instrument requires enumerated discrete support.")
-            self.levels = support.values.reshape(-1)
-            if len(self.levels) < 2:
-                raise ValueError("The instrument requires at least two declared levels.")
-
-        if SEMType.is_continuous(model.sem_type):
-            self.evaluate = self._evaluate_continuous
-        elif SEMType.is_discrete(model.sem_type):
-            self.evaluate = self._evaluate_discrete if self.instrument is None else self._evaluate_discrete_iv
-        else:
-            raise NotImplementedError(f"Energy score is not implemented for this SEM type: {model.sem_type}")
 
     def evaluate(self, observations: DataBatch, **kwargs) -> tuple[ScalarResult, dict]:
-        """Replaced at initialization by the model-specific implementation."""
-        raise NotImplementedError
-
-    def _prepare_observations(self, observations: DataBatch) -> DataBatch:
         if not isinstance(observations, DataBatch):
             raise TypeError("observations must be a DataBatch.")
         observations = observations.to(self.device)
         unknown = set(observations.names) - self.model.input_node
         if unknown:
             raise ValueError(f"Unknown or internal observed variables: {sorted(unknown)}")
-        return observations
-
-    def _evaluate_continuous(self, observations: DataBatch, **kwargs) -> tuple[ScalarResult, dict]:
-        observations = self._prepare_observations(observations)
-        prediction, _ = self.model.sample(batch_size=self.bs)
-        return self._energy_score(observations, prediction)
-
-    def _evaluate_discrete(self, observations: DataBatch, **kwargs) -> tuple[ScalarResult, dict]:
-        observations = self._prepare_observations(observations)
+        if SEMType.is_continuous(self.model.sem_type):
+            prediction, _ = self.model.sample(batch_size=self.bs)
+            return self._energy_score(observations, prediction)
         names = [name for name in observations.names if name in self.model.state_node_names
                  and not self.model.node_specs[name].is_helper]
         outcomes = observations.subset(names)
         prediction, _ = self.model.sample(batch_size=self.bs)
         return self.discrete_loss.energy_dist(outcomes, prediction)
 
-    def _evaluate_discrete_iv(self, observations: DataBatch, **kwargs) -> tuple[ScalarResult, dict]:
-        observations = self._prepare_observations(observations)
-        names = [name for name in observations.names if name in self.model.state_node_names
-                 and not self.model.node_specs[name].is_helper]
-        outcomes = observations.subset(names)
-        instrument = observations.subset(self.instrument)
-        if instrument.values.shape[1] != 1:
-            raise ValueError("The instrument must be scalar.")
-        z = instrument.values[:, 0]
-        total = observations.values.new_zeros((), dtype=torch.float32)
-        metrics = {}
-        # Group valid instrument values once; the kernel checks each group's size.
-        for level in self.levels:
-            group = outcomes[z == level]
-            intervention = DataBatch(level.expand(self.bs, 1), instrument.variables)
-            prediction, _ = self.model.sample(batch_size=self.bs, set_nodes=intervention)
-            result, details = self.discrete_loss.energy_dist(group, prediction)
-            weight = len(group) / len(observations)
-            total = total + weight * result.value
-            for name, value in details.items():
-                metrics[name] = metrics.get(name, 0) + weight * value
-        return ScalarResult(total, "energy_distance", outcomes.variables), metrics
-
     def _energy_score(self, observations: DataBatch, prediction: DataBatch) -> tuple[ScalarResult, dict]:
         """Compare observations [N, D] with named draws [M, D], allowing N != M."""
-        targets = _numeric_values(observations)
-        draws = _numeric_values(DataBatch(prediction.select(observations.names), observations.variables)).to(targets)
+        targets = _apply_numeric_mapping(observations)
+        draws = _apply_numeric_mapping(DataBatch(prediction.select(observations.names), observations.variables)).to(targets)
         n = draws.shape[0]
         if not len(observations) or n < 2:
             raise ValueError("Energy score requires observations and at least two model draws.")
+        # Cross term: average every observation/model pair, even when N != M.
         cross = (torch.cdist(targets, draws) ** self.beta).mean()
         distances = torch.cdist(draws, draws) ** self.beta
+        # Model pair term: omit self-pairs for the unbiased finite-sample estimate.
         pair = (distances.sum() - distances.diagonal().sum()) / (n * (n - 1))
         value = cross - pair / 2
         return ScalarResult(value, "energy_score", observations.variables), {
             "energy_score": value, "estimated-true distance": cross, "estimated-estimated distance": pair
         }
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return "EnergyLoss"
 
 
 class MeanPotentialOutcome(SEM2Operator):
-    """Mean of a scalar outcome under a named intervention.
+    """Mean of a scalar outcome under constant named interventions.
 
-    Supply outcome metadata to interpret categories using explicit scores.
-    Otherwise the existing code-valued mean is retained with a warning.
+    n_samples counts Monte Carlo samples; discrete outcomes are integrated over
+    their states. By default, sampling uses the existing RNG stream. An explicit
+    seed reseeds each evaluation; the previous RNG state is not restored.
+    Supply variable metadata for an explicit category-to-number mapping.
     """
     input_type = OperatorInput.SELF
     output_type = OperatorOutput.SCALAR
 
-    def __init__(self, target_node: str, intervene_node: str, model, variable: VariableInfo | None = None):
+    def __init__(self, model: SEM2, *, outcome: str, intervention: dict[str, float],
+                 n_samples: int = 1000, seed: int | None = None,
+                 variable: VariableInfo | None = None) -> None:
         self.model = model
-        self.target_node = target_node
-        self.intervene_node = intervene_node
-        if target_node not in model.input_node or intervene_node not in model.input_node:
+        self.outcome = outcome
+        self.intervention = dict(intervention)
+        self.n_samples = n_samples
+        self.seed = seed
+        if outcome not in model.input_node or set(intervention) - model.input_node:
             raise ValueError("Query nodes must be user-declared model variables.")
-        self.variable = variable if variable is not None else model._variable_info(target_node)
-        if self.variable.name != target_node or self.variable.width != 1 or model.node_dict[target_node].out_dim != 1:
-            raise ValueError("MeanPotentialOutcome requires scalar target metadata matching the model.")
-        if model.node_dict[intervene_node].out_dim != 1:
-            raise ValueError("MeanPotentialOutcome requires a scalar intervention node.")
+        self.variable = variable if variable is not None else model._variable_info(outcome)
+        if self.variable.name != outcome or self.variable.width != 1 or model.node_dict[outcome].out_dim != 1:
+            raise ValueError("MeanPotentialOutcome requires scalar outcome metadata matching the model.")
+        if any(model.node_dict[name].out_dim != 1 for name in intervention):
+            raise ValueError("MeanPotentialOutcome requires scalar intervention nodes.")
         if SEMType.is_continuous(model.sem_type):
-            self.sampler = PotentialOutcome(model, target_node)
-            self.evaluate = self._evaluate_continuous
-        elif SEMType.is_discrete(model.sem_type):
-            self.evaluate = self._evaluate_discrete
+            self.sampler = PotentialOutcomeSample(model, outcome)
+
+    def evaluate(self, **kwargs) -> tuple[ScalarResult, dict]:
+        """Evaluate the configured intervention, reseeding only if requested."""
+        parameter = next(self.model.parameters(), None)
+        device = parameter.device if parameter is not None else torch.device(self.model.device)
+        dtype = parameter.dtype if parameter is not None else torch.get_default_dtype()
+        # Broadcast constant assignments once; samplers still consume named batches.
+        values = [torch.as_tensor(value, device=device, dtype=dtype).expand(self.n_samples, 1)
+                  for value in self.intervention.values()]
+        set_nodes = DataBatch(torch.cat(values, dim=1),
+                              tuple(self.model._variable_info(n) for n in self.intervention)) if values else None
+
+        set_seed(self.seed, device=device)
+        if SEMType.is_continuous(self.model.sem_type):
+            draws, details = self.sampler.evaluate(batch_size=self.n_samples, set_nodes=set_nodes)
+            value = _apply_numeric_mapping(DataBatch(draws.values, (self.variable,))).mean()
         else:
-            raise NotImplementedError(f"Mean potential outcome is not implemented for this SEM type: {model.sem_type}")
-
-    def evaluate(self, set_value: DataBatch, **kwargs) -> tuple[ScalarResult, dict]:
-        """Replaced at initialization by the model-specific implementation."""
-        raise NotImplementedError
-
-    def _validate_intervention(self, set_value: DataBatch) -> None:
-        if not isinstance(set_value, DataBatch) or set_value.names != (self.intervene_node,):
-            raise TypeError("set_value must be a DataBatch containing the intervention variable.")
-
-    def _evaluate_continuous(self, set_value: DataBatch, **kwargs) -> tuple[ScalarResult, dict]:
-        self._validate_intervention(set_value)
-        draws, details = self.sampler.evaluate(batch_size=len(set_value), set_nodes=set_value)
-        value = _numeric_values(DataBatch(draws.values, (self.variable,))).mean()
-        return ScalarResult(value, "mean_potential_outcome", (self.variable,)), details
-
-    def _evaluate_discrete(self, set_value: DataBatch, **kwargs) -> tuple[ScalarResult, dict]:
-        self._validate_intervention(set_value)
-        prediction, details = self.model.sample(batch_size=len(set_value), set_nodes=set_value)
-        prediction = prediction.marginalize([self.target_node])
-        states = DataBatch(prediction.states.values, (self.variable,))
-        numeric = _numeric_values(states)[:, 0].to(prediction.probabilities)
-        value = (prediction.probabilities @ numeric).mean()
+            prediction, details = self.model.sample(batch_size=self.n_samples, set_nodes=set_nodes)
+            prediction = prediction.marginalize([self.outcome])
+            states = DataBatch(prediction.states.values, (self.variable,))
+            numeric = _apply_numeric_mapping(states)[:, 0].to(prediction.probabilities)
+            value = (prediction.probabilities @ numeric).mean()
         return ScalarResult(value, "mean_potential_outcome", (self.variable,)), details
 
 
@@ -165,23 +120,23 @@ class ATE(SEM2Operator):
     input_type = OperatorInput.SELF
     output_type = OperatorOutput.SCALAR
 
-    def __init__(self, model, target_node: str, intervene_node: str, sample_bs: int = 512,
-                 variable: VariableInfo | None = None):
-        self.device = model.device
-        self.bs = sample_bs
+    def __init__(self, cfg: TrainingConfig, model: SEM2, variable: VariableInfo | None = None) -> None:
         self.model = model
-        self.intervene_node = intervene_node
-        self.treat_pot_out = MeanPotentialOutcome(target_node, intervene_node, model, variable=variable)
+        # Fixed 1-versus-0 treatment contrast, not a general multilevel effect.
+        # An explicit seed pairs the exogenous draws; otherwise use the current stream.
+        self.control = MeanPotentialOutcome(model, outcome=cfg.Y_node, intervention={cfg.T_node: 0},
+                                            n_samples=cfg.sample_bs, seed=cfg.rng_seed, variable=variable)
+        self.treatment = MeanPotentialOutcome(model, outcome=cfg.Y_node, intervention={cfg.T_node: 1},
+                                              n_samples=cfg.sample_bs, seed=cfg.rng_seed, variable=variable)
 
     def evaluate(self, **kwargs) -> tuple[ScalarResult, dict]:
-        metadata = (self.model._variable_info(self.intervene_node),)
-        t0 = DataBatch(torch.zeros((self.bs, 1), device=self.device), metadata)
-        t1 = DataBatch(torch.ones((self.bs, 1), device=self.device), metadata)
-        y0, _ = self.treat_pot_out.evaluate(t0)
-        y1, _ = self.treat_pot_out.evaluate(t1)
-        return ScalarResult(y1.value - y0.value, "ATE", y1.variables), {"control": t0, "treatment": t1}
+        y0, control = self.control.evaluate()
+        y1, treatment = self.treatment.evaluate()
+        return ScalarResult(y1.value - y0.value, "ATE", y1.variables), {
+            "control": control["interventions"], "treatment": treatment["interventions"]
+        }
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return "ATE"
 
 
