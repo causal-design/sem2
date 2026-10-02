@@ -53,7 +53,7 @@ Optimisers = Literal["AdamW", "Adam", "SGD"]
 class TrainingConfig(BaseModel):
     """Configuration for a SEM2 training run.
 
-    Covers device selection, optimiser and training loop settings.
+    Covers device selection, optimiser, training loop and general operator settings.
     Objectives are supplied separately; node architecture is configured via
     LinearNodeConfig and MLPConfig.
 
@@ -87,8 +87,6 @@ class TrainingConfig(BaseModel):
     # ATE loss
     use_ate: bool = False
     ate_weight: float = -0.05
-    T_node: str = "X"
-    Y_node: str = "Y"
 
     # MMD loss  # TODO
     use_mmd: bool = False

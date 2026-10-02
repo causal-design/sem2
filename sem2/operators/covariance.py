@@ -5,6 +5,7 @@ from .operators_base import OperatorInput, OperatorOutput, SEM2Operator
 from ..dataloader.data import DataBatch
 from ..model.models.base import SEM2
 from ..model.models.linear import SEM2Linear
+from ..default_configs import TrainingConfig
 
 
 class Covariance(SEM2Operator):
@@ -15,13 +16,16 @@ class Covariance(SEM2Operator):
     the conditional-covariance decomposition retains probability gradients.
     Assumes finite second moments. Category codes retain their model-defined
     numeric representation.
+    n_samples overrides cfg.sample_bs; evaluate(sample_bs=...) affects one call.
     """
     input_type = OperatorInput.SELF
     output_type = OperatorOutput.MATRIX
 
-    def __init__(self, model: SEM2, n_samples: int = 1024) -> None:
+    def __init__(self, model: SEM2, n_samples: int | None = None,
+                 *, cfg: TrainingConfig | None = None) -> None:
+        cfg = cfg if cfg is not None else TrainingConfig(device=model.device)
         self.model = model
-        self.n_samples = n_samples
+        self.n_samples = cfg.sample_bs if n_samples is None else n_samples
         self.names = tuple(n for n in model.topological_order if n in model.input_node)
         self.variables = tuple(model._variable_info(n) for n in self.names)
         self.columns = {}
@@ -29,15 +33,18 @@ class Covariance(SEM2Operator):
         for variable in self.variables:
             self.columns[variable.name] = list(range(start, start + variable.width))
             start += variable.width
-        if not isinstance(model, SEM2Linear) and n_samples < 2:
+        if not isinstance(model, SEM2Linear) and self.n_samples < 2:
             raise ValueError("Covariance requires at least two Monte Carlo samples.")
 
-    def evaluate(self, **kwargs) -> tuple[torch.Tensor, dict]:
+    def evaluate(self, *, sample_bs: int | None = None, **kwargs) -> tuple[torch.Tensor, dict]:
         """Return the full covariance matrix and its ordered variable metadata."""
         if isinstance(self.model, SEM2Linear):
             covariance = self.model.cov_matrix(list(self.names))
         else:
-            prediction, _ = self.model.sample(self.n_samples)
+            sample_bs = self.n_samples if sample_bs is None else sample_bs
+            if sample_bs < 2:
+                raise ValueError("Covariance requires at least two Monte Carlo samples.")
+            prediction, _ = self.model.sample(sample_bs)
             if isinstance(prediction, DataBatch):
                 covariance = torch.cov(prediction.select(self.names).T)
             else:

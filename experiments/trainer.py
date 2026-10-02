@@ -33,9 +33,9 @@ def main():
     torch.testing.assert_close(result.value, reordered.value)
     print("Named-column reorder check passed.")
     trainer.train()
-    outcome = MeanPotentialOutcome(model, outcome="Y", intervention={"X": 1}, n_samples=cfg.sample_bs,
+    outcome = MeanPotentialOutcome(model, outcome="Y", intervention={"X": 1}, cfg=cfg,
                                    variable=VariableInfo("Y", categorical=True, numeric_mapping={0: 0., 1: 1.}))
-    result, _ = outcome.evaluate()
+    result, _ = outcome.evaluate(sample_bs=128)
     print(result.name, result.value.detach(), result.variables)
 
 
