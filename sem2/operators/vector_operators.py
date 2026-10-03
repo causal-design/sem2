@@ -1,7 +1,7 @@
 """Operators returning named draws."""
 from __future__ import annotations
 from .operators_base import SEM2Operator, OperatorInput, OperatorOutput
-from ..model.construction import SEMType
+from ..model.construction.sem_types import SEMType
 from ..dataloader.data import DataBatch
 from ..model.models.base import SEM2
 

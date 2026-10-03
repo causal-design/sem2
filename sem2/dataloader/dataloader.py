@@ -8,7 +8,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from .data import VariableInfo, prepare_data
 
 if TYPE_CHECKING:
-    from ..model.models import SEM2
+    from ..model.models.base import SEM2
 
 
 def prepare_dataloader(model: SEM2, data: pd.DataFrame, batch_size: int,

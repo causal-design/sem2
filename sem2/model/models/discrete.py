@@ -8,7 +8,7 @@ from torch import Tensor
 from collections import defaultdict
 
 from ..components.nodes import NodeMLPDiscrete, SEM2Node, DiscreteModes
-from ..construction import SEMType
+from ..construction.sem_types import SEMType
 from .base import SEM2
 from ...dataloader.data import DataBatch, DiscreteDistribution
 from ...default_configs import LinearNodeConfig, MLPConfig

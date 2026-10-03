@@ -8,7 +8,8 @@ from torch import nn
 from torch import Tensor
 
 from ..components.nodes import NodeExogenous, NodeLinear, NodeMLP, NodeMLPDiscrete, SEM2Node
-from ..construction import _DAG, SEMType
+from ..construction.dag import _DAG
+from ..construction.sem_types import SEMType
 from ...dataloader.data import DataBatch, VariableInfo
 from ...default_configs import LinearNodeConfig, MLPConfig
 

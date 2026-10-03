@@ -3,11 +3,11 @@ import pandas as pd
 import torch
 import torch.nn as nn
 
-from ..model.models import SEM2
+from ..model.models.base import SEM2
 from ..operators.operators_base import OperatorInput, OperatorOutput, SEM2Operator
 from ..default_configs import TrainingConfig
 from ..dataloader.data import DataBatch, VariableInfo
-from ..dataloader import prepare_dataloader
+from ..dataloader.dataloader import prepare_dataloader
 from ..utils import set_seed
 
 logger = logging.getLogger(__name__)
@@ -82,9 +82,9 @@ def fit(model: SEM2, data: pd.DataFrame, objective: SEM2Operator, config: Traini
 
 
 def main():
-    from ..dataloader import DummyDiscreteDataloader
+    from ..dataloader.dummy import DummyDiscreteDataloader
     from ..default_configs import MLPConfig
-    from ..model import SEM2Discrete
+    from ..model.models.discrete import SEM2Discrete
     from ..operators.discrete_iv import DiscreteIVEnergyLoss
 
     set_seed(0)
