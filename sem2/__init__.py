@@ -1,1 +1,1 @@
-from .trainer import fit
+"""Semiparametric structural equation models."""

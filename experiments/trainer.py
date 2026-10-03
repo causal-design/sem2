@@ -3,10 +3,10 @@ import logging
 import pandas as pd
 import torch
 from sem2.dataloader.data import VariableInfo
-from sem2.dataloader import DummyDiscreteDataloader
+from sem2.dataloader.dummy import DummyDiscreteDataloader
 from sem2.default_configs import TrainingConfig, MLPConfig
-from sem2.model import SEM2Discrete
-from sem2.trainer import SEM2Trainer
+from sem2.model.models.discrete import SEM2Discrete
+from sem2.trainer.trainer import SEM2Trainer
 from sem2.operators.scalar_operators import MeanPotentialOutcome, SEM2Loss
 from sem2.operators.discrete_iv import DiscreteIVEnergyLoss
 from sem2.utils import set_seed

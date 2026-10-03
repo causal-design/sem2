@@ -19,11 +19,11 @@ from sem2.model.components.nodes import (
     NodeExogenous,
     NodeEndogenous, NodeLinear, NodeNonlinear, NodeMLP,
 )
-from sem2.model.models import SEM2
-from sem2.model.construction import _DAG
-from sem2.model.construction import SEMType
-from sem2.model.construction import FormulaParser
-from sem2.model.construction import NodeSpec
+from sem2.model.models.base import SEM2
+from sem2.model.construction.dag import _DAG
+from sem2.model.construction.sem_types import SEMType
+from sem2.model.construction.formula_parser import FormulaParser
+from sem2.model.construction.sem_ast import NodeSpec
 
 #probably should breakdown into smaller test files but for now is fine I guess
 
@@ -855,14 +855,14 @@ class TestFormulaParserAST:
         assert inputs == {"e1", "e2", "y"}
 
     def test_ast_statement_types(self):
-        from sem2.model.construction import ExogenousDecl, EndogenousDecl
+        from sem2.model.construction.sem_ast import ExogenousDecl, EndogenousDecl
         parser = FormulaParser("e ~ Normal(0,1); y <- 1*e")
         parser.parse()
         kinds = [type(s).__name__ for s in parser.statements]
         assert kinds == ["ExogenousDecl", "EndogenousDecl"]
 
     def test_exogenous_ast_holds_distribution(self):
-        from sem2.model.construction import ExogenousDecl
+        from sem2.model.construction.sem_ast import ExogenousDecl
         parser = FormulaParser("e ~ Normal(0,1)")
         parser.parse()
         decl = parser.statements[0]
@@ -871,7 +871,7 @@ class TestFormulaParserAST:
         assert decl.dist.args == [0.0, 1.0]
 
     def test_linear_ast_holds_terms(self):
-        from sem2.model.construction import EndogenousDecl
+        from sem2.model.construction.sem_ast import EndogenousDecl
         parser = FormulaParser("e1, e2 ~ Normal(0,1); y <- 1*e1 + e2")
         parser.parse()
         y_decl = parser.statements[-1]
@@ -1067,7 +1067,7 @@ class TestRegisterBuffer:
 # 12. SEM2Linear: coef_matrix / cov_matrix
 # ═══════════════════════════════════════════════════════════════════════════════
 
-from sem2.model import SEM2Linear
+from sem2.model.models.linear import SEM2Linear
 from sem2.operators.linear import (
     SEM2LinearModelOperator, LogLikelihood, WeightedFrobeniusDistance,
 )

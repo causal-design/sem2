@@ -18,7 +18,8 @@ from sem2.utils import set_seed
 
 torch.set_num_threads(1)
 
-from sem2.model import SEM2Linear, SEMType
+from sem2.model.models.linear import SEM2Linear
+from sem2.model.construction.sem_types import SEMType
 from sem2.operators.linear import LogLikelihood
 from sem2.dataloader.data import DataBatch, VariableInfo
 

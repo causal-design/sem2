@@ -10,8 +10,8 @@ import torch
 
 from .operators_base import OperatorInput, OperatorOutput, SEM2Operator
 from .covariance import Covariance
-from ..model.construction import SEMType
-from ..model.models import SEM2Linear
+from ..model.construction.sem_types import SEMType
+from ..model.models.linear import SEM2Linear
 from ..dataloader.data import DataBatch, ScalarResult
 from ..model.models.base import SEM2
 from ..default_configs import TrainingConfig

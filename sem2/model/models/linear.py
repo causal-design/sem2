@@ -6,7 +6,7 @@ import torch
 from torch import Tensor
 
 from ..components.nodes import NodeExogenous, NodeLinear
-from ..construction import SEMType
+from ..construction.sem_types import SEMType
 from .base import SEM2
 from ...default_configs import LinearNodeConfig, MLPConfig
 

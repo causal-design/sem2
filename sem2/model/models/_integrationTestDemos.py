@@ -3,7 +3,8 @@
 Run with:  python -m sem2.model.models._integrationTestDemos
 (Slated to be folded into integration tests.)
 """
-from ..models import SEM2, SEM2Discrete
+from .base import SEM2
+from .discrete import SEM2Discrete
 from ...default_configs import MLPConfig, LinearNodeConfig
 
 
