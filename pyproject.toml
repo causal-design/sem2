@@ -15,6 +15,9 @@ dependencies = [
     "pytest",
 ]
 
+[project.optional-dependencies]
+docs = ["sphinx>=8,<9"]
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["sem2", "sem2.*"]
