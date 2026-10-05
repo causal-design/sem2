@@ -16,7 +16,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-docs = ["sphinx>=8,<9"]
+docs = ["sphinx>=8,<9", "pydata-sphinx-theme>=0.15"]
 
 [tool.setuptools.packages.find]
 where = ["."]

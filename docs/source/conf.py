@@ -6,5 +6,5 @@ release = importlib.metadata.version("sem2")
 extensions = ["sphinx.ext.autodoc", "sphinx.ext.napoleon"]
 autodoc_typehints = "none"
 autoclass_content = "both"
-html_theme = "alabaster"
+html_theme = "pydata_sphinx_theme"
 exclude_patterns = []
