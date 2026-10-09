@@ -21,7 +21,7 @@ torch.set_num_threads(1)
 from sem2.model.models.linear import SEM2Linear
 from sem2.model.construction.sem_types import SEMType
 from sem2.operators.linear import LogLikelihood
-from sem2.dataloader.data import DataBatch, VariableInfo
+from sem2.data.records import DataBatch, VariableInfo
 
 DATA = os.path.join(os.path.dirname(__file__), "..", "data", "PoliticalDemocracy.csv")
 LAVAAN = {"dem60~ind60": 1.483, "dem65~ind60": 0.572, "dem65~dem60": 0.837}

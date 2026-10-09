@@ -2,7 +2,7 @@
 from __future__ import annotations
 import torch
 from .operators_base import OperatorInput, OperatorOutput, SEM2Operator
-from ..dataloader.data import DataBatch
+from ..data.records import DataBatch
 from ..model.models.base import SEM2
 from ..model.models.linear import SEM2Linear
 from ..default_configs import TrainingConfig
@@ -31,8 +31,8 @@ class Covariance(SEM2Operator):
         self.columns = {}
         start = 0
         for variable in self.variables:
-            self.columns[variable.name] = list(range(start, start + variable.width))
-            start += variable.width
+            self.columns[variable.name] = list(range(start, start + variable.dim))
+            start += variable.dim
         if not isinstance(model, SEM2Linear) and self.sample_bs < 2:
             raise ValueError("Covariance requires at least two Monte Carlo samples.")
 
@@ -60,5 +60,5 @@ class Covariance(SEM2Operator):
                 within = within - conditional.T @ conditional / len(conditional)
                 indices = [i for n in prediction.states.names for i in self.columns[n]]
                 covariance[torch.tensor(indices, device=states.device)[:, None], indices] += within
-        width = sum(v.width for v in self.variables)
+        width = sum(v.dim for v in self.variables)
         return covariance.reshape(width, width), {"variables": self.variables}

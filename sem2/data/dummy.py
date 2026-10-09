@@ -1,6 +1,6 @@
 import torch
 from collections.abc import Iterator
-from .data import DataBatch, VariableInfo
+from .records import DataBatch, VariableInfo
 
 
 class DummyDiscreteDataloader:

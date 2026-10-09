@@ -1,8 +1,8 @@
 """Energy fitting for discrete instrumental-variable problems."""
 from __future__ import annotations
 import torch
-from .scalar_operators import EnergyLoss
-from ..dataloader.data import DataBatch, ScalarResult
+from .divergence import EnergyLoss
+from ..data.records import DataBatch, ScalarResult
 from ..default_configs import TrainingConfig
 from ..model.components.nodes import NodeExogenous
 from ..model.models.discrete import SEM2Discrete

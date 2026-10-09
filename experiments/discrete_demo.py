@@ -4,7 +4,7 @@ import logging
 from sem2.model.models.base import SEM2
 from sem2.model.models.discrete import SEM2Discrete
 from sem2.default_configs import MLPConfig
-from sem2.dataloader.data import DataBatch
+from sem2.data.records import DataBatch
 
 logging.basicConfig(level=logging.INFO)
 

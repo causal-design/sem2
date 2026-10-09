@@ -5,7 +5,8 @@ import pandas as pd
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 
-from .data import VariableInfo, prepare_data
+from ..data.records import VariableInfo
+from ..data.preparation import prepare_data
 
 if TYPE_CHECKING:
     from ..model.models.base import SEM2
