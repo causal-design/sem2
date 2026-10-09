@@ -10,7 +10,8 @@ from collections import defaultdict
 from ..components.nodes import NodeMLPDiscrete, SEM2Node, DiscreteModes
 from ..construction.sem_types import SEMType
 from .base import SEM2
-from ...dataloader.data import DataBatch, DiscreteDistribution
+from ...data.records import DataBatch
+from ..distributions import DiscreteJointDistribution
 from ...default_configs import LinearNodeConfig, MLPConfig
 
 
@@ -83,10 +84,10 @@ class SEM2Discrete(SEM2):
                     else:
                         self.cont_parents[node_name].append(pn)
 
-    def sample(self, batch_size: int = 1, set_nodes: DataBatch | None = None) -> tuple[DiscreteDistribution, dict]:
+    def sample(self, batch_size: int = 1, set_nodes: DataBatch | None = None) -> tuple[DiscreteJointDistribution, dict]:
         """Enumerate discrete states and compute their conditional probabilities.
 
-            Exogenous inputs are sampled; the returned DiscreteDistribution
+            Exogenous inputs are sampled; the returned DiscreteJointDistribution
             integrates discrete outcomes rather than drawing categorical observations.
 
             Args:
@@ -186,7 +187,7 @@ class SEM2Discrete(SEM2):
         supplied = {} if set_nodes is None else dict(zip(set_nodes.names, set_nodes.variables))
         variables = tuple(supplied[name] if name in supplied else self._variable_info(name)
                           for name in self.state_node_names)
-        result = DiscreteDistribution(DataBatch(all_states, variables), probs)
+        result = DiscreteJointDistribution(DataBatch(all_states, variables), probs)
         names = [name for name in self.state_node_names if not self.node_specs[name].is_helper]
         if len(names) != len(self.state_node_names):
             # Sum over internal helpers rather than exposing their state coordinates.

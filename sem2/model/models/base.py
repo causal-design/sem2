@@ -10,7 +10,7 @@ from torch import Tensor
 from ..components.nodes import NodeExogenous, NodeLinear, NodeMLP, NodeMLPDiscrete, SEM2Node
 from ..construction.dag import _DAG
 from ..construction.sem_types import SEMType
-from ...dataloader.data import DataBatch, VariableInfo
+from ...data.records import DataBatch, VariableInfo
 from ...default_configs import LinearNodeConfig, MLPConfig
 
 
@@ -144,7 +144,7 @@ class SEM2(_DAG, nn.Module):
     def _variable_info(self, name: str) -> VariableInfo:
         node = self.node_dict[name]
         categorical = isinstance(node, NodeMLPDiscrete) or isinstance(node.dist, torch.distributions.Categorical)
-        return VariableInfo(name, width=node.out_dim, categorical=categorical)
+        return VariableInfo(name, dim=node.out_dim, categorical=categorical)
 
     def _intervention_values(self, set_nodes: DataBatch | None, batch_size: int) -> dict[str, Tensor]:
         """Check names and shapes, then unwrap caller-supplied valid intervention values."""
@@ -163,8 +163,8 @@ class SEM2(_DAG, nn.Module):
                 raise ValueError(f"Unknown or internal intervention node: {name!r}")
             node = self.node_dict[name]
             value = set_nodes.select(name)
-            if variable.width != node.out_dim:
-                raise ValueError(f"Intervention width does not match {name!r}.")
+            if variable.dim != node.out_dim:
+                raise ValueError(f"Intervention dimension does not match {name!r}.")
             values[name] = value
         return values
 

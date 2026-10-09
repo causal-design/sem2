@@ -1,20 +1,14 @@
-"""Linear-model likelihood and covariance-based objectives.
-
-Likelihood and path analysis require linear models. Covariance discrepancy
-delegates to the general Covariance operator.
-"""
+"""Likelihood and path analysis requiring linear models."""
 from __future__ import annotations
 import math
 import warnings
 import torch
 
 from .operators_base import OperatorInput, OperatorOutput, SEM2Operator
-from .covariance import Covariance
+
 from ..model.construction.sem_types import SEMType
 from ..model.models.linear import SEM2Linear
-from ..dataloader.data import DataBatch, ScalarResult
-from ..model.models.base import SEM2
-from ..default_configs import TrainingConfig
+from ..data.records import DataBatch, ScalarResult
 
 
 class SEM2LinearModelOperator(SEM2Operator):
@@ -190,59 +184,6 @@ class LogLikelihood(SEM2LinearModelOperator):
 
     def __repr__(self) -> str:
         return "LogLikelihood"
-
-
-class WeightedFrobeniusDistance(SEM2Operator):
-    """Weighted Frobenius distance between the sample covariance and the
-    model-implied covariance.
-
-        F = sum_{i,j} W[i,j] * (S[i,j] - Sigma[i,j])^2
-
-    With W all-ones this is the (squared) Frobenius / unweighted-least-squares
-    discrepancy used in SEM estimation (cf. lavaan's ULS objective). A weight
-    matrix W can be supplied to recover weighted/GLS-style discrepancies.
-    beta is accepted for scalar-objective composition but does not affect this loss.
-    """
-    input_type = OperatorInput.DATA
-    output_type = OperatorOutput.SCALAR
-
-    def __init__(self, model: SEM2, observed_vars: list[str] | None = None,
-                 weight: torch.Tensor | None = None, sample_bs: int | None = None,
-                 *, cfg: TrainingConfig | None = None) -> None:
-        self.model = model
-        self.observed_vars = observed_vars
-        self.covariance = Covariance(model, sample_bs=sample_bs, cfg=cfg)
-        self.weight = weight
-
-    def evaluate(self, observations: DataBatch, *, sample_bs: int | None = None,
-                 beta: float | None = None) -> tuple[ScalarResult, dict]:
-        """
-        Args:
-            observations: named data, selected in observed_vars order.
-        Returns:
-            (weighted_frobenius_distance, metrics)
-        """
-        if not isinstance(observations, DataBatch):
-            raise TypeError("observations must be a DataBatch.")
-        batch = observations if self.observed_vars is None else observations.subset(self.observed_vars)
-        covariance, _ = self.covariance.evaluate(sample_bs=sample_bs)
-        indices = [i for n in batch.names for i in self.covariance.columns[n]]
-        model_cov = covariance[indices][:, indices]
-        if len(batch) < 2:
-            raise ValueError("Sample covariance requires at least two observations.")
-        sample_cov = torch.cov(batch.values.to(model_cov).T).reshape_as(model_cov)
-
-        diff = sample_cov - model_cov
-        if self.weight is not None:
-            loss = (self.weight.to(device=model_cov.device) * diff ** 2).sum()
-        else:
-            loss = (diff ** 2).sum()
-        return ScalarResult(loss, "weighted_frobenius_distance", batch.variables), {
-            "weighted_frobenius_distance": loss.detach()
-        }
-
-    def __repr__(self) -> str:
-        return "WeightedFrobeniusDistance"
 
 
 class PathAnalysis(SEM2LinearModelOperator):
