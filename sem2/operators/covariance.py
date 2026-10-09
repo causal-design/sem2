@@ -27,7 +27,7 @@ class Covariance(SEM2Operator):
         self.model = model
         self.sample_bs = cfg.sample_bs if sample_bs is None else sample_bs
         self.names = tuple(n for n in model.topological_order if n in model.input_node)
-        self.variables = tuple(model._variable_info(n) for n in self.names)
+        self.variables = [model._variable_info(n) for n in self.names]
         self.columns = {}
         start = 0
         for variable in self.variables:

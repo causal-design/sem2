@@ -15,7 +15,11 @@ if TYPE_CHECKING:
 
 
 class EnergyLoss(SEM2Operator):
-    """Compare named observations with model draws or finite probabilities.
+    """Compare observations with draws or probabilities using provisional energy code.
+
+    The calculation is retained as an executable placeholder pending Step-7
+    distance/exponent/scaling and estimator review; no new estimator is approved
+    by this layout/dispatch correction. IV specialization remains separate.
 
     Settings resolve as evaluation override > constructor override > config.
     Per-call overrides do not change the stored defaults.
@@ -30,6 +34,8 @@ class EnergyLoss(SEM2Operator):
         self.sample_bs = cfg.sample_bs if sample_bs is None else sample_bs
         self.beta = cfg.energy_score_beta if beta is None else beta
         self.discrete_loss = DiscreteEnergyLoss()
+        self._evaluate_model = (self._evaluate_continuous if SEMType.is_continuous(model.sem_type)
+                                else self._evaluate_discrete)
 
     def evaluate(self, observations: DataBatch, *, sample_bs: int | None = None,
                  beta: float | None = None) -> tuple[ScalarResult, dict]:
@@ -41,9 +47,17 @@ class EnergyLoss(SEM2Operator):
         unknown = set(observations.names) - self.model.input_node
         if unknown:
             raise ValueError(f"Unknown or internal observed variables: {sorted(unknown)}")
-        if SEMType.is_continuous(self.model.sem_type):
-            prediction, _ = self.model.sample(batch_size=sample_bs)
-            return self._energy_score(observations, prediction, beta=beta)
+        return self._evaluate_model(observations, sample_bs=sample_bs, beta=beta)
+
+    def _evaluate_continuous(self, observations: DataBatch, *,
+                             sample_bs: int, beta: float) -> tuple[ScalarResult, dict]:
+        """Compare named observations with realized continuous model draws."""
+        prediction, _ = self.model.sample(batch_size=sample_bs)
+        return self._energy_score(observations, prediction, beta=beta)
+
+    def _evaluate_discrete(self, observations: DataBatch, *,
+                          sample_bs: int, beta: float) -> tuple[ScalarResult, dict]:
+        """Align observed endogenous names with the enumerated model law."""
         names = [name for name in observations.names if name in self.model.state_node_names
                  and not self.model.node_specs[name].is_helper]
         outcomes = observations.subset(names)

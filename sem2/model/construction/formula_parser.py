@@ -121,7 +121,13 @@ class FormulaParser:
     # ── Statement parsing (string -> AST) ─────────────────────────────────────
 
     def _parse_statement(self, formula: str) -> Statement:
-        """Parse one fully-expanded ``name <sep> rhs`` formula into an AST node."""
+        """Convert one expanded equation into a typed, non-executable statement.
+
+        Expansion has already separated internal helper equations. A mechanism
+        term records n(...) or d(...; levels=N) with ordered parent names, not a
+        neural network. _lower() converts that syntax to a NodeSpec; SEM2 later
+        instantiates executable nodes and parameters in topological order.
+        """
         if "~" in formula:
             lhs, rhs = formula.split("~")
             dist_name, dist_args, dist_kwargs = self._parse_exogenous_rhs(lhs, rhs)
@@ -171,7 +177,12 @@ class FormulaParser:
     # ── Lowering (AST -> NodeSpec) ────────────────────────────────────────────
 
     def _lower(self, st: Statement) -> NodeSpec:
-        """Lower an AST statement into the NodeSpec consumed by _DAG / SEM2."""
+        """Translate typed syntax into uniform node-construction metadata.
+
+        Preserve ordered parents, fixed versus learned coefficients, intercepts,
+        levels and helper status. No tensors, random draws or fitted parameters
+        are created here; _DAG checks graph structure and SEM2 constructs nodes.
+        """
         if isinstance(st, ExogenousDecl):
             return NodeSpec(
                 name=st.name, rhs=st.rhs, node_type="exogenous", predecessors=[],

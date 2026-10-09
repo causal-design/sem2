@@ -61,6 +61,9 @@ class MeanPotentialOutcome(SEM2Operator):
             raise ValueError("MeanPotentialOutcome requires scalar intervention nodes.")
         if SEMType.is_continuous(model.sem_type):
             self.sampler = PotentialOutcomeSample(model, outcome)
+            self._evaluate_model = self._evaluate_continuous
+        else:
+            self._evaluate_model = self._evaluate_discrete
 
     def evaluate(self, *, sample_bs: int | None = None,
                  beta: float | None = None) -> tuple[ScalarResult, dict]:
@@ -73,19 +76,28 @@ class MeanPotentialOutcome(SEM2Operator):
         values = [torch.as_tensor(value, device=device, dtype=dtype).expand(sample_bs, 1)
                   for value in self.intervention.values()]
         set_nodes = DataBatch(torch.cat(values, dim=1),
-                              tuple(self.model._variable_info(n) for n in self.intervention)) if values else None
+                              [self.model._variable_info(n) for n in self.intervention]) if values else None
 
         set_seed(self.seed, device=device)
-        if SEMType.is_continuous(self.model.sem_type):
-            draws, details = self.sampler.evaluate(sample_bs=sample_bs, set_nodes=set_nodes)
-            value = numeric_values(DataBatch(draws.values, (self.variable,))).mean()
-        else:
-            prediction, details = self.model.sample(batch_size=sample_bs, set_nodes=set_nodes)
-            prediction = prediction.marginalize([self.outcome])
-            states = DataBatch(prediction.states.values, (self.variable,))
-            numeric = numeric_values(states)[:, 0].to(prediction.probabilities)
-            value = (prediction.probabilities @ numeric).mean()
-        return ScalarResult(value, "mean_potential_outcome", (self.variable,)), details
+        value, details = self._evaluate_model(sample_bs, set_nodes)
+        return ScalarResult(value, "mean_potential_outcome", [self.variable]), details
+
+    def _evaluate_continuous(self, sample_bs: int,
+                             set_nodes: DataBatch | None) -> tuple[torch.Tensor, dict]:
+        """Average target-only draws, retaining shared sampler early stopping."""
+        draws, details = self.sampler.evaluate(sample_bs=sample_bs, set_nodes=set_nodes)
+        value = numeric_values(DataBatch(draws.values, [self.variable])).mean()
+        return value, details
+
+    def _evaluate_discrete(self, sample_bs: int,
+                          set_nodes: DataBatch | None) -> tuple[torch.Tensor, dict]:
+        """Integrate named outcome states, then average the exogenous draws."""
+        prediction, details = self.model.sample(batch_size=sample_bs, set_nodes=set_nodes)
+        prediction = prediction.marginalize([self.outcome])
+        states = DataBatch(prediction.states.values, [self.variable])
+        numeric = numeric_values(states)[:, 0].to(prediction.probabilities)
+        value = (prediction.probabilities @ numeric).mean()
+        return value, details
 
 
 class ATE(SEM2Operator):

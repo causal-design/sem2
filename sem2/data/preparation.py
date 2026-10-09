@@ -13,8 +13,12 @@ if TYPE_CHECKING:
     from ..model.models.base import SEM2
 
 
-def _column_names(columns: pd.Index) -> list[str]:
-    """Normalize labels, rejecting ambiguous names rather than guessing by order."""
+def _normalize_column_names(columns: pd.Index) -> list[str]:
+    """Return model-safe names without changing the original DataFrame labels.
+
+    Replace invalid identifier characters, prefix leading digits, suffix Python
+    keywords, and reject normalization collisions rather than guess by order.
+    """
     used, names = set(), []
     for label in columns:
         if isinstance(label, str) and label.isidentifier() and not keyword.iskeyword(label):
@@ -49,8 +53,9 @@ def _encode_column(series: pd.Series, variable: VariableInfo) -> tuple[pd.Series
         missing = set(labels) - encoding.keys()
         if missing:
             raise ValueError(f"Encoding is missing labels for {variable.name!r}: {sorted(missing, key=repr)}")
+        ordered = series.cat.ordered if categorical else variable.ordered
         series = series.astype(object).map(encoding)
-        variable = replace(variable, categorical=True, encoding=encoding)
+        variable = replace(variable, categorical=True, encoding=encoding, ordered=ordered)
     if encoding is not None:
         codes = list(encoding.values())
         if any(not isinstance(code, Integral) for code in codes) or len(set(codes)) != len(codes):
@@ -100,18 +105,43 @@ def _validate_column(
 def prepare_data(
     model: SEM2,
     frame: pd.DataFrame,
-    variables: tuple[VariableInfo, ...] = (),
+    variables: list[VariableInfo] | None = None,
     device: torch.device | str | None = None,
 ) -> tuple[DataBatch, dict[str, object]]:
-    """Prepare a DataFrame once, returning (DataBatch, report) without mutation.
+    """Clean and align observations once without mutating the supplied frame.
 
-    Metadata uses normalized model names. Numeric columns contain stored values;
-    pandas categorical columns contain labels, with declared category order used
-    for default encoding. Other label columns require an explicit encoding.
-    Supplied numeric mappings are preserved, not applied or inferred here.
+    Parameters
+    ----------
+    model : SEM2
+        Supplies names, topological order and declared domains, not observation
+        status. Fitting columns must be scalar user-declared variables.
+    frame : pandas.DataFrame
+        Original named observations. Invalid column identifiers are normalized;
+        collisions, unknown variables and internal helper names are rejected.
+        Rows missing any supplied variable are dropped in a working copy.
+        Declare label columns with pandas.Categorical, including unused levels
+        and optional ordering; default codes follow the declared category order.
+        Other label columns require an explicit encoding. Numeric columns hold
+        stored values, not labels awaiting automatic recoding.
+    variables : list[VariableInfo] or None
+        Optional metadata keyed by normalized names. Explicit numeric mappings
+        are validated and preserved, never applied to or substituted for IDs.
+    device : torch.device, str or None
+        Target device; defaults to the model's device. Values use model dtype.
 
-    Rows missing any supplied variable are dropped and counted in the report.
-    Observation status belongs to this batch, not the structural graph.
+    Returns
+    -------
+    batch : DataBatch
+        Complete rows with columns and metadata in model topological order.
+    report : dict
+        Original-to-normalized column names, observed/unobserved model names,
+        and input/retained/dropped row counts. No loader or fitting is created.
+
+    Notes
+    -----
+    Domains, encoding and mapping coverage are checked before dtype narrowing;
+    overflow is checked afterwards. Observation status belongs to this data
+    pairing, not the structural graph. Category ordering does not supply scores.
     """
     if not isinstance(frame, pd.DataFrame):
         raise TypeError("Expected a pandas DataFrame; convert the input to a DataFrame first.")
@@ -119,10 +149,11 @@ def prepare_data(
         raise ValueError("DataFrame columns must be nonempty and unique.")
     if any(name in model.node_specs and model.node_specs[name].is_helper for name in frame.columns):
         raise ValueError("Data cannot reference internal helper nodes.")
-    names = _column_names(frame.columns)
+    names = _normalize_column_names(frame.columns)
     unknown = set(names) - model.input_node
     if unknown:
         raise ValueError(f"Unknown model columns after normalization: {sorted(unknown)}")
+    variables = [] if variables is None else variables
     supplied = {v.name: v for v in variables}
     if len(supplied) != len(variables) or set(supplied) - set(names):
         raise ValueError("Metadata must have unique names matching supplied columns.")
@@ -162,7 +193,7 @@ def prepare_data(
         values.append(value)
         metadata.append(variable)
 
-    batch = DataBatch(torch.stack(values, dim=-1), tuple(metadata))
+    batch = DataBatch(torch.stack(values, dim=-1), metadata)
     report = {
         "column_names": dict(zip(frame.columns, names)),
         "observed": batch.names,

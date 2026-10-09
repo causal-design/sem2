@@ -39,4 +39,4 @@ class SEM2Loss(SEM2Operator):
             label = f"{index}:{type(component).__name__}"
             metrics.update((f"{label}/{name}", value) for name, value in details.items())
             metrics[label] = result.value.detach()
-        return ScalarResult(total, "loss", tuple(variables.values())), metrics
+        return ScalarResult(total, "loss", list(variables.values())), metrics

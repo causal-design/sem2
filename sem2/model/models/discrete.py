@@ -185,8 +185,8 @@ class SEM2Discrete(SEM2):
 
         # Pair probability columns with their named states and preserve supplied metadata.
         supplied = {} if set_nodes is None else dict(zip(set_nodes.names, set_nodes.variables))
-        variables = tuple(supplied[name] if name in supplied else self._variable_info(name)
-                          for name in self.state_node_names)
+        variables = [supplied[name] if name in supplied else self._variable_info(name)
+                     for name in self.state_node_names]
         result = DiscreteJointDistribution(DataBatch(all_states, variables), probs)
         names = [name for name in self.state_node_names if not self.node_specs[name].is_helper]
         if len(names) != len(self.state_node_names):

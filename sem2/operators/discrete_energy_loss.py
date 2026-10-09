@@ -6,7 +6,11 @@ from ..data.numeric import numeric_values
 
 
 class DiscreteEnergyLoss:
-    """Mathematical implementation used by EnergyLoss.
+    """Provisional finite-energy calculation retained pending Step-7 review.
+
+    This executable implementation is a placeholder for the reviewed estimator,
+    not evidence that distance/scaling, pair correction or fitting validation has
+    been approved. The bounded Step-6 correction pass leaves its formulas intact.
 
     observations.values has shape [N, D], prediction.states.values [S, D],
     and prediction.probabilities [M, S], where M counts exogenous draws.
