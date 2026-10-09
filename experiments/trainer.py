@@ -1,4 +1,8 @@
-"""Small named-data training example using the canonical package trainer."""
+"""Compatibility smoke example using the canonical trainer and IV placeholder.
+
+This is not an IV fit-recovery/bounds validation example. The reviewed IV model
+API, valid-batch policy and full demonstrations are deferred to later work.
+"""
 import logging
 import pandas as pd
 import torch

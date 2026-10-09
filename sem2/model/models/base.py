@@ -200,7 +200,7 @@ class SEM2(_DAG, nn.Module):
             if name == target:
                 break
         # Stack variable blocks in the same order as their metadata.
-        result = DataBatch(torch.cat(values, dim=-1), tuple(variables))
+        result = DataBatch(torch.cat(values, dim=-1), variables)
         return result, {"interventions": set_nodes}
 
     def forward(self, *args, **kwargs):

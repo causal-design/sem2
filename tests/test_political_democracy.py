@@ -57,7 +57,7 @@ def _load_centered():
 def _fit(iters=2000, lr=0.05):
     set_seed(0)
     data, cols = _load_centered()
-    x = DataBatch(data[:, [cols[v] for v in OBS]], tuple(VariableInfo(v) for v in OBS))
+    x = DataBatch(data[:, [cols[v] for v in OBS]], [VariableInfo(v) for v in OBS])
     m = SEM2Linear(FORMULA)
     ll = LogLikelihood(m, centered=True)
     opt = torch.optim.Adam(m.parameters(), lr=lr)

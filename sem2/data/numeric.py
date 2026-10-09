@@ -8,6 +8,10 @@ def numeric_values(batch: DataBatch) -> torch.Tensor:
     """Apply numeric mappings without replacing stored category identities.
 
     Mappings are assumed complete; unmapped values propagate as NaN.
+    The inherited no-mapping path warns and uses codes numerically. That fallback
+    is provisional pending the Step-7 metric/estimator review; declaring ordered
+    categories does not justify it. Supply explicit scores for meaningful means
+    or distances. Noncategorical finite values may also use an explicit mapping.
     """
     columns = []
     blocks = batch.values.split([v.dim for v in batch.variables], dim=-1)

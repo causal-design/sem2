@@ -40,7 +40,7 @@ def make_model(formula, cfgs: dict[str, int | LinearNodeConfig | MLPConfig] | No
 
 
 def batch(values, *names):
-    return DataBatch(values, tuple(VariableInfo(name) for name in names))
+    return DataBatch(values, [VariableInfo(name) for name in names])
 
 
 def run(model, bs=BS, set_nodes=None):

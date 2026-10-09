@@ -10,10 +10,23 @@ from ..data.records import DataBatch
 class DiscreteJointDistribution:
     """Finite named states and probabilities, not realized observations.
 
-    probabilities has shape [exogenous draws, states]. Each row is a conditional
-    distribution for one Monte Carlo sample of the exogenous inputs. Averaging
-    rows estimates the marginal law.
-    This record represents either a joint distribution or a selected marginal.
+    Parameters
+    ----------
+    states : DataBatch
+        Enumerated joint states, shape [states, sum(variable.dim)], with named
+        metadata. These rows are possible values, not observed sample counts.
+    probabilities : torch.Tensor
+        Shape [exogenous draws, states]. Each row is a conditional distribution
+        for one Monte Carlo draw of the exogenous inputs. Averaging rows estimates
+        the marginal law; construction and marginalize() do not average them.
+
+    Notes
+    -----
+    SEM2Discrete.sample() computes this law; operators consume it. The record is
+    neither a graph node nor a model and owns no parameters. Tensor operations
+    retain the probability gradient path. A selected marginal uses the same
+    record; intervening remains a model operation, not distribution conditioning.
+    Callers supply normalized probabilities aligned to states on the same device.
     """
     states: DataBatch
     probabilities: torch.Tensor
