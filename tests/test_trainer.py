@@ -2,9 +2,12 @@
 from copy import deepcopy
 import logging
 
+import numpy as np
 import pandas as pd
 import torch
 from torch.utils.data import DataLoader, TensorDataset
+
+from experiments.trainer import run_example
 
 from sem2.data.records import DataBatch
 from sem2.default_configs import TrainingConfig
@@ -68,3 +71,18 @@ def test_default_fit_does_not_reseed_the_shared_stream():
     torch.random.set_rng_state(rng)
     assert fit(model, frame, objective, cfg) is model
     assert torch.equal(torch.random.get_rng_state(), expected_rng)
+
+
+def test_gaussian_example_matches_independent_ols_and_reports_final_diagnostics():
+    coefficients, moments, diagnostics = run_example(seed=7)
+    np.testing.assert_allclose(coefficients["true"], [1., 2.], rtol=0., atol=0.)
+    assert not np.allclose(coefficients["initial"], coefficients["true"])
+    np.testing.assert_allclose(coefficients["fitted"], coefficients["OLS"], rtol=0., atol=1e-4)
+    np.testing.assert_allclose(moments["true"], [0., 1., 1., 2., 2.**2 + 1.], rtol=0., atol=0.)
+    intercept, slope = coefficients["OLS"]
+    np.testing.assert_allclose(
+        moments["fitted"], [0., intercept, 1., slope, slope**2 + 1.], rtol=0., atol=1e-4,
+    )
+    assert diagnostics["fitted mean negative log-likelihood"] < diagnostics["initial mean negative log-likelihood"]
+    assert diagnostics["maximum absolute final gradient"] < 1e-4
+    assert diagnostics["maximum absolute fitted-minus-OLS coefficient"] < 1e-4
