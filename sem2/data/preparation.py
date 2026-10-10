@@ -37,7 +37,19 @@ def _normalize_column_names(columns: pd.Index) -> list[str]:
 
 
 def _encode_column(series: pd.Series, variable: VariableInfo) -> tuple[pd.Series, VariableInfo]:
-    """Encode declared labels; numeric columns already contain stored values."""
+    """Replace category labels with integer codes for tensor storage.
+
+    For categories ["low", "high"], values ["high", "low"] become [1, 0].
+    Codes follow the declared pandas category order unless an explicit encoding
+    is supplied. Return the converted series and metadata retaining the encoding
+    (including unused levels) and category ordering; do not mutate either input.
+    Noncategorical numeric columns are already stored values and are not recoded.
+
+    This changes cell values, unlike _normalize_column_names, which only makes
+    column labels valid model identifiers (for example, "y var" -> "y_var").
+    Neither operation standardizes a numeric scale or applies numeric_mapping:
+    codes identify categories, whereas numerical scores give them analysis values.
+    """
     categorical = isinstance(series.dtype, pd.CategoricalDtype)
     encoding = variable.encoding
     if categorical or not pd.api.types.is_numeric_dtype(series.dtype):

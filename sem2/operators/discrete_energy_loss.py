@@ -2,7 +2,7 @@
 import torch
 from ..data.records import DataBatch, ScalarResult
 from ..model.distributions import DiscreteJointDistribution
-from ..data.numeric import numeric_values
+from ..data.conversion import databatch_to_tensor
 
 
 class DiscreteEnergyLoss:
@@ -60,7 +60,7 @@ class DiscreteEnergyLoss:
         # One indicator row per observation, in enumerated-state order [N, S].
         # Match stored identities directly, without coercing them to integer indices.
         empirical = (observations.values[:, None, :] == states[None, :, :]).all(-1).to(probabilities)
-        numeric = numeric_values(DataBatch(states, observations.variables)).to(probabilities)
+        numeric = databatch_to_tensor(DataBatch(states, observations.variables)).to(probabilities)
         # D[i,j] = ||state_i - state_j||_2**beta, using the chosen numeric mapping.
         distances = torch.cdist(numeric, numeric) ** beta
         # Average the cross-distance over independent data and model draws.

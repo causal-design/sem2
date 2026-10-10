@@ -3,7 +3,7 @@ import pandas as pd
 import pytest
 import torch
 
-from sem2.data.numeric import numeric_values
+from sem2.data.conversion import databatch_to_tensor
 from sem2.data.preparation import prepare_data
 from sem2.data.records import DataBatch, ScalarResult, VariableInfo
 from sem2.default_configs import MLPConfig
@@ -25,11 +25,32 @@ def test_named_record_dimensions_selection_and_scalar_contract():
     result.value.backward()
     torch.testing.assert_close(values.grad, torch.ones_like(values))
     with pytest.raises(TypeError, match='VariableInfo'):
-        DataBatch(torch.zeros(2, 1), ['x'])
+        DataBatch(torch.zeros(2, 1), [123])
     with pytest.raises(ValueError, match='two-dimensional'):
         DataBatch(torch.zeros(2), [VariableInfo('x')])
     with pytest.raises(ValueError, match='scalar tensor'):
         ScalarResult(torch.zeros(1), 'not_scalar')
+
+
+def test_name_only_batch_keeps_canonical_metadata_and_supports_interventions():
+    values = torch.tensor([[1., 0.], [0., 1.]], requires_grad=True)
+    names = ['Z', 'D']
+    batch = DataBatch(values, names)
+    assert batch.variables == [VariableInfo('Z'), VariableInfo('D')]
+    assert isinstance(batch.variables, list)
+    assert names == ['Z', 'D']
+    assert batch.values is values
+    assert batch[0].variables == batch.variables
+    batch.subset(['D', 'Z']).values.sum().backward()
+    torch.testing.assert_close(values.grad, torch.ones_like(values))
+    with pytest.raises(ValueError, match='unique'):
+        DataBatch(values, ['Z', 'Z'])
+    with pytest.raises(ValueError, match='dimensions'):
+        DataBatch(values, ['Z'])
+    model = SEM2Discrete('Z ~ Categorical(probs=[1,1]); D <- d(Z; levels=2)',
+                         node_cfgs={'D': MLPConfig(hidden_dims=[4])})
+    prediction, _ = model.sample(2, set_nodes=batch)
+    torch.testing.assert_close(prediction.probabilities, torch.tensor([[1., 0.], [0., 1.]]))
 
 
 def test_categorical_preparation_preserves_frame_levels_order_and_separate_scores():
@@ -49,12 +70,12 @@ def test_categorical_preparation_preserves_frame_levels_order_and_separate_score
     assert report == {'column_names': {'y var': 'y_var'}, 'observed': ('y_var',),
                       'unobserved': ('u',), 'input_rows': 3, 'retained_rows': 2, 'dropped_rows': 1}
     torch.testing.assert_close(batch.values[:, 0], torch.tensor([1., 0.]))
-    torch.testing.assert_close(numeric_values(batch)[:, 0], torch.tensor([2., -1.]))
+    torch.testing.assert_close(databatch_to_tensor(batch)[:, 0], torch.tensor([2., -1.]))
     torch.testing.assert_close(batch.values[:, 0], torch.tensor([1., 0.]))
     # An explicit mapping also applies to quantitative finite values.
     quantitative = DataBatch(torch.tensor([[2.], [4.]]),
                              [VariableInfo('x', categorical=False, numeric_mapping={2.: 5., 4.: 9.})])
-    torch.testing.assert_close(numeric_values(quantitative), torch.tensor([[5.], [9.]]))
+    torch.testing.assert_close(databatch_to_tensor(quantitative), torch.tensor([[5.], [9.]]))
 
 
 def test_preparation_rejects_name_collisions_and_preserves_legacy_no_score_warning():
@@ -65,7 +86,7 @@ def test_preparation_rejects_name_collisions_and_preserves_legacy_no_score_warni
     batch, _ = prepare_data(model, pd.DataFrame({'y_var': pd.Categorical(
         ['no', 'yes'], categories=['no', 'yes'])}))
     with pytest.warns(UserWarning, match='category codes'):
-        numeric = numeric_values(batch)
+        numeric = databatch_to_tensor(batch)
     torch.testing.assert_close(numeric, batch.values)
     # This preserves compatibility, not approval of the deferred category metric.
 
