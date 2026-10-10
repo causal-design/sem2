@@ -4,7 +4,7 @@ import torch
 from .records import DataBatch
 
 
-def numeric_values(batch: DataBatch) -> torch.Tensor:
+def databatch_to_tensor(batch: DataBatch) -> torch.Tensor:
     """Apply numeric mappings without replacing stored category identities.
 
     Mappings are assumed complete; unmapped values propagate as NaN.

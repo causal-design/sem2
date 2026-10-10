@@ -6,7 +6,7 @@ from .operators_base import OperatorInput, OperatorOutput, SEM2Operator
 from .covariance import Covariance
 from .discrete_energy_loss import DiscreteEnergyLoss
 from ..data.records import DataBatch, ScalarResult
-from ..data.numeric import numeric_values
+from ..data.conversion import databatch_to_tensor
 from ..model.construction.sem_types import SEMType
 from ..default_configs import TrainingConfig
 
@@ -67,8 +67,8 @@ class EnergyLoss(SEM2Operator):
     def _energy_score(self, observations: DataBatch, prediction: DataBatch,
                       *, beta: float) -> tuple[ScalarResult, dict]:
         """Compare observations [N, D] with named draws [M, D], allowing N != M."""
-        targets = numeric_values(observations)
-        draws = numeric_values(DataBatch(prediction.select(observations.names), observations.variables)).to(targets)
+        targets = databatch_to_tensor(observations)
+        draws = databatch_to_tensor(DataBatch(prediction.select(observations.names), observations.variables)).to(targets)
         n = draws.shape[0]
         if not len(observations) or n < 2:
             raise ValueError("Energy score requires observations and at least two model draws.")

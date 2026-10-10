@@ -1,4 +1,9 @@
-"""Small named-value records shared by preparation, samplers and operators."""
+"""Small data containers shared by preparation, samplers and operators.
+
+Here a record means an object with named fields, not a row in a dataset:
+VariableInfo describes one variable, DataBatch holds a tensor with its variable
+metadata, and ScalarResult holds one named scalar tensor.
+"""
 from __future__ import annotations
 from dataclasses import dataclass, field
 from collections.abc import Iterable
@@ -36,7 +41,7 @@ class VariableInfo:
     ordered: bool = False
 
 
-@dataclass
+@dataclass(init=False)
 class DataBatch:
     """Two-dimensional named values with aligned variable metadata.
 
@@ -45,9 +50,11 @@ class DataBatch:
     values : torch.Tensor
         Shape [rows, sum(variable.dim)]. Rows can be observations, model draws,
         intervention assignments or enumerated states; the caller gives context.
-    variables : list[VariableInfo]
-        Ordered metadata for consecutive column blocks. Use VariableInfo(name)
-        for scalar defaults, not bare string shorthand.
+    variables : list[VariableInfo or str]
+        Ordered metadata for consecutive column blocks. Names such as ["Z", "D"]
+        create scalar VariableInfo defaults internally. Supply VariableInfo only
+        for non-default dimensions, categorical labels or numerical mappings.
+        The stored variables attribute is always a list of VariableInfo objects.
 
     Notes
     -----
@@ -57,11 +64,15 @@ class DataBatch:
     values: torch.Tensor
     variables: list[VariableInfo]
 
+    def __init__(self, values: torch.Tensor, variables: list[VariableInfo | str]) -> None:
+        self.values = values
+        self.variables = [VariableInfo(v) if isinstance(v, str) else v for v in variables]
+        self.__post_init__()
+
     def __post_init__(self) -> None:
         """Keep ordered metadata and check alignment so named selection cannot mislabel columns."""
-        self.variables = list(self.variables)
         if any(not isinstance(v, VariableInfo) for v in self.variables):
-            raise TypeError("variables must contain VariableInfo objects, not names.")
+            raise TypeError("variables must contain names or VariableInfo objects.")
         if not isinstance(self.values, torch.Tensor) or self.values.ndim != 2:
             raise ValueError("DataBatch values must be a two-dimensional tensor.")
         if any(not isinstance(v.name, str) or not v.name or not isinstance(v.dim, int) or v.dim < 1

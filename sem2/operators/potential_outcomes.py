@@ -5,7 +5,7 @@ import torch
 from .operators_base import OperatorInput, OperatorOutput, SEM2Operator
 from ..model.construction.sem_types import SEMType
 from ..data.records import DataBatch, ScalarResult, VariableInfo
-from ..data.numeric import numeric_values
+from ..data.conversion import databatch_to_tensor
 from ..utils import set_seed
 from ..default_configs import TrainingConfig
 
@@ -86,7 +86,7 @@ class MeanPotentialOutcome(SEM2Operator):
                              set_nodes: DataBatch | None) -> tuple[torch.Tensor, dict]:
         """Average target-only draws, retaining shared sampler early stopping."""
         draws, details = self.sampler.evaluate(sample_bs=sample_bs, set_nodes=set_nodes)
-        value = numeric_values(DataBatch(draws.values, [self.variable])).mean()
+        value = databatch_to_tensor(DataBatch(draws.values, [self.variable])).mean()
         return value, details
 
     def _evaluate_discrete(self, sample_bs: int,
@@ -95,7 +95,7 @@ class MeanPotentialOutcome(SEM2Operator):
         prediction, details = self.model.sample(batch_size=sample_bs, set_nodes=set_nodes)
         prediction = prediction.marginalize([self.outcome])
         states = DataBatch(prediction.states.values, [self.variable])
-        numeric = numeric_values(states)[:, 0].to(prediction.probabilities)
+        numeric = databatch_to_tensor(states)[:, 0].to(prediction.probabilities)
         value = (prediction.probabilities @ numeric).mean()
         return value, details
 

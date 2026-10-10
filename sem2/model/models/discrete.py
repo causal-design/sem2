@@ -96,7 +96,7 @@ class SEM2Discrete(SEM2):
         """
 
         # Unwrap valid interventions before enumerating conditional probabilities.
-        interventions = self._intervention_values(set_nodes, batch_size)
+        interventions = self._unpack_interventions(set_nodes, batch_size)
 
         device = self.device
         all_states = self.all_states  # [N_conf, N_discrete_nodes]

@@ -146,8 +146,15 @@ class SEM2(_DAG, nn.Module):
         categorical = isinstance(node, NodeMLPDiscrete) or isinstance(node.dist, torch.distributions.Categorical)
         return VariableInfo(name, dim=node.out_dim, categorical=categorical)
 
-    def _intervention_values(self, set_nodes: DataBatch | None, batch_size: int) -> dict[str, Tensor]:
-        """Check names and shapes, then unwrap caller-supplied valid intervention values."""
+    def _unpack_interventions(self, set_nodes: DataBatch | None, batch_size: int) -> dict[str, Tensor]:
+        """Unpack a named intervention batch into per-node tensors.
+
+        Input has shape [batch_size, sum(variable.dim)]; each dictionary value
+        has shape [batch_size, node.out_dim]. None gives an empty dictionary.
+        Check positive batch size, row count, user-declared names and matching
+        dimensions. Do not broadcast, encode labels, apply numerical scores or
+        validate support values; callers supply valid stored intervention values.
+        """
         if batch_size < 1:
             raise ValueError("batch_size must be positive.")
         if set_nodes is None:
@@ -183,7 +190,7 @@ class SEM2(_DAG, nn.Module):
         if target is not None and target not in self.input_node:
             raise ValueError(f"Unknown or internal target node: {target!r}")
         # Unwrap interventions once and retain their supplied variable metadata.
-        interventions = self._intervention_values(set_nodes, batch_size)
+        interventions = self._unpack_interventions(set_nodes, batch_size)
         supplied = {} if set_nodes is None else dict(zip(set_nodes.names, set_nodes.variables))
         values, variables = [], []
         # Evaluate parents first, replacing intervened equations with fixed values.
