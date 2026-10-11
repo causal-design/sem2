@@ -3,6 +3,7 @@
 Here a record means an object with named fields, not a row in a dataset:
 VariableInfo describes one variable, DataBatch holds a tensor with its variable
 metadata, and ScalarResult holds one named scalar tensor.
+See docs/data-structures.md for their relationship to DataFrames and model nodes.
 """
 from __future__ import annotations
 from dataclasses import dataclass, field

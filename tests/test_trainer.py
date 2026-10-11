@@ -73,16 +73,32 @@ def test_default_fit_does_not_reseed_the_shared_stream():
     assert torch.equal(torch.random.get_rng_state(), expected_rng)
 
 
-def test_gaussian_example_matches_independent_ols_and_reports_final_diagnostics():
+def test_gaussian_example_matches_independent_covariance_fit_and_final_diagnostics():
     coefficients, moments, diagnostics = run_example(seed=7)
-    np.testing.assert_allclose(coefficients["true"], [1., 2.], rtol=0., atol=0.)
+    np.testing.assert_allclose(coefficients["true"], [0., 2.], rtol=0., atol=0.)
     assert not np.allclose(coefficients["initial"], coefficients["true"])
-    np.testing.assert_allclose(coefficients["fitted"], coefficients["OLS"], rtol=0., atol=1e-4)
-    np.testing.assert_allclose(moments["true"], [0., 1., 1., 2., 2.**2 + 1.], rtol=0., atol=0.)
-    intercept, slope = coefficients["OLS"]
+    np.testing.assert_allclose(coefficients.loc["intercept (fixed)"], 0., rtol=0., atol=0.)
+    np.testing.assert_allclose(coefficients["fitted"], coefficients["reference"], rtol=0., atol=1e-4)
+    np.testing.assert_allclose(moments["true"], [0., 0., 1., 2., 5.], rtol=0., atol=0.)
+    slope = coefficients.loc["x -> y", "fitted"]
+    np.testing.assert_allclose(moments["fitted"], [0., 0., 1., slope, slope**2 + 1.], atol=1e-5)
+
+    # Independently expand the weighted covariance loss and find all stationary points.
+    # W=[[1, 1/2], [1/2, 1]] counts the off-diagonal residual only once.
+    b = np.polynomial.Polynomial([0., 1.])
+    sample = moments["sample"]
+    loss = ((sample["var(x)"] - 1.)**2 + (sample["cov(x,y)"] - b)**2
+            + (sample["var(y)"] - 1. - b**2)**2)
+    roots = loss.deriv().roots()
+    reference_loss = min(loss(root.real) for root in roots if abs(root.imag) < 1e-8)
+    np.testing.assert_allclose(diagnostics["independent minimum loss"], reference_loss, atol=1e-10)
     np.testing.assert_allclose(
-        moments["fitted"], [0., intercept, 1., slope, slope**2 + 1.], rtol=0., atol=1e-4,
+        [diagnostics["initial weighted squared Frobenius loss"],
+         diagnostics["fitted weighted squared Frobenius loss"]],
+        [loss(coefficients.loc["x -> y", "initial"]), loss(slope)], rtol=1e-5, atol=1e-6,
     )
-    assert diagnostics["fitted mean negative log-likelihood"] < diagnostics["initial mean negative log-likelihood"]
+    assert diagnostics["fitted weighted squared Frobenius loss"] < diagnostics["initial weighted squared Frobenius loss"]
+    np.testing.assert_allclose(diagnostics["fitted weighted squared Frobenius loss"], reference_loss, atol=1e-6)
+    assert abs(loss.deriv()(slope)) < 1e-4
     assert diagnostics["maximum absolute final gradient"] < 1e-4
-    assert diagnostics["maximum absolute fitted-minus-OLS coefficient"] < 1e-4
+    assert diagnostics["absolute fitted-minus-reference slope"] < 1e-4
