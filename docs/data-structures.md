@@ -4,6 +4,36 @@ A **pandas DataFrame** holds observations. A **model node** describes how one
 variable is generated. The small records between them carry named tensors and
 metadata; they are not additional models.
 
+## Visual overview
+
+### Object relationships
+
+![Models contain nodes and supports. DataBatch and ScalarResult carry tensors and VariableInfo; a DiscreteJointDistribution contains a state DataBatch and a probability tensor.](diagrams/data-structure-relationships.svg)
+
+Solid arrows name components, fields or properties, **not inheritance**. The
+dashed link means metadata and nodes correspond by variable name, not by an
+object reference. A `DataBatch` can also stand alone as observations, generated
+values or intervention assignments; it does not have to belong to a distribution.
+
+### Fitting workflow
+
+![DataFrame preparation produces a DataBatch; the trainer batches its tensor values, reattaches metadata, evaluates a scalar objective, and uses its result to update the supplied model.](diagrams/data-fitting-flow.svg)
+
+`SEM2Trainer` owns preparation and the repeated minibatch/update loop; `fit`
+is the convenience entry point. Metadata bypasses the loader and is not
+optimized. The preparation report and objective metrics are omitted from the
+chart. After the configured epochs, fitting returns the **same model**, not a
+`DataBatch` or `ScalarResult`.
+
+Sampling is a different route through that model: `SEM2.sample` and
+`SEM2Linear.sample` produce a `DataBatch` of draws, whereas `SEM2Discrete.sample`
+produces a `DiscreteJointDistribution`. Each also returns an auxiliary dictionary.
+Their row meanings and intervention inputs are detailed below.
+
+Editable Graphviz sources: [object relationships](diagrams/data-structure-relationships.dot)
+and [fitting workflow](diagrams/data-fitting-flow.dot). Regenerate an SVG with
+`dot -Tsvg source.dot -o figure.svg`; viewing the guide needs no Graphviz install.
+
 ## What each object represents
 
 | Object | Contents and role | Implementation |

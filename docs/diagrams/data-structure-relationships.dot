@@ -1,0 +1,31 @@
+digraph relationships {
+  graph [rankdir=LR, bgcolor="white", pad=0.25, nodesep=0.4, ranksep=0.5,
+         fontname="DejaVu Sans", fontsize=16];
+  node [shape=box, style="rounded,filled", fillcolor="#eef6ff", color="#426582",
+        fontname="DejaVu Sans", fontsize=15, fontcolor="#172b3a", margin="0.18,0.12"];
+  edge [color="#52677a", fontname="DejaVu Sans", fontsize=12, fontcolor="#34495e",
+        arrowsize=0.7];
+
+  model [label="Model\nSEM2, SEM2Linear\nor SEM2Discrete", fillcolor="#fff4dc"];
+  node_record [label="SEM2Node\nMechanism or\nexogenous distribution", fillcolor="#fff4dc"];
+  support [label="RandomVariableSupport\nDomain and optional\nenumeration", fillcolor="#fff4dc"];
+  law [label="DiscreteJointDistribution\nFinite probability law"];
+  batch [label="DataBatch\nNamed 2D values"];
+  scalar [label="ScalarResult\nOne named scalar quantity"];
+  info [label="VariableInfo\nName and dimension\nCategory metadata", fillcolor="#f3f4f6"];
+  values [label="Tensor\nRows x components", fillcolor="#f3f4f6"];
+  probabilities [label="Tensor\nExogenous draws\nx joint states", fillcolor="#f3f4f6"];
+  value [label="Tensor\nZero-dimensional scalar", fillcolor="#f3f4f6"];
+
+  { rank=same; model; law; scalar; }
+  model -> node_record [label="node_dict"];
+  node_record -> support [label="support"];
+  law -> batch [label="states"];
+  law -> probabilities [label="probabilities"];
+  batch -> values [label="values"];
+  batch -> info [label="variables"];
+  scalar -> value [label="value"];
+  scalar -> info [label="variables\n(associated)"];
+  node_record -> info [dir=none, style=dashed, constraint=false,
+                       label="matched by name\nnot a node reference"];
+}
