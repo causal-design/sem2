@@ -1,18 +1,29 @@
 """Energy fitting for discrete instrumental-variable problems."""
 from __future__ import annotations
 import torch
-from .scalar_operators import EnergyLoss
-from ..dataloader.data import DataBatch, ScalarResult
+from .divergence import EnergyLoss
+from ..data.records import DataBatch, ScalarResult
 from ..default_configs import TrainingConfig
 from ..model.components.nodes import NodeExogenous
 from ..model.models.discrete import SEM2Discrete
 
 
 class DiscreteIVEnergyLoss(EnergyLoss):
-    """Fit outcome distributions separately at each exogenous instrument level.
+    """Provisional placeholder for the deferred, reviewed IV fitting interface.
 
-    The supplied model must encode the IV assumptions; this operator does not
-    establish identification. Group losses use empirical instrument frequencies.
+    The existing executable calculation is retained for compatibility, not as
+    completed Step-7 functionality. It compares conditional outcome distributions
+    for a scalar exogenous discrete instrument using empirical group frequencies.
+
+    Deferred: an IV model API/convenience initializer, estimator/weight review,
+    valid minibatch policy and independent IV fitting validation. No stratified
+    batching is implemented. Each evaluated batch currently needs at least two
+    observations at every declared instrument level; ordinary shuffled batches
+    need not satisfy this and may raise in the energy kernel.
+
+    Callers supply a model encoding the IV assumptions. This class checks neither
+    those causal assumptions nor identification, and does not certify effect or
+    bound recovery. See docs/plan/v0.1.md, Step 7 and later IV/example stages.
     """
 
     def __init__(self, cfg: TrainingConfig, model: SEM2Discrete, instrument: str, *,

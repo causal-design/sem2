@@ -1,11 +1,16 @@
 """Energy calculations for named finite distributions."""
 import torch
-from ..dataloader.data import DataBatch, DiscreteDistribution, ScalarResult
-from .operators_base import _apply_numeric_mapping
+from ..data.records import DataBatch, ScalarResult
+from ..model.distributions import DiscreteJointDistribution
+from ..data.conversion import databatch_to_tensor
 
 
 class DiscreteEnergyLoss:
-    """Mathematical implementation used by EnergyLoss.
+    """Provisional finite-energy calculation retained pending Step-7 review.
+
+    This executable implementation is a placeholder for the reviewed estimator,
+    not evidence that distance/scaling, pair correction or fitting validation has
+    been approved. The bounded Step-6 correction pass leaves its formulas intact.
 
     observations.values has shape [N, D], prediction.states.values [S, D],
     and prediction.probabilities [M, S], where M counts exogenous draws.
@@ -17,7 +22,7 @@ class DiscreteEnergyLoss:
         """Set pair correction; the caller supplies the resolved beta per evaluation."""
         self.unbiased = unbiased
 
-    def _validate(self, observations: DataBatch, prediction: DiscreteDistribution, observed_pairs: bool = False) -> None:
+    def _validate(self, observations: DataBatch, prediction: DiscreteJointDistribution, observed_pairs: bool = False) -> None:
         """Check sizes only, avoiding empty means and zero pair denominators."""
         n, m = len(observations), prediction.probabilities.shape[0]
         if not observations.variables or n < 1 or m < 1:
@@ -43,7 +48,7 @@ class DiscreteEnergyLoss:
         return pair
 
     def _energy_components(
-        self, observations: DataBatch, prediction: DiscreteDistribution,
+        self, observations: DataBatch, prediction: DiscreteJointDistribution,
         *, beta: float,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """Return scalar cross/pair distances, empirical rows [N, S] and distances [S, S]."""
@@ -55,7 +60,7 @@ class DiscreteEnergyLoss:
         # One indicator row per observation, in enumerated-state order [N, S].
         # Match stored identities directly, without coercing them to integer indices.
         empirical = (observations.values[:, None, :] == states[None, :, :]).all(-1).to(probabilities)
-        numeric = _apply_numeric_mapping(DataBatch(states, observations.variables)).to(probabilities)
+        numeric = databatch_to_tensor(DataBatch(states, observations.variables)).to(probabilities)
         # D[i,j] = ||state_i - state_j||_2**beta, using the chosen numeric mapping.
         distances = torch.cdist(numeric, numeric) ** beta
         # Average the cross-distance over independent data and model draws.
@@ -63,7 +68,7 @@ class DiscreteEnergyLoss:
         pair = self._pair_distance(probabilities, distances)
         return cross, pair, empirical, distances
 
-    def energy_score(self, observations: DataBatch, prediction: DiscreteDistribution,
+    def energy_score(self, observations: DataBatch, prediction: DiscreteJointDistribution,
                      *, beta: float) -> tuple[ScalarResult, dict]:
         """Energy score from observations [N, D] and predictions [M, S].
 
@@ -76,7 +81,7 @@ class DiscreteEnergyLoss:
         result = ScalarResult(cross - pair / 2, "energy_score", observations.variables)
         return result, {"estimated-true distance": cross, "estimated-estimated distance": pair}
 
-    def energy_dist(self, observations: DataBatch, prediction: DiscreteDistribution,
+    def energy_dist(self, observations: DataBatch, prediction: DiscreteJointDistribution,
                     *, beta: float) -> tuple[ScalarResult, dict]:
         """Half-energy distance from observations [N, D] and predictions [M, S].
 

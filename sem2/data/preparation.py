@@ -1,147 +1,24 @@
-"""Small records shared by loaders, samplers and operators."""
+"""Prepare pandas observations separately from shared named-value records."""
 from __future__ import annotations
-from dataclasses import dataclass, replace
-from collections.abc import Iterable
+from dataclasses import replace
 import keyword
 from numbers import Integral
 from typing import TYPE_CHECKING
 import pandas as pd
 import torch
+from .records import DataBatch, VariableInfo
 
 if TYPE_CHECKING:
     from ..model.components.nodes import RandomVariableSupport
     from ..model.models.base import SEM2
 
 
-@dataclass
-class VariableInfo:
-    """Column meaning, separate from node support.
+def _normalize_column_names(columns: pd.Index) -> list[str]:
+    """Return model-safe names without changing the original DataFrame labels.
 
-    encoding maps external labels to stored codes; numeric_mapping maps those labels
-    (or stored values without an encoding) to explicitly supplied numeric values.
-    width preserves existing low-level vector nodes, not vector DataFrame cells.
+    Replace invalid identifier characters, prefix leading digits, suffix Python
+    keywords, and reject normalization collisions rather than guess by order.
     """
-    name: str
-    width: int = 1
-    categorical: bool | None = None
-    encoding: dict | None = None
-    numeric_mapping: dict | None = None
-
-
-@dataclass
-class DataBatch:
-    """Rows with ordered metadata; strings create scalar VariableInfo defaults."""
-    values: torch.Tensor
-    variables: tuple[VariableInfo | str, ...] | list[VariableInfo | str]
-
-    def __post_init__(self) -> None:
-        """Keep ordered metadata and check alignment so named selection cannot mislabel columns."""
-        self.variables = tuple(VariableInfo(v) if isinstance(v, str) else v for v in self.variables)
-        if not isinstance(self.values, torch.Tensor) or self.values.ndim != 2:
-            raise ValueError("DataBatch values must be a two-dimensional tensor.")
-        if any(not isinstance(v.name, str) or not v.name or not isinstance(v.width, int) or v.width < 1
-               for v in self.variables):
-            raise ValueError("Variables require nonempty names and positive widths.")
-        if len(set(self.names)) != len(self.variables):
-            raise ValueError("Variable names must be unique.")
-        if self.values.shape[1] != sum(v.width for v in self.variables):
-            raise ValueError("Data columns must match variable widths.")
-
-    @property
-    def names(self) -> tuple[str, ...]:
-        return tuple(v.name for v in self.variables)
-
-    def __len__(self) -> int:
-        return self.values.shape[0]
-
-    def select(self, names: str | Iterable[str]) -> torch.Tensor:
-        """Select whole variable blocks in the requested order."""
-        names = (names,) if isinstance(names, str) else tuple(names)
-        if len(set(names)) != len(names):
-            raise ValueError("Selected variable names must be unique.")
-        columns = {}
-        start = 0
-        for variable in self.variables:
-            columns[variable.name] = list(range(start, start + variable.width))
-            start += variable.width
-        missing = set(names) - columns.keys()
-        if missing:
-            raise ValueError(f"Unknown variables: {sorted(missing)}")
-        return self.values[:, [i for name in names for i in columns[name]]]
-
-    def subset(self, names: str | Iterable[str]) -> DataBatch:
-        names = (names,) if isinstance(names, str) else tuple(names)
-        variables = dict(zip(self.names, self.variables))
-        values = self.select(names)
-        return DataBatch(values, tuple(variables[name] for name in names))
-
-    def __getitem__(self, rows) -> DataBatch:
-        """Slice rows, retaining the batch dimension for a single row."""
-        if isinstance(rows, tuple):
-            raise TypeError("Use subset() to select named columns; indexing only slices rows.")
-        values = self.values[rows]
-        if values.ndim == 1:
-            values = values.unsqueeze(0)
-        return DataBatch(values, self.variables)
-
-    def to(self, *args, **kwargs) -> DataBatch:
-        return DataBatch(self.values.to(*args, **kwargs), self.variables)
-
-
-@dataclass
-class DiscreteDistribution:
-    """Finite named states and probabilities, not realized observations.
-
-    probabilities has shape [exogenous draws, states]. Each row is a conditional
-    distribution for one Monte Carlo sample of the exogenous inputs. Averaging
-    rows estimates the marginal law.
-    This record represents either a joint distribution or a selected marginal.
-    """
-    states: DataBatch
-    probabilities: torch.Tensor
-
-    def __post_init__(self) -> None:
-        """Check that probability columns index the state table on the same device."""
-        if not isinstance(self.states, DataBatch):
-            raise TypeError("states must be a DataBatch.")
-        if self.probabilities.ndim != 2 or self.probabilities.shape[1] != len(self.states):
-            raise ValueError("Probabilities must have shape [draws, states].")
-        if self.probabilities.device != self.states.values.device:
-            raise ValueError("States and probabilities must be on the same device.")
-
-    def to(self, *args, **kwargs) -> DiscreteDistribution:
-        probabilities = self.probabilities.to(*args, **kwargs)
-        return DiscreteDistribution(self.states.to(device=probabilities.device), probabilities)
-
-    def marginalize(self, names: str | Iterable[str]) -> DiscreteDistribution:
-        """Combine equal projected states; retain the exogenous-draw axis."""
-        states = self.states.subset(names)
-        if states.values.shape[1] == 0:
-            values = states.values.new_empty((1, 0))
-            probabilities = self.probabilities.sum(-1, keepdim=True)
-        else:
-            values, inverse = torch.unique(states.values, dim=0, return_inverse=True)
-            probabilities = self.probabilities.new_zeros((self.probabilities.shape[0], len(values)))
-            probabilities = probabilities.index_add(1, inverse, self.probabilities)
-        return DiscreteDistribution(DataBatch(values, states.variables), probabilities)
-
-
-@dataclass
-class ScalarResult:
-    """A named scalar quantity; value retains its autograd graph."""
-    value: torch.Tensor
-    name: str
-    variables: tuple[VariableInfo, ...] = ()
-
-    def __post_init__(self) -> None:
-        """Require one tensor-valued quantity without detaching its gradient graph."""
-        if not isinstance(self.value, torch.Tensor) or self.value.ndim != 0:
-            raise ValueError("ScalarResult value must be a scalar tensor.")
-        self.variables = tuple(self.variables)
-
-
-def _column_names(columns: pd.Index) -> list[str]:
-    """Normalize labels, rejecting ambiguous names rather than guessing by order."""
     used, names = set(), []
     for label in columns:
         if isinstance(label, str) and label.isidentifier() and not keyword.iskeyword(label):
@@ -160,7 +37,19 @@ def _column_names(columns: pd.Index) -> list[str]:
 
 
 def _encode_column(series: pd.Series, variable: VariableInfo) -> tuple[pd.Series, VariableInfo]:
-    """Encode declared labels; numeric columns already contain stored values."""
+    """Replace category labels with integer codes for tensor storage.
+
+    For categories ["low", "high"], values ["high", "low"] become [1, 0].
+    Codes follow the declared pandas category order unless an explicit encoding
+    is supplied. Return the converted series and metadata retaining the encoding
+    (including unused levels) and category ordering; do not mutate either input.
+    Noncategorical numeric columns are already stored values and are not recoded.
+
+    This changes cell values, unlike _normalize_column_names, which only makes
+    column labels valid model identifiers (for example, "y var" -> "y_var").
+    Neither operation standardizes a numeric scale or applies numeric_mapping:
+    codes identify categories, whereas numerical scores give them analysis values.
+    """
     categorical = isinstance(series.dtype, pd.CategoricalDtype)
     encoding = variable.encoding
     if categorical or not pd.api.types.is_numeric_dtype(series.dtype):
@@ -176,8 +65,9 @@ def _encode_column(series: pd.Series, variable: VariableInfo) -> tuple[pd.Series
         missing = set(labels) - encoding.keys()
         if missing:
             raise ValueError(f"Encoding is missing labels for {variable.name!r}: {sorted(missing, key=repr)}")
+        ordered = series.cat.ordered if categorical else variable.ordered
         series = series.astype(object).map(encoding)
-        variable = replace(variable, categorical=True, encoding=encoding)
+        variable = replace(variable, categorical=True, encoding=encoding, ordered=ordered)
     if encoding is not None:
         codes = list(encoding.values())
         if any(not isinstance(code, Integral) for code in codes) or len(set(codes)) != len(codes):
@@ -227,18 +117,43 @@ def _validate_column(
 def prepare_data(
     model: SEM2,
     frame: pd.DataFrame,
-    variables: tuple[VariableInfo, ...] = (),
+    variables: list[VariableInfo] | None = None,
     device: torch.device | str | None = None,
 ) -> tuple[DataBatch, dict[str, object]]:
-    """Prepare a DataFrame once, returning (DataBatch, report) without mutation.
+    """Clean and align observations once without mutating the supplied frame.
 
-    Metadata uses normalized model names. Numeric columns contain stored values;
-    pandas categorical columns contain labels, with declared category order used
-    for default encoding. Other label columns require an explicit encoding.
-    Supplied numeric mappings are preserved, not applied or inferred here.
+    Parameters
+    ----------
+    model : SEM2
+        Supplies names, topological order and declared domains, not observation
+        status. Fitting columns must be scalar user-declared variables.
+    frame : pandas.DataFrame
+        Original named observations. Invalid column identifiers are normalized;
+        collisions, unknown variables and internal helper names are rejected.
+        Rows missing any supplied variable are dropped in a working copy.
+        Declare label columns with pandas.Categorical, including unused levels
+        and optional ordering; default codes follow the declared category order.
+        Other label columns require an explicit encoding. Numeric columns hold
+        stored values, not labels awaiting automatic recoding.
+    variables : list[VariableInfo] or None
+        Optional metadata keyed by normalized names. Explicit numeric mappings
+        are validated and preserved, never applied to or substituted for IDs.
+    device : torch.device, str or None
+        Target device; defaults to the model's device. Values use model dtype.
 
-    Rows missing any supplied variable are dropped and counted in the report.
-    Observation status belongs to this batch, not the structural graph.
+    Returns
+    -------
+    batch : DataBatch
+        Complete rows with columns and metadata in model topological order.
+    report : dict
+        Original-to-normalized column names, observed/unobserved model names,
+        and input/retained/dropped row counts. No loader or fitting is created.
+
+    Notes
+    -----
+    Domains, encoding and mapping coverage are checked before dtype narrowing;
+    overflow is checked afterwards. Observation status belongs to this data
+    pairing, not the structural graph. Category ordering does not supply scores.
     """
     if not isinstance(frame, pd.DataFrame):
         raise TypeError("Expected a pandas DataFrame; convert the input to a DataFrame first.")
@@ -246,10 +161,11 @@ def prepare_data(
         raise ValueError("DataFrame columns must be nonempty and unique.")
     if any(name in model.node_specs and model.node_specs[name].is_helper for name in frame.columns):
         raise ValueError("Data cannot reference internal helper nodes.")
-    names = _column_names(frame.columns)
+    names = _normalize_column_names(frame.columns)
     unknown = set(names) - model.input_node
     if unknown:
         raise ValueError(f"Unknown model columns after normalization: {sorted(unknown)}")
+    variables = [] if variables is None else variables
     supplied = {v.name: v for v in variables}
     if len(supplied) != len(variables) or set(supplied) - set(names):
         raise ValueError("Metadata must have unique names matching supplied columns.")
@@ -268,7 +184,7 @@ def prepare_data(
     for name in observed:
         node = model.node_dict[name]
         variable = supplied.get(name, model._variable_info(name))
-        if variable.width != 1 or node.out_dim != 1 or (
+        if variable.dim != 1 or node.out_dim != 1 or (
             node.dist is not None and (node.dist.batch_shape or node.dist.event_shape)
         ):
             raise ValueError(f"Only scalar fitting variables are supported: {name!r}.")
@@ -289,7 +205,7 @@ def prepare_data(
         values.append(value)
         metadata.append(variable)
 
-    batch = DataBatch(torch.stack(values, dim=-1), tuple(metadata))
+    batch = DataBatch(torch.stack(values, dim=-1), metadata)
     report = {
         "column_names": dict(zip(frame.columns, names)),
         "observed": batch.names,
