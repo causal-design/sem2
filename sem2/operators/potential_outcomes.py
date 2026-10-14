@@ -14,7 +14,15 @@ if TYPE_CHECKING:
 
 
 class PotentialOutcomeSample(SEM2Operator):
-    """Sample a continuous model, stopping as soon as the target is computed."""
+    """Sample a continuous model, stopping as soon as the target is computed.
+
+    Parameters
+    ----------
+    model : SEM2
+        Continuous model to sample.
+    target_node : str
+        User-declared target variable; internal helpers cannot be selected.
+    """
     input_type = OperatorInput.SELF
     output_type = OperatorOutput.DATA_BATCH
 
@@ -27,6 +35,22 @@ class PotentialOutcomeSample(SEM2Operator):
         self.target_node = target_node
 
     def evaluate(self, sample_bs: int = 1, set_nodes: DataBatch | None = None) -> tuple[DataBatch, dict]:
+        """Return target draws under optional interventions.
+
+        Parameters
+        ----------
+        sample_bs : int, default=1
+            Positive number of draws.
+        set_nodes : DataBatch, optional
+            Valid named intervention values, one row per draw.
+
+        Returns
+        -------
+        draws : DataBatch
+            Target values of shape (sample_bs, target_width).
+        details : dict
+            ``interventions`` records the supplied intervention batch.
+        """
         return self.model._sample(sample_bs, set_nodes, target=self.target_node)
 
 
@@ -39,6 +63,24 @@ class MeanPotentialOutcome(SEM2Operator):
     Supply variable metadata for an explicit category-to-number mapping.
     sample_bs overrides cfg.sample_bs; evaluate(sample_bs=...) overrides one call.
     beta is accepted for scalar-objective composition but does not affect this query.
+
+    Parameters
+    ----------
+    model : SEM2
+        Continuous or finite-discrete model.
+    outcome : str
+        Scalar outcome variable.
+    intervention : dict[str, float]
+        Constant assignments to scalar variables; an empty mapping gives the
+        observational model mean.
+    sample_bs : int, optional
+        Monte Carlo count, overriding the config default.
+    seed : int, optional
+        Reseed on every evaluation; ``None`` continues the current stream.
+    variable : VariableInfo, optional
+        Outcome metadata, including a category-to-number mapping.
+    cfg : TrainingConfig, optional
+        Supplies the default Monte Carlo count.
     """
     input_type = OperatorInput.SELF
     output_type = OperatorOutput.SCALAR
@@ -67,7 +109,22 @@ class MeanPotentialOutcome(SEM2Operator):
 
     def evaluate(self, *, sample_bs: int | None = None,
                  beta: float | None = None) -> tuple[ScalarResult, dict]:
-        """Evaluate the configured intervention, reseeding only if requested."""
+        """Evaluate the configured intervention, reseeding only if requested.
+
+        Parameters
+        ----------
+        sample_bs : int, optional
+            Monte Carlo count for this call.
+        beta : float, optional
+            Accepted for composition; unused.
+
+        Returns
+        -------
+        result : ScalarResult
+            Mean outcome, labelled ``mean_potential_outcome``, with gradients.
+        details : dict
+            ``interventions`` holds the broadcast intervention batch, or None.
+        """
         sample_bs = self.sample_bs if sample_bs is None else sample_bs
         parameter = next(self.model.parameters(), None)
         device = parameter.device if parameter is not None else torch.device(self.model.device)
@@ -105,6 +162,22 @@ class ATE(SEM2Operator):
 
     sample_bs overrides cfg.sample_bs; evaluate(sample_bs=...) affects one call.
     beta is accepted for scalar-objective composition but does not affect this contrast.
+
+    Parameters
+    ----------
+    cfg : TrainingConfig
+        Default sample count and optional seed. An explicit seed pairs draws
+        across interventions; otherwise each uses the current stream.
+    model : SEM2
+        Model supplying intervention distributions, not identification proof.
+    variable : VariableInfo, optional
+        Scalar outcome metadata and optional numerical scoring.
+    outcome : str
+        Outcome variable name.
+    treatment : str
+        Scalar treatment variable, assigned 1 and 0 respectively.
+    sample_bs : int, optional
+        Draw count per intervention, overriding the config value.
     """
     input_type = OperatorInput.SELF
     output_type = OperatorOutput.SCALAR
@@ -121,6 +194,22 @@ class ATE(SEM2Operator):
 
     def evaluate(self, *, sample_bs: int | None = None,
                  beta: float | None = None) -> tuple[ScalarResult, dict]:
+        """Return the mean outcome at treatment 1 minus that at 0.
+
+        Parameters
+        ----------
+        sample_bs : int, optional
+            Draw count per intervention for this call.
+        beta : float, optional
+            Accepted for composition; unused.
+
+        Returns
+        -------
+        result : ScalarResult
+            Difference of means, labelled ``ATE``, retaining gradients.
+        details : dict
+            ``control`` and ``treatment`` hold the intervention batches.
+        """
         y0, control = self.control.evaluate(sample_bs=sample_bs)
         y1, treatment = self.treatment.evaluate(sample_bs=sample_bs)
         return ScalarResult(y1.value - y0.value, "ATE", y1.variables), {

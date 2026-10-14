@@ -13,11 +13,13 @@ if TYPE_CHECKING:
 
 
 class OperatorInput(StrEnum):
+    """Input contract: DATA consumes a batch; SELF evaluates the model alone."""
     DATA = "Data"       # Requires an observation DataBatch
     SELF = "self"       # Model-only; may take query/intervention arguments
 
 
 class OperatorOutput(StrEnum):
+    """Result kind: scalar, matrix, named draws or a finite probability law."""
     SCALAR = "Scalar"   # ScalarResult, retaining gradients
     MATRIX = "Matrix"   # Tensor with axis metadata in diagnostics
     DATA_BATCH = "DataBatch"

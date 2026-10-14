@@ -15,6 +15,20 @@ logger = logging.getLogger(__name__)
 
 
 def get_optimiser(model: nn.Module, cfg: TrainingConfig) -> torch.optim.Optimizer:
+    """Create a fresh optimizer for all model parameters.
+
+    Parameters
+    ----------
+    model : torch.nn.Module
+        Module whose parameters are passed to the optimizer.
+    cfg : TrainingConfig
+        Optimizer name, learning rate, weight decay and SGD momentum.
+
+    Returns
+    -------
+    torch.optim.Optimizer
+        AdamW, Adam or SGD with no reused optimizer state.
+    """
     if cfg.optim == "AdamW":
         return torch.optim.AdamW(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
     elif cfg.optim == "Adam":
@@ -30,6 +44,21 @@ class SEM2Trainer:
 
     Ordinary tensor minibatches use PyTorch's shuffled DataLoader. Specialized
     IV-valid batching is deferred; no stratification or group balancing is done.
+
+    Parameters
+    ----------
+    cfg : TrainingConfig
+        Device, optimizer, minibatch and epoch settings.
+    sem : SEM2
+        Model to update in place, already on ``cfg.device``.
+    data : pandas.DataFrame
+        Named scalar observations, prepared once without mutating the frame.
+        Incomplete rows are dropped and reported in ``preparation_report``.
+    objective : SEM2Operator
+        Data-taking scalar objective bound to the supplied model, minimized by
+        training. Negate log-likelihood when composing a loss.
+    variables : list[VariableInfo], optional
+        Metadata keyed by normalized data column names.
     """
 
     def __init__(self, cfg: TrainingConfig, sem: SEM2, data: pd.DataFrame,
@@ -63,6 +92,11 @@ class SEM2Trainer:
         minibatch's update; it is not an epoch mean or a final evaluation.
         Scalar extraction occurs only at that logging boundary, not each update.
         Histories, final-evaluation diagnostics and convergence checks are deferred.
+
+        Returns
+        -------
+        SEM2
+            The same model with updated parameters, left in training mode.
         """
         cfg = self.cfg
         set_seed(cfg.rng_seed, device=cfg.device)

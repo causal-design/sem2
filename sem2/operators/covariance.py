@@ -17,6 +17,15 @@ class Covariance(SEM2Operator):
     Assumes finite second moments. Category codes retain their model-defined
     numeric representation.
     sample_bs overrides cfg.sample_bs; evaluate(sample_bs=...) affects one call.
+
+    Parameters
+    ----------
+    model : SEM2
+        Model whose user-declared variables define the matrix axes.
+    sample_bs : int, optional
+        Exogenous/model draw count. Non-linear models require at least two.
+    cfg : TrainingConfig, optional
+        Supplies ``sample_bs`` when no explicit count is given.
     """
     input_type = OperatorInput.SELF
     output_type = OperatorOutput.MATRIX
@@ -37,7 +46,20 @@ class Covariance(SEM2Operator):
             raise ValueError("Covariance requires at least two Monte Carlo samples.")
 
     def evaluate(self, *, sample_bs: int | None = None) -> tuple[torch.Tensor, dict]:
-        """Return the full covariance matrix and its ordered variable metadata."""
+        """Return the full covariance matrix and its ordered variable metadata.
+
+        Parameters
+        ----------
+        sample_bs : int, optional
+            Draw-count override, ignored for analytical linear covariance.
+
+        Returns
+        -------
+        covariance : torch.Tensor
+            Shape (total_width, total_width), retaining parameter gradients.
+        details : dict
+            ``variables`` describes consecutive row and column blocks.
+        """
         if isinstance(self.model, SEM2Linear):
             covariance = self.model.cov_matrix(list(self.names))
         else:

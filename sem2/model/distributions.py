@@ -41,11 +41,29 @@ class DiscreteJointDistribution:
             raise ValueError("States and probabilities must be on the same device.")
 
     def to(self, *args, **kwargs) -> DiscreteJointDistribution:
+        """Return a law with probabilities converted by ``torch.Tensor.to``.
+
+        Forward conversion arguments to probabilities. Move the state table to
+        the resulting device without changing its dtype or variable metadata.
+        """
         probabilities = self.probabilities.to(*args, **kwargs)
         return DiscreteJointDistribution(self.states.to(device=probabilities.device), probabilities)
 
     def marginalize(self, names: str | Iterable[str]) -> DiscreteJointDistribution:
-        """Combine equal projected states; retain the exogenous-draw axis."""
+        """Combine equal projected states; retain the exogenous-draw axis.
+
+        Parameters
+        ----------
+        names : str or iterable of str
+            Unique state-variable names in the desired column order.
+
+        Returns
+        -------
+        DiscreteJointDistribution
+            Unique projected states with probabilities summed over discarded
+            coordinates. Selecting no variables gives one empty state carrying
+            each row's total probability. Gradients are preserved.
+        """
         states = self.states.subset(names)
         if states.values.shape[1] == 0:
             values = states.values.new_empty((1, 0))

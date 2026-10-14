@@ -23,7 +23,20 @@ class DiscreteIVEnergyLoss(EnergyLoss):
 
     Callers supply a model encoding the IV assumptions. This class checks neither
     those causal assumptions nor identification, and does not certify effect or
-    bound recovery. See docs/plan/v0.1.md, Step 7 and later IV/example stages.
+    bound recovery.
+
+    Parameters
+    ----------
+    cfg : TrainingConfig
+        Device and default sample count and energy exponent.
+    model : SEM2Discrete
+        Model encoding the supplied IV assumptions.
+    instrument : str
+        Scalar exogenous variable with enumerated support of at least two levels.
+    sample_bs : int, optional
+        Exogenous draws per instrument level; overrides the config count.
+    beta : float, optional
+        Distance exponent; overrides the config value.
     """
 
     def __init__(self, cfg: TrainingConfig, model: SEM2Discrete, instrument: str, *,
@@ -44,6 +57,25 @@ class DiscreteIVEnergyLoss(EnergyLoss):
 
     def evaluate(self, observations: DataBatch, *, sample_bs: int | None = None,
                  beta: float | None = None) -> tuple[ScalarResult, dict]:
+        """Average conditional discrepancies using empirical instrument weights.
+
+        Parameters
+        ----------
+        observations : DataBatch
+            Instrument and observed endogenous variables. Each declared level
+            needs at least two observations; no stratification is performed.
+        sample_bs : int, optional
+            Model draws per level for this call; use at least two.
+        beta : float, optional
+            Distance exponent for this call.
+
+        Returns
+        -------
+        result : ScalarResult
+            Group-frequency-weighted half-energy distance, retaining gradients.
+        diagnostics : dict
+            Cross, within-model and within-data distances with the same weights.
+        """
         sample_bs = self.sample_bs if sample_bs is None else sample_bs
         beta = self.beta if beta is None else beta
         observations = observations.to(self.device)

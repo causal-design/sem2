@@ -1,26 +1,24 @@
 Core API
 ========
 
-Models
-------
+Models and data
+---------------
 
-* ``sem2.model.models.base.SEM2`` — general continuous model.
-* ``sem2.model.models.linear.SEM2Linear`` — linear model and analytical moments.
-* ``sem2.model.models.discrete.SEM2Discrete`` — finite-state model.
+* :doc:`models` — continuous, linear and finite-discrete structural models.
+* :doc:`data` — observation preparation, named tensors and scalar results.
+* :doc:`configuration` — node architecture, optimization and sampling settings.
 
-Data and configuration
+Fitting and evaluation
 ----------------------
 
-* ``sem2.data.records`` — named data batches, variable metadata and scalar results.
-* ``sem2.data.preparation.prepare_data`` — DataFrame preparation and alignment.
-* ``sem2.default_configs`` — node and training settings.
+* :doc:`training` — fit models to named observations with a scalar objective.
+* :doc:`objectives` — energy and covariance discrepancies, IV losses and composition.
+* :doc:`queries` — covariance, potential outcomes and treatment-effect contrasts.
+* :doc:`operators` — Gaussian log-likelihood and linear-model operator interfaces.
+* :doc:`operator-contracts` — operator input and output conventions.
 
-Training
---------
+Model construction
+------------------
 
-:doc:`training` — fit models to named observations with a scalar objective.
-
-Operators
----------
-
-:doc:`operators` — Gaussian log-likelihood and linear-model operator interfaces.
+* :doc:`formulas` — formula syntax, parsing and structural specifications.
+* :doc:`nodes` — random-variable domains and executable mechanisms.
