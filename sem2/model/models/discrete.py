@@ -16,7 +16,23 @@ from ...default_configs import LinearNodeConfig, MLPConfig
 
 
 class SEM2Discrete(SEM2):
-    """Discrete SEM2."""
+    """Discrete SEM2 with enumeration of endogenous joint states.
+
+    Parameters
+    ----------
+    model_formula : str
+        Exogenous laws and discrete equations using ``d(parents; levels=N)``.
+    node_cfgs : dict, optional
+        Per-node configurations, consumed during construction. Discrete nodes
+        use ``MLPConfig``; category counts come from the formula.
+    device : str or torch.device, default="cpu"
+        Device for model parameters, states and probabilities.
+
+    Notes
+    -----
+    Enumeration grows as the product of endogenous category counts. Sampling
+    integrates these states rather than drawing realized categorical outcomes.
+    """
     node_dict: nn.ModuleDict[str, SEM2Node]  # Maps node name to its SEM2Node object, registered as submodule for PyTorch tracking
     sem_type = SEMType.DISCRETE
 
@@ -87,12 +103,29 @@ class SEM2Discrete(SEM2):
     def sample(self, batch_size: int = 1, set_nodes: DataBatch | None = None) -> tuple[DiscreteJointDistribution, dict]:
         """Enumerate discrete states and compute their conditional probabilities.
 
-            Exogenous inputs are sampled; the returned DiscreteJointDistribution
-            integrates discrete outcomes rather than drawing categorical observations.
+        Exogenous inputs are sampled; the returned DiscreteJointDistribution
+        integrates discrete outcomes rather than drawing categorical observations.
 
-            Args:
-                batch_size: Number of exogenous Monte Carlo samples.
-                set_nodes: Optional DataBatch of named intervention values.
+        Parameters
+        ----------
+        batch_size : int, default=1
+            Positive number of exogenous Monte Carlo draws.
+        set_nodes : DataBatch, optional
+            Named intervention values with one row per draw. Supply valid state
+            IDs or exogenous values on the model device, with matching widths.
+
+        Returns
+        -------
+        distribution : DiscreteJointDistribution
+            Named endogenous states and probabilities of shape
+            (batch_size, n_states). Internal helper states are marginalized out.
+        details : dict
+            ``interventions`` contains the supplied ``set_nodes`` object.
+
+        Notes
+        -----
+        Consumes randomness and updates cached node values. Average probability
+        rows to estimate the marginal law over exogenous inputs.
         """
 
         # Unwrap valid interventions before enumerating conditional probabilities.

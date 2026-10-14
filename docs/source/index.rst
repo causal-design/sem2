@@ -14,6 +14,14 @@ identification.
    api
 
 .. toctree::
+   :maxdepth: 2
+   :caption: Models and data
+
+   models
+   data
+   configuration
+
+.. toctree::
    :maxdepth: 1
    :caption: Training
 
@@ -23,4 +31,14 @@ identification.
    :maxdepth: 2
    :caption: Operators
 
+   objectives
+   queries
    operators
+   operator-contracts
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Model construction
+
+   formulas
+   nodes

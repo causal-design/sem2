@@ -8,6 +8,18 @@ class DummyDiscreteDataloader:
 
     This samples the table below, not a supplied SEM. It is not an end-to-end
     fit-recovery benchmark or validation of the deferred IV fitting interface.
+
+    Parameters
+    ----------
+    n_steps : int
+        Number of batches yielded by each iteration.
+    batch_size : int, default=128
+        Rows sampled with replacement per batch.
+
+    Notes
+    -----
+    Iteration yields CPU ``DataBatch`` objects with integer values of shape
+    (batch_size, 3), ordered Z, X, Y. Sampling advances the Torch RNG stream.
     """
     outcome_probs = [0.20831, 0.12493, 0.14293, 0.023828, 0.11672, 0.049984, 0.24999, 0.083305]
     outcome_vals = [(0, 0, 0), (0, 0, 1), (0, 1, 0), (0, 1, 1), (1, 0, 0), (1, 0, 1), (1, 1, 0), (1, 1, 1)]

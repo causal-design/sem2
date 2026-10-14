@@ -82,6 +82,7 @@ class _DAG:
         self.inferred_sem_type: SEMType = self._infer_sem_type()
 
     def static_order(self):
+        """Return an iterator over node names in topological order, including helpers."""
         return iter(self.topological_order)
 
     def _index(self, nodes: list[str] | None) -> list[int]:

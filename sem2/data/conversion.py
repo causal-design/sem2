@@ -8,10 +8,22 @@ def databatch_to_tensor(batch: DataBatch) -> torch.Tensor:
     """Apply numeric mappings without replacing stored category identities.
 
     Mappings are assumed complete; unmapped values propagate as NaN.
-    The inherited no-mapping path warns and uses codes numerically. That fallback
-    is provisional pending the Step-7 metric/estimator review; declaring ordered
-    categories does not justify it. Supply explicit scores for meaningful means
+    The no-mapping path warns and uses codes numerically. That fallback is not a
+    category-aware metric; declaring ordered categories does not justify it.
+    Supply explicit scores for meaningful means
     or distances. Noncategorical finite values may also use an explicit mapping.
+
+    Parameters
+    ----------
+    batch : DataBatch
+        Named values and optional label-to-score mappings. Mapped variables must
+        be scalar; encodings translate labels to the stored identities.
+
+    Returns
+    -------
+    torch.Tensor
+        Numerical values with the same shape and device. Integer blocks become
+        floating point. The original values and metadata are unchanged.
     """
     columns = []
     blocks = batch.values.split([v.dim for v in batch.variables], dim=-1)
