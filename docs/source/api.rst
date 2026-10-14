@@ -15,30 +15,12 @@ Data and configuration
 * ``sem2.data.preparation.prepare_data`` — DataFrame preparation and alignment.
 * ``sem2.default_configs`` — node and training settings.
 
-Linear-model operators
-----------------------
-
-.. autosummary::
-   :toctree: generated
-   :template: autosummary/class.rst
-   :nosignatures:
-
-   sem2.operators.linear.LogLikelihood
-   sem2.operators.linear.SEM2LinearModelOperator
-   sem2.operators.linear.PathAnalysis
-
 Training
 --------
 
-.. autosummary::
-   :toctree: generated
-   :nosignatures:
+:doc:`training` — fit models to named observations with a scalar objective.
 
-   sem2.trainer.trainer.fit
+Operators
+---------
 
-.. autosummary::
-   :toctree: generated
-   :template: autosummary/class.rst
-   :nosignatures:
-
-   sem2.trainer.trainer.SEM2Trainer
+:doc:`operators` — Gaussian log-likelihood and linear-model operator interfaces.

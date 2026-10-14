@@ -6,11 +6,21 @@ Define a model with formulas, prepare named data, and fit it with an explicit
 objective. Model-implied interventions do not by themselves establish causal
 identification.
 
-This documentation starts with installation and the core package entry points.
-Detailed guides will be added alongside implementation.
-
 .. toctree::
-   :maxdepth: 2
+   :maxdepth: 1
+   :caption: Getting started
 
    installation
    api
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Training
+
+   training
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Operators
+
+   operators
