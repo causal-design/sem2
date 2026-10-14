@@ -1,133 +1,142 @@
+"""Fit a separate Gaussian model by weighted covariance matching.
+
+Run ``python -m experiments.trainer`` from the repository root after installing
+SEM2. The true equations are x = u and y = 2*x + v, with independent standard
+normal u and v. Only x and y are observed. The fitted model knows the graph,
+zero intercepts and unit noise variances, but estimates the x-to-y slope.
+Covariance alone cannot estimate intercepts, so both are explicitly fixed at zero.
+
+WeightedFrobeniusDistance uses Covariance internally and minimizes the weighted
+sum of squared covariance residuals, not a Gaussian likelihood. With diagonal
+weights 1 and off-diagonal weights 1/2, each distinct covariance is counted once.
+The reference minimizes this same one-dimensional objective independently in
+NumPy. It is not OLS. Full batches match the covariance of the whole dataset.
+
+The diagnostics describe this finite-sample example, not a general convergence
+or identification guarantee. The IV smoke example is in experiments/iv_trainer.py.
+"""
+import numpy as np
+import pandas as pd
 import torch
-import torch.nn as nn
-from typing import Iterable
-import time
-import logging
 
-from sem2.dataloader import DummyDiscreteDataloader
-from sem2.model.models import SEM2Discrete
-from sem2.operators.scalar_operators import SEM2Loss
-from sem2.default_configs import TrainingConfig, MLPConfig
-
-logger = logging.getLogger(__name__)
+from sem2.data.records import DataBatch
+from sem2.default_configs import TrainingConfig
+from sem2.model.models.linear import SEM2Linear
+from sem2.operators.covariance import Covariance
+from sem2.operators.divergence import WeightedFrobeniusDistance
+from sem2.trainer.trainer import SEM2Trainer
+from sem2.utils import set_seed
 
 
-def get_optimiser(model: nn.Module, cfg) -> torch.optim.Optimizer:
-    if cfg.optim == "AdamW":
-        return torch.optim.AdamW(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
-    elif cfg.optim == "Adam":
-        return torch.optim.Adam(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
-    elif cfg.optim == "SGD":
-        return torch.optim.SGD(model.parameters(), momentum=0.9, lr=cfg.lr, weight_decay=cfg.weight_decay)
-    else:
-        raise ValueError(f"Invalid optimiser: {cfg.optim}")
+def _coefficients(model: SEM2Linear) -> pd.Series:
+    """Read the fixed intercept and fitted slope by name, not parent order."""
+    node = model.node_dict["y"]
+    return pd.Series({
+        "intercept (fixed)": node.intercept().detach().item(),
+        "x -> y": node.effective_weight()[0, node.predecessors.index("x")].detach().item(),
+    })
 
 
-class SEM2Trainer:
-    def __init__(self, cfg: TrainingConfig, sem: SEM2Discrete, dl: Iterable):
-        """ Trainer class. Configured for IV graph Z->X->Y
-        Args:
-            cfg: TrainingConfig object containing training configuration.
-            sem: SEM2 model to train.
-            dl: Iterable dataset to train on. Each element should be a batch of data.
-        """
-
-        self.cfg = cfg
-        self.sem = sem
-        self.dl = dl
-        self.device = cfg.device
-
-        self.loss_fn = SEM2Loss(cfg, sem)
-        self.optim = get_optimiser(sem, cfg)
-
-    def train(self):
-        """ Train the model. """
-        cfg = self.cfg
-
-        self.sem.train()
-
-        for epoch in range(cfg.epochs):
-            epoch_st_t = time.perf_counter()
-
-            losses = []
-            energy_loss, ate = 0, 0
-            # Train steps
-            for batch in self.dl:
-                batch = batch.to(self.device)
-                loss, loss_metrics = self._fit_batch(batch)
-                losses.append(loss)
-                energy_loss += loss_metrics["EnergyLoss"]
-                ate += loss_metrics["ATE"]
-
-            # Timing
-            epoch_end_t = time.perf_counter()
-            epoch_time = epoch_end_t - epoch_st_t
-            logger.info(f"Epoch {epoch}: {epoch_time:.2f}s")
-
-            # Get loss statistics
-            average_loss = torch.stack(losses).mean().item()
-            average_energy_loss = energy_loss / len(self.dl)
-            average_ATE = ate / len(self.dl)
-            logger.info(f'{average_loss=:.4g}, {average_energy_loss=:.4g}, {average_ATE=:.4g}')
-
-    def _fit_batch(self, batch):
-        """ Fit model on a single batch.
-            Includes making predictions, calculating gradients, and updating model parameters.
-        """
-        self.optim.zero_grad()
+def _moments(model: SEM2Linear) -> pd.Series:
+    """Return means and the named x/y block from the covariance operator."""
+    means = model.mean_vector().detach()
+    operator = Covariance(model)
+    covariance, _ = operator.evaluate()
+    indices = [operator.columns[name][0] for name in ["x", "y"]]
+    covariance = covariance.detach()[indices][:, indices]
+    return pd.Series({
+        "mean(x)": means[model.node_order.index("x")].item(),
+        "mean(y)": means[model.node_order.index("y")].item(),
+        "var(x)": covariance[0, 0].item(),
+        "cov(x,y)": covariance[0, 1].item(),
+        "var(y)": covariance[1, 1].item(),
+    })
 
 
-        # Compute loss
-        loss, loss_metrics = self.loss_fn.evaluate(batch)
-        # Calculate gradients and update model parameters
-        loss.backward()
-        self.optim.step()
+def _reference_fit(sample_cov: np.ndarray, weight: np.ndarray) -> tuple[float, float]:
+    """Minimize the scalar quartic independently, checking all stationary points.
 
-        # Detach to stop memory leak
-        loss = loss.detach()
-        loss_metrics = {k: v.detach() for k, v in loss_metrics.items()}
-        return loss, loss_metrics
+    The model covariance is [[1, b], [b, b**2 + 1]]. The derivative divided by
+    two is 2*Wyy*b**3 + (Wxy + Wyx + 2*Wyy*(1 - Syy))*b - (Wxy + Wyx)*Sxy.
+    Positive Wyy makes the loss grow at either infinity, so a minimum is among
+    the real roots. Compare their losses rather than selecting a root by sign.
+    """
+    cross_weight = weight[0, 1] + weight[1, 0]
+    roots = np.roots([
+        2 * weight[1, 1], 0.,
+        cross_weight + 2 * weight[1, 1] * (1 - sample_cov[1, 1]),
+        -cross_weight * sample_cov[0, 1],
+    ])
+    candidates = roots.real[np.abs(roots.imag) < 1e-8]
+    losses = [
+        np.sum(weight * (sample_cov - np.array([[1., b], [b, b**2 + 1.]]))**2)
+        for b in candidates
+    ]
+    best = np.argmin(losses)
+    return float(candidates[best]), float(losses[best])
 
 
-def main():
-    torch.set_printoptions(sci_mode=False, precision=5)
-    torch.manual_seed(0)
-    logging.basicConfig(level=logging.INFO)
-    cfg = TrainingConfig(ate_weight=0.015, use_ate=True)
+def run_example(seed: int = 0) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, float]]:
+    """Generate 512 observations, fit, and return comparisons and diagnostics."""
+    set_seed(seed)
+    truth = SEM2Linear("u,v ~ Normal(0,1); x <- 1*u + 0; y <- 2*x + 1*v + 0")
+    with torch.no_grad():
+        draws, _ = truth.sample(512)
+    observations = draws.subset(["x", "y"])
+    data = pd.DataFrame(observations.values.numpy(), columns=observations.names)
 
-    formula1 = "U ~ Uniform(0,1); eps_d ~ Uniform(0,1); eps_y ~ Uniform(0,1); Z ~ Categorical(probs=[1, 1]);"
-    formula2 = "X <- d(Z, U, eps_d); Y <- d(X, U, eps_y)"
-    mlp_cfgs = {"U": 4, "eps_d": 4, "eps_y": 4,
-                "X": MLPConfig(output_dim=2),
-                "Y": MLPConfig(output_dim=2)
-                }
-    model_formula = formula1 + formula2
-    sem_model = SEM2Discrete(model_formula, node_cfgs=mlp_cfgs, device=cfg.device)
-
-    trainer = SEM2Trainer(cfg, sem_model, DummyDiscreteDataloader(256, batch_size=cfg.batch_size))
+    # No true slope or latent draws are transferred to the separate fitted model.
+    model = SEM2Linear("u,v ~ Normal(0,1); x <- 1*u + 0; y <- x + 1*v + 0")
+    coefficients = pd.DataFrame({"true": _coefficients(truth), "initial": _coefficients(model)})
+    moments = pd.DataFrame({"true": _moments(truth), "initial": _moments(model)})
+    weight = torch.tensor([[1., 0.5], [0.5, 1.]])
+    objective = WeightedFrobeniusDistance(model, observed_vars=["x", "y"], weight=weight)
+    config = TrainingConfig(
+        device="cpu", optim="SGD", lr=0.01, momentum=0., weight_decay=0.,
+        epochs=200, batch_size=len(data), rng_seed=seed,
+    )
+    trainer = SEM2Trainer(config, model, data, objective)
+    batch = DataBatch(trainer.loader.dataset.tensors[0], trainer.variables)
+    initial_loss = objective.evaluate(batch)[0].value.detach().item()
     trainer.train()
 
-    # Evaluate model
-    from sem2.operators.scalar_operators import ATE
-    eval_cfg = cfg.model_copy(update={"batch_size": 10000})
-    ATE_evaluator = ATE(eval_cfg, sem_model)
+    coefficients["fitted"] = _coefficients(model)
+    moments["fitted"] = _moments(model)
+    sample_cov = np.cov(data[["x", "y"]].to_numpy(dtype=float), rowvar=False, ddof=1)
+    moments["sample"] = [data["x"].mean(), data["y"].mean(),
+                         sample_cov[0, 0], sample_cov[0, 1], sample_cov[1, 1]]
+    reference_slope, reference_loss = _reference_fit(sample_cov, weight.numpy())
+    coefficients["reference"] = [0., reference_slope]
 
-    ate, _ = ATE_evaluator.evaluate()
-    print(f'{ate = }')
+    # Evaluate after the final update on all observations, not the last batch log.
+    final_loss = objective.evaluate(batch)[0].value
+    gradients = torch.autograd.grad(final_loss, tuple(model.parameters()), allow_unused=True)
+    diagnostics = {
+        "initial weighted squared Frobenius loss": initial_loss,
+        "fitted weighted squared Frobenius loss": final_loss.detach().item(),
+        "independent minimum loss": reference_loss,
+        "maximum absolute final gradient": max(
+            gradient.abs().max().item() for gradient in gradients if gradient is not None
+        ),
+        "absolute fitted-minus-reference slope": abs(coefficients.loc["x -> y", "fitted"] - reference_slope),
+    }
+    return coefficients, moments, diagnostics
 
-    # Sample Z=0
-    Z0 = torch.zeros([10000, 1], device="cuda", dtype=torch.long)
-    set_nodes = {"Z": Z0}
-    preds, _  = sem_model.sample(batch_size=10000, set_nodes=set_nodes)
-    preds = preds.mean(dim=0) / 2
-    print(f'Z=0, {preds = }')
 
-    # Sample Z=1
-    Z0 = torch.ones([10000, 1], device="cuda", dtype=torch.long)
-    set_nodes = {"Z": Z0}
-    preds, _  = sem_model.sample(batch_size=10000, set_nodes=set_nodes)
-    preds = preds.mean(dim=0) / 2
-    print(f'Z=1, {preds = }')
+def main() -> None:
+    coefficients, moments, diagnostics = run_example()
+    print("Gaussian covariance fit: 512 observations, seed=0, CPU, 200 full-batch SGD updates.")
+    print("Independent standard-normal noise; graph, zero intercepts and unit variances are known.")
+    print("Weighted squared Frobenius objective: W = [[1, 0.5], [0.5, 1]], sample covariance uses n-1.")
+    print("\nCoefficients (reference independently minimizes the same covariance loss, not OLS):")
+    print(coefficients.to_string(float_format=lambda value: f"{value:.6f}"))
+    print("\nModel-implied moments and empirical moments (means are not fitted):")
+    print(moments.to_string(float_format=lambda value: f"{value:.6f}"))
+    print("\nFull-data fit diagnostics:")
+    for name, value in diagnostics.items():
+        print(f"  {name}: {value:.6g}")
+    print("\nReference agreement checks optimization; differences from truth include sampling error.")
+    print("This example does not establish general convergence, identification, or IV validity.")
 
 
 if __name__ == "__main__":

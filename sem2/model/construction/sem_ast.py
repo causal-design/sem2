@@ -40,10 +40,11 @@ class LinearTerm:
 @dataclass
 class MechanismTerm:
     """A structural mechanism applied to parents: an MLP ``n(...)`` or a
-    discrete ``d(...)`` node. kind is "mlp" or "discrete".
+    discrete ``d(...; levels=N)`` node. kind is "mlp" or "discrete".
     """
     kind: str
     parents: list[str]
+    levels: int | None = None  # Required category count for discrete mechanisms.
 
 
 @dataclass
@@ -66,6 +67,8 @@ class EndogenousDecl:
     node_type: str    # "linear" | "mlp" | "discrete"
     terms: list[LinearTerm] = field(default_factory=list)
     mechanism: MechanismTerm | None = None
+    intercept: float | None = None  # None -> estimated; number -> fixed
+    is_helper: bool = False
 
 
 # A single parsed formula statement.
@@ -95,6 +98,9 @@ class NodeSpec:
         dist_name:    Distribution name string for exogenous nodes (e.g. "Normal"),
                       None for endogenous nodes.
         dist_params:  (args, kwargs) tuple for exogenous nodes, None otherwise.
+        intercept:    Fixed linear intercept, or None to estimate it.
+        levels:       Number of categories for discrete mechanisms, otherwise None.
+        is_helper:    Whether expansion generated this private computation node.
     """
     name: str
     rhs: str
@@ -104,3 +110,6 @@ class NodeSpec:
     # Only for exogenous nodes:
     dist_name: str | None = None
     dist_params: tuple | None = None        # Tuple of (arguments, keyword_arguments)
+    intercept: float | None = None
+    is_helper: bool = False
+    levels: int | None = None

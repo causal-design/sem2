@@ -36,9 +36,9 @@ class _LinearModel(nn.Module):
     Not part of the public API and used internally by NodeLinear.
     """
 
-    def __init__(self, cfg: _LinearConfig, device="cpu"):
+    def __init__(self, cfg: _LinearConfig, device: str | torch.device = "cpu") -> None:
         super().__init__()
-        self.cfg = cfg
+        self.cfg: _LinearConfig = cfg
         input_dim = cfg.input_dim
         output_dim = cfg.output_dim
 
@@ -90,7 +90,7 @@ class _MLP(nn.Module):
     Args:
         config (MLPConfig): Configuration object for the MLP. If None, uses default values.
     """
-    def __init__(self, config: MLPConfig, device="cpu"):
+    def __init__(self, config: MLPConfig, device: str | torch.device = "cpu") -> None:
         super().__init__()
 
         layers = []
@@ -109,7 +109,7 @@ class _MLP(nn.Module):
 
         # Wrap the layers in a Sequential module
         self.net = nn.Sequential(*layers)
-        self.cfg = config
+        self.cfg: MLPConfig = config
         self.to(device)
 
     def forward(self, x: Tensor) -> Tensor:

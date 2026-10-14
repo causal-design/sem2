@@ -1,30 +1,26 @@
-""" Operators specialised for linear SEM2 models (SEM2Linear).
-
-These functionals read the model-implied covariance (and path coefficients) of a
-linear SEM. The abstract SEM2LinearModelOperator base guards that the model is in
-fact linear; the concrete operators implement specific functionals.
-"""
+"""Likelihood and path analysis requiring linear models."""
 from __future__ import annotations
 import math
 import warnings
 import torch
 
 from .operators_base import OperatorInput, OperatorOutput, SEM2Operator
-from ..model.construction import SEMType
-from ..model.models import SEM2Linear
+
+from ..model.construction.sem_types import SEMType
+from ..model.models.linear import SEM2Linear
+from ..data.records import DataBatch, ScalarResult
 
 
 class SEM2LinearModelOperator(SEM2Operator):
     """Abstract base for operators that require a linear SEM (SEM2Linear).
 
     Validates linearity once at construction so concrete operators can rely on
-    coef_matrix / cov_matrix being available, and resolves the observed
-    variables the operator works over (defaulting to the formula's unobs(...)
-    declaration). Named for the *model* it serves (a linear-model operator),
+    coef_matrix / cov_matrix being available. Observation names belong to the
+    operator or its input batch, not the graph. Named for the *model* it serves,
     not "a linear operator".
     """
 
-    def __init__(self, model: SEM2Linear, observed_vars: list[str] | None = None):
+    def __init__(self, model: SEM2Linear, observed_vars: list[str] | None = None) -> None:
         inferred_type = getattr(model, "inferred_sem_type", None)
 
         if not isinstance(model, SEM2Linear):
@@ -58,19 +54,16 @@ class SEM2LinearModelOperator(SEM2Operator):
         self.model = model
         self.device = getattr(model, "device", "cpu")
 
-        vars_ = list(observed_vars) if observed_vars is not None else list(model.observed_vars)
-        if not vars_:
-            raise ValueError(
-                "No observed variables were provided. Pass observed_vars=[...] or "
-                "declare unobs(...) in the model formula."
-            )
-        missing = [v for v in vars_ if v not in model._node_index]
+        vars_ = list(observed_vars) if observed_vars is not None else None
+        if vars_ == []:
+            raise ValueError("At least one observed variable is required.")
+        missing = [v for v in (vars_ or ()) if v not in model.input_node]
         if missing:
             raise ValueError(f"Observed variables are not in the model: {missing}")
         self.observed_vars = vars_
 
 
-def _check_observation_shape(observations: torch.Tensor, n_vars: int, operator_name: str):
+def _check_observation_shape(observations: torch.Tensor, n_vars: int, operator_name: str) -> None:
     if observations.ndim != 2:
         raise ValueError(
             f"{operator_name} expects observations with shape [n, p]; "
@@ -98,8 +91,10 @@ class LogLikelihood(SEM2LinearModelOperator):
     first and second moments; a warning is issued once at construction.
 
     evaluate() returns the mean log-likelihood over the batch. observed_vars
-    defaults to the formula's unobs(...) declaration. loc defaults to the
+    defaults to the input batch's names. loc defaults to the
     model-implied mean; use centered=True for centred covariance-style fits.
+    sample_bs and beta are accepted for scalar-objective composition but do not
+    affect this analytic calculation.
     """
     input_type = OperatorInput.DATA
     output_type = OperatorOutput.SCALAR
@@ -110,7 +105,7 @@ class LogLikelihood(SEM2LinearModelOperator):
         observed_vars: list[str] | None = None,
         loc: torch.Tensor | None = None,
         centered: bool = False,
-    ):
+    ) -> None:
         super().__init__(model, observed_vars)
         if centered and loc is not None:
             raise ValueError("Pass either centered=True or loc=..., not both.")
@@ -126,34 +121,38 @@ class LogLikelihood(SEM2LinearModelOperator):
                 stacklevel=2,
             )
 
-    def _loc(self, dtype: torch.dtype) -> torch.Tensor:
+    def _loc(self, dtype: torch.dtype, names: tuple[str, ...]) -> torch.Tensor:
         if self.centered:
-            loc = torch.zeros(len(self.observed_vars), device=self.device, dtype=dtype)
+            loc = torch.zeros(len(names), device=self.device, dtype=dtype)
         elif self.loc is not None:
             loc = self.loc.to(device=self.device, dtype=dtype)
         else:
             mu = self.model.mean_vector()
-            idx = torch.tensor(self.model._index(self.observed_vars), device=self.device)
+            idx = torch.tensor(self.model._index(names), device=self.device)
             loc = mu.index_select(0, idx).to(dtype=dtype)
 
-        if loc.ndim != 1 or loc.shape[0] != len(self.observed_vars):
+        if loc.ndim != 1 or loc.shape[0] != len(names):
             raise ValueError(
-                f"loc must have shape [{len(self.observed_vars)}]; "
+                f"loc must have shape [{len(names)}]; "
                 f"got shape {tuple(loc.shape)}."
             )
         return loc
 
-    def evaluate(self, observations: torch.Tensor, **kwargs) -> tuple[torch.Tensor, dict]:
+    def evaluate(self, observations: DataBatch, *, sample_bs: int | None = None,
+                 beta: float | None = None) -> tuple[ScalarResult, dict]:
         """
         Args:
-            observations: [n, p] data, columns aligned to observed_vars.
+            observations: named data, selected in observed_vars order.
         Returns:
             (mean_log_likelihood, metrics)
         """
-        x = observations.to(self.device)
-        _check_observation_shape(x, len(self.observed_vars), type(self).__name__)
+        if not isinstance(observations, DataBatch):
+            raise TypeError("observations must be a DataBatch.")
+        batch = observations if self.observed_vars is None else observations.subset(self.observed_vars)
+        x = batch.values.to(self.device)
+        _check_observation_shape(x, len(batch.names), type(self).__name__)
 
-        sigma = self.model.cov_matrix(self.observed_vars)        # [p, p]
+        sigma = self.model.cov_matrix(batch.names)               # [p, p]
         x = x.to(dtype=sigma.dtype)
         if not torch.isfinite(sigma).all():
             raise ValueError(
@@ -161,7 +160,7 @@ class LogLikelihood(SEM2LinearModelOperator):
                 "Check that all exogenous distributions have finite second moments."
             )
 
-        loc = self._loc(dtype=sigma.dtype)
+        loc = self._loc(dtype=sigma.dtype, names=batch.names)
         if not torch.isfinite(loc).all():
             raise ValueError(
                 f"{type(self).__name__} requires finite model-implied means. "
@@ -179,50 +178,12 @@ class LogLikelihood(SEM2LinearModelOperator):
 
         log_probs = -0.5 * (k * math.log(2 * math.pi) + maha) - half_log_det  # [n]
         ll = log_probs.mean()
-        return ll, {"log_likelihood": ll.detach(), "log_likelihood_sum": log_probs.sum().detach()}
+        return ScalarResult(ll, "log_likelihood", batch.variables), {
+            "log_likelihood": ll.detach(), "log_likelihood_sum": log_probs.sum().detach()
+        }
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return "LogLikelihood"
-
-
-class WeightedFrobeniusDistance(SEM2LinearModelOperator):
-    """Weighted Frobenius distance between the sample covariance and the
-    model-implied covariance.
-
-        F = sum_{i,j} W[i,j] * (S[i,j] - Sigma[i,j])^2
-
-    With W all-ones this is the (squared) Frobenius / unweighted-least-squares
-    discrepancy used in SEM estimation (cf. lavaan's ULS objective). A weight
-    matrix W can be supplied to recover weighted/GLS-style discrepancies.
-    """
-    input_type = OperatorInput.DATA
-    output_type = OperatorOutput.SCALAR
-
-    def __init__(self, model: SEM2Linear, observed_vars: list[str] | None = None, weight: torch.Tensor | None = None):
-        super().__init__(model, observed_vars)
-        self.weight = weight
-
-    def evaluate(self, observations: torch.Tensor, **kwargs) -> tuple[torch.Tensor, dict]:
-        """
-        Args:
-            observations: [n, p] data, columns aligned to observed_vars.
-        Returns:
-            (weighted_frobenius_distance, metrics)
-        """
-        x = observations.to(self.device)
-        _check_observation_shape(x, len(self.observed_vars), type(self).__name__)
-        sample_cov = torch.cov(x.T)                              # [p, p]
-        model_cov = self.model.cov_matrix(self.observed_vars)    # [p, p]
-
-        diff = sample_cov - model_cov
-        if self.weight is not None:
-            loss = (self.weight.to(self.device) * diff ** 2).sum()
-        else:
-            loss = (diff ** 2).sum()
-        return loss, {"weighted_frobenius_distance": loss.detach()}
-
-    def __repr__(self):
-        return "WeightedFrobeniusDistance"
 
 
 class PathAnalysis(SEM2LinearModelOperator):
@@ -230,11 +191,12 @@ class PathAnalysis(SEM2LinearModelOperator):
     input_type = OperatorInput.SELF
     output_type = OperatorOutput.SCALAR
 
-    def evaluate(self, *args, **kwargs) -> tuple[torch.Tensor, dict]:
+    def evaluate(self, *, sample_bs: int | None = None,
+                 beta: float | None = None) -> tuple[torch.Tensor, dict]:
         raise NotImplementedError(
             "PathAnalysis is not implemented yet; the API and automatic path "
             "enumeration still need to be designed."
         )
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return "PathAnalysis"

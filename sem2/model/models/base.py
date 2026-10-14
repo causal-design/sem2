@@ -2,12 +2,16 @@
 # on Python < 3.14.
 from __future__ import annotations
 import warnings
+from dataclasses import replace
 import torch
 from torch import nn
 from torch import Tensor
 
 from ..components.nodes import NodeExogenous, NodeLinear, NodeMLP, NodeMLPDiscrete, SEM2Node
-from ..construction import _DAG, SEMType
+from ..construction.dag import _DAG
+from ..construction.sem_types import SEMType
+from ...data.records import DataBatch, VariableInfo
+from ...default_configs import LinearNodeConfig, MLPConfig
 
 
 # ════════════════════════════════════════════════════════════════════════════════════
@@ -23,7 +27,8 @@ class SEM2(_DAG, nn.Module):
     node_dict: nn.ModuleDict[str, SEM2Node]  # Maps node name to its SEM2Node object, registered as submodule for PyTorch tracking
     sem_type = SEMType.NONLINEAR
 
-    def __init__(self, model_formula: str, node_cfgs:dict|None = None, device="cpu"):
+    def __init__(self, model_formula: str,
+                 node_cfgs: dict[str, int | LinearNodeConfig | MLPConfig] | None = None, device: str | torch.device = "cpu") -> None:
         """
         Args:
             model_formula: Semicolon-separated formulas defining the SEM.
@@ -51,7 +56,7 @@ class SEM2(_DAG, nn.Module):
         self.node_dict = nn.ModuleDict(name_to_node)
         self.node_dict.to(device)
 
-    def _check_sem_type(self):
+    def _check_sem_type(self) -> None:
         """Warn if the formula's inferred sem_type differs from the sem_type this
         class is specialised for, nudging the user toward a more suitable SEM2
         subclass. Subclasses (e.g. SEM2Discrete, SEM2Linear) may override this to
@@ -76,7 +81,8 @@ class SEM2(_DAG, nn.Module):
                     stacklevel=3,
                 )
 
-    def _build_and_initialize_nodes(self, node_cfgs: dict, device: str) -> dict[str, SEM2Node]:
+    def _build_and_initialize_nodes(self, node_cfgs: dict[str, int | LinearNodeConfig | MLPConfig],
+                                    device: str | torch.device) -> dict[str, SEM2Node]:
         """Build all SEM2Node objects from DAG.node_specs in topological order.
 
         Because we iterate in topological order, every node's predecessors are
@@ -95,6 +101,8 @@ class SEM2(_DAG, nn.Module):
 
         for node_name in self.topological_order:
             ns = self.node_specs[node_name]
+            if ns.is_helper and node_name in node_cfgs:
+                raise ValueError(f"Cannot configure internal helper node: {node_name!r}")
             cfg = node_cfgs.pop(node_name, None)
             predecessor_nodes = [name_to_node[p] for p in ns.predecessors]
 
@@ -116,11 +124,14 @@ class SEM2(_DAG, nn.Module):
                 node = NodeMLP(node_name, ns.rhs, cfg, predecessor_nodes, device=device)
 
             elif ns.node_type == "discrete":
+                # Category count belongs to the formula; copy the architecture config.
+                cfg = replace(cfg if cfg is not None else MLPConfig(), output_dim=ns.levels)
                 node = NodeMLPDiscrete(node_name, ns.rhs, cfg, predecessor_nodes, device=device)
 
             elif ns.node_type == "linear":
                 node = NodeLinear(
-                    node_name, ns.rhs, ns.coefficients, cfg, predecessor_nodes, device=device
+                    node_name, ns.rhs, ns.coefficients, cfg, predecessor_nodes,
+                    device=device, intercept=ns.intercept,
                 )
 
             else:
@@ -130,33 +141,74 @@ class SEM2(_DAG, nn.Module):
 
         return name_to_node
 
-    def sample(self, batch_size: int = 1, set_nodes: dict[str, Tensor]|None = None) -> tuple[dict[str, Tensor], dict]:
-        """ Forward pass of a continuous SEM2 model. Nodes are sampled from their respective distributions.
+    def _variable_info(self, name: str) -> VariableInfo:
+        node = self.node_dict[name]
+        categorical = isinstance(node, NodeMLPDiscrete) or isinstance(node.dist, torch.distributions.Categorical)
+        return VariableInfo(name, dim=node.out_dim, categorical=categorical)
 
-        Args:
-            batch_size: Number of samples to draw.
-            set_nodes: Optional dict of node name -> tensor to pin specific node
-                       values (e.g. for interventions). Shape: [batch_size, out_dim].
-        Return:
-            {node_name: tensor}.
-            {} Dummy dict, no metrics are generated.
+    def _unpack_interventions(self, set_nodes: DataBatch | None, batch_size: int) -> dict[str, Tensor]:
+        """Unpack a named intervention batch into per-node tensors.
+
+        Input has shape [batch_size, sum(variable.dim)]; each dictionary value
+        has shape [batch_size, node.out_dim]. None gives an empty dictionary.
+        Check positive batch size, row count, user-declared names and matching
+        dimensions. Do not broadcast, encode labels, apply numerical scores or
+        validate support values; callers supply valid stored intervention values.
         """
-        layer = self.node_dict
-        topological_order = self.topological_order
+        if batch_size < 1:
+            raise ValueError("batch_size must be positive.")
+        if set_nodes is None:
+            return {}
+        if not isinstance(set_nodes, DataBatch):
+            raise TypeError("set_nodes must be a DataBatch.")
+        if len(set_nodes) != batch_size:
+            raise ValueError("Intervention rows must match batch_size.")
+        values = {}
+        for variable in set_nodes.variables:
+            name = variable.name
+            if name not in self.input_node:
+                raise ValueError(f"Unknown or internal intervention node: {name!r}")
+            node = self.node_dict[name]
+            value = set_nodes.select(name)
+            if variable.dim != node.out_dim:
+                raise ValueError(f"Intervention dimension does not match {name!r}.")
+            values[name] = value
+        return values
 
-        set_nodes = set_nodes if set_nodes is not None else {}
-        assert set(set_nodes.keys()).issubset(layer.keys()), \
-            f"set_nodes contains unknown nodes: {set(set_nodes.keys()) - set(layer.keys())}"
+    def sample(self, batch_size: int = 1, set_nodes: DataBatch | None = None) -> tuple[DataBatch, dict]:
+        """Return named draws and intervention provenance, excluding helpers."""
+        # Share the sampling loop with queries that stop at a specific target.
+        return self._sample(batch_size, set_nodes)
 
-        for node_name in topological_order:
-            v = layer[node_name]
-            if node_name in set_nodes:
-                v.set_value(set_nodes[node_name])
+    def _sample(self, batch_size: int, set_nodes: DataBatch | None,
+                target: str | None = None) -> tuple[DataBatch, dict]:
+        """One traversal for full samples and target-only queries.
+
+        The private target option lets queries stop early without duplicating
+        intervention handling or expanding the public sample interface.
+        """
+        if target is not None and target not in self.input_node:
+            raise ValueError(f"Unknown or internal target node: {target!r}")
+        # Unwrap interventions once and retain their supplied variable metadata.
+        interventions = self._unpack_interventions(set_nodes, batch_size)
+        supplied = {} if set_nodes is None else dict(zip(set_nodes.names, set_nodes.variables))
+        values, variables = [], []
+        # Evaluate parents first, replacing intervened equations with fixed values.
+        for name in self.topological_order:
+            node = self.node_dict[name]
+            if name in interventions:
+                node.set_value(interventions[name])
             else:
-                pred_values = [layer[p].get_value() for p in v.predecessors]
-                v(pred_values, batch_size)
-
-        return {name: layer[name].get_value() for name in topological_order}, {}
+                node([self.node_dict[p].get_value() for p in node.predecessors], batch_size)
+            # Keep compiler helpers out of the returned batch.
+            if not self.node_specs[name].is_helper and (target is None or name == target):
+                values.append(node.get_value())
+                variables.append(supplied[name] if name in supplied else self._variable_info(name))
+            if name == target:
+                break
+        # Stack variable blocks in the same order as their metadata.
+        result = DataBatch(torch.cat(values, dim=-1), variables)
+        return result, {"interventions": set_nodes}
 
     def forward(self, *args, **kwargs):
         raise NotImplementedError(f"call the sample() method instead of forward() or calling the model directly.")

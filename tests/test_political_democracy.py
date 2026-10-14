@@ -14,12 +14,14 @@ Reference (lavaan ML, structural regressions among latents):
 import os
 import pytest
 import torch
+from sem2.utils import set_seed
 
-torch.manual_seed(0)
 torch.set_num_threads(1)
 
-from sem2.model import SEM2Linear, SEMType
+from sem2.model.models.linear import SEM2Linear
+from sem2.model.construction.sem_types import SEMType
 from sem2.operators.linear import LogLikelihood
+from sem2.data.records import DataBatch, VariableInfo
 
 DATA = os.path.join(os.path.dirname(__file__), "..", "data", "PoliticalDemocracy.csv")
 LAVAAN = {"dem60~ind60": 1.483, "dem65~ind60": 0.572, "dem65~dem60": 0.837}
@@ -35,9 +37,7 @@ FORMULA = (
     "y1 <- dem60 + ey1 + e15; y2 <- dem60 + ey2 + e24 + e26;"
     "y3 <- dem60 + ey3 + e37; y4 <- dem60 + ey4 + e24 + e48;"
     "y5 <- dem65 + ey5 + e15; y6 <- dem65 + ey6 + e26 + e68;"
-    "y7 <- dem65 + ey7 + e37; y8 <- dem65 + ey8 + e48 + e68;"
-    "unobs(ex1,ex2,ex3,ey1,ey2,ey3,ey4,ey5,ey6,ey7,ey8,edem60,edem65,"
-    "e15,e24,e26,e37,e48,e68,ind60,dem60,dem65)"
+    "y7 <- dem65 + ey7 + e37; y8 <- dem65 + ey8 + e48 + e68"
 )
 OBS = ["x1", "x2", "x3", "y1", "y2", "y3", "y4", "y5", "y6", "y7", "y8"]
 
@@ -55,16 +55,16 @@ def _load_centered():
 
 
 def _fit(iters=2000, lr=0.05):
-    torch.manual_seed(0)
+    set_seed(0)
     data, cols = _load_centered()
-    x = data[:, [cols[v] for v in OBS]]
+    x = DataBatch(data[:, [cols[v] for v in OBS]], [VariableInfo(v) for v in OBS])
     m = SEM2Linear(FORMULA)
     ll = LogLikelihood(m, centered=True)
     opt = torch.optim.Adam(m.parameters(), lr=lr)
     for _ in range(iters):
         opt.zero_grad()
         val, _ = ll.evaluate(x)
-        (-val).backward()        # maximise log-likelihood == lavaan ML discrepancy
+        (-val.value).backward()  # maximise log-likelihood == lavaan ML discrepancy
         opt.step()
     return m
 
@@ -94,13 +94,15 @@ def _structural_coefs(m):
 class TestPoliticalDemocracy:
 
     def test_model_is_linear_gaussian(self):
+        set_seed(0)
         m = SEM2Linear(FORMULA)
         assert m.inferred_sem_type == SEMType.LINEAR_GAUSSIAN
-        assert m.observed_vars == OBS
+        assert set(OBS).issubset(m.input_node)
 
     def test_cov_matrix_symmetric_and_pd(self):
+        set_seed(0)
         m = SEM2Linear(FORMULA)
-        sigma = m.cov_matrix(m.observed_vars).detach()
+        sigma = m.cov_matrix(OBS).detach()
         assert sigma.shape == (len(OBS), len(OBS))
         assert torch.allclose(sigma, sigma.T, atol=1e-5)
         # Cholesky succeeds iff positive definite.

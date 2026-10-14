@@ -1,0 +1,33 @@
+digraph fitting {
+  graph [rankdir=TB, bgcolor="white", pad=0.25, nodesep=0.5, ranksep=0.45,
+         fontname="DejaVu Sans", fontsize=16];
+  node [shape=box, style="rounded,filled", fillcolor="#eef6ff", color="#426582",
+        fontname="DejaVu Sans", fontsize=15, fontcolor="#172b3a", margin="0.18,0.12"];
+  edge [color="#52677a", fontname="DejaVu Sans", fontsize=12, fontcolor="#34495e",
+        arrowsize=0.7];
+
+  frame [label="pandas.DataFrame\nNamed observations"];
+  model [label="The supplied model\nNodes and trainable parameters", fillcolor="#fff4dc"];
+  prepare [label="prepare_data(model, frame)\nAlign names; encode; check domains", fillcolor="#e8f5ec"];
+  prepared [label="Prepared DataBatch\nAll retained observations"];
+  metadata [label="list[VariableInfo]\nRetained by trainer, not batched", fillcolor="#f3f4f6"];
+  loader [label="TensorDataset + DataLoader\nTensor values only", fillcolor="#e8f5ec"];
+  batch [label="Minibatch DataBatch\nValues + retained metadata"];
+  objective [label="Explicit scalar objective\nobjective.evaluate(batch)", fillcolor="#e8f5ec"];
+  result [label="ScalarResult\nresult.value retains gradients"];
+  update [label="Backward pass + optimizer step\nUpdate the same model", fillcolor="#e8f5ec"];
+
+  { rank=same; frame; model; }
+  frame -> prepare;
+  model -> prepare [label="names, order, domains"];
+  prepare -> prepared;
+  prepared -> loader [label="values"];
+  prepared -> metadata [label="variables"];
+  loader -> batch [label="one tensor minibatch"];
+  metadata -> batch [label="attach metadata"];
+  batch -> objective;
+  model -> objective [label="model computations", constraint=false];
+  objective -> result;
+  result -> update [label="differentiate value"];
+  update -> model [label="parameters only", color="#9a641a", fontcolor="#815113", constraint=false];
+}
