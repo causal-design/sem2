@@ -42,7 +42,12 @@ class RandomVariable(ABC):
 
     @property
     def support(self) -> RandomVariableSupport:
-        """Inspect the declared domain without sampling or changing node state."""
+        """Inspect the declared domain without sampling or changing node state.
+
+        Read the current distribution's constraint/enumeration on access rather
+        than cache a second support tensor. Deterministic nodes use their declared
+        _support_constraint. This is a domain, not data-observed unique values.
+        """
         constraint = self._support_constraint
         values = None
         if self.dist is not None:

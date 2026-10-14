@@ -10,7 +10,7 @@ from torch import Tensor
 from ..components.nodes import NodeExogenous, NodeLinear, NodeMLP, NodeMLPDiscrete, SEM2Node
 from ..construction.dag import _DAG
 from ..construction.sem_types import SEMType
-from ...dataloader.data import DataBatch, VariableInfo
+from ...data.records import DataBatch, VariableInfo
 from ...default_configs import LinearNodeConfig, MLPConfig
 
 
@@ -144,10 +144,17 @@ class SEM2(_DAG, nn.Module):
     def _variable_info(self, name: str) -> VariableInfo:
         node = self.node_dict[name]
         categorical = isinstance(node, NodeMLPDiscrete) or isinstance(node.dist, torch.distributions.Categorical)
-        return VariableInfo(name, width=node.out_dim, categorical=categorical)
+        return VariableInfo(name, dim=node.out_dim, categorical=categorical)
 
-    def _intervention_values(self, set_nodes: DataBatch | None, batch_size: int) -> dict[str, Tensor]:
-        """Check names and shapes, then unwrap caller-supplied valid intervention values."""
+    def _unpack_interventions(self, set_nodes: DataBatch | None, batch_size: int) -> dict[str, Tensor]:
+        """Unpack a named intervention batch into per-node tensors.
+
+        Input has shape [batch_size, sum(variable.dim)]; each dictionary value
+        has shape [batch_size, node.out_dim]. None gives an empty dictionary.
+        Check positive batch size, row count, user-declared names and matching
+        dimensions. Do not broadcast, encode labels, apply numerical scores or
+        validate support values; callers supply valid stored intervention values.
+        """
         if batch_size < 1:
             raise ValueError("batch_size must be positive.")
         if set_nodes is None:
@@ -163,8 +170,8 @@ class SEM2(_DAG, nn.Module):
                 raise ValueError(f"Unknown or internal intervention node: {name!r}")
             node = self.node_dict[name]
             value = set_nodes.select(name)
-            if variable.width != node.out_dim:
-                raise ValueError(f"Intervention width does not match {name!r}.")
+            if variable.dim != node.out_dim:
+                raise ValueError(f"Intervention dimension does not match {name!r}.")
             values[name] = value
         return values
 
@@ -183,7 +190,7 @@ class SEM2(_DAG, nn.Module):
         if target is not None and target not in self.input_node:
             raise ValueError(f"Unknown or internal target node: {target!r}")
         # Unwrap interventions once and retain their supplied variable metadata.
-        interventions = self._intervention_values(set_nodes, batch_size)
+        interventions = self._unpack_interventions(set_nodes, batch_size)
         supplied = {} if set_nodes is None else dict(zip(set_nodes.names, set_nodes.variables))
         values, variables = [], []
         # Evaluate parents first, replacing intervened equations with fixed values.
@@ -200,7 +207,7 @@ class SEM2(_DAG, nn.Module):
             if name == target:
                 break
         # Stack variable blocks in the same order as their metadata.
-        result = DataBatch(torch.cat(values, dim=-1), tuple(variables))
+        result = DataBatch(torch.cat(values, dim=-1), variables)
         return result, {"interventions": set_nodes}
 
     def forward(self, *args, **kwargs):

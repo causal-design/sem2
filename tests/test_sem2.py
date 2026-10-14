@@ -12,7 +12,8 @@ import torch.nn as nn
 from sem2.utils import set_seed
 
 from sem2.model.components.nn_models import _LinearConfig, _LinearModel, _MLP
-from sem2.dataloader.data import DataBatch, VariableInfo
+from sem2.data.records import DataBatch, VariableInfo
+from sem2.operators.divergence import WeightedFrobeniusDistance
 from sem2.default_configs import LinearNodeConfig, MLPConfig
 from sem2.model.components.nodes import (
     RandomVariable, SEM2Node,
@@ -39,7 +40,7 @@ def make_model(formula, cfgs: dict[str, int | LinearNodeConfig | MLPConfig] | No
 
 
 def batch(values, *names):
-    return DataBatch(values, tuple(VariableInfo(name) for name in names))
+    return DataBatch(values, [VariableInfo(name) for name in names])
 
 
 def run(model, bs=BS, set_nodes=None):
@@ -1069,7 +1070,7 @@ class TestRegisterBuffer:
 
 from sem2.model.models.linear import SEM2Linear
 from sem2.operators.linear import (
-    SEM2LinearModelOperator, LogLikelihood, WeightedFrobeniusDistance,
+    SEM2LinearModelOperator, LogLikelihood,
 )
 
 
