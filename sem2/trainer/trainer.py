@@ -88,30 +88,35 @@ class SEM2Trainer:
 
 def fit(model: SEM2, data: pd.DataFrame, objective: SEM2Operator, config: TrainingConfig,
         *, variables: list[VariableInfo] | None = None) -> SEM2:
-    """Fit and return the supplied model in place, using a fresh optimizer.
+    """Fit a model to named observations by minimizing a scalar objective.
 
     Parameters
     ----------
     model : SEM2
-        Model whose parameters are updated; its structural graph is unchanged.
+        Model to update in place, on the device specified by ``config.device``.
     data : pandas.DataFrame
-        Named observations, prepared once without mutating the frame.
+        Observations of shape (n_rows, n_variables), with columns naming scalar
+        model variables. Rows with missing values are dropped; the input is
+        unchanged.
     objective : SEM2Operator
-        Data-taking scalar objective to minimize. Use a negative weight for
-        LogLikelihood inside SEM2Loss. Model-only components may be composed.
+        Data-taking scalar objective bound to this model. To maximize
+        log-likelihood, give ``LogLikelihood`` a negative weight in ``SEM2Loss``.
     config : TrainingConfig
-        Optimizer, epoch and batch settings. rng_seed=None leaves the shared RNG
-        stream alone; an explicit seed resets it when training executes, not at
-        trainer construction. It does not reproduce earlier model initialization.
-    variables : list[VariableInfo] or None
-        Optional column metadata passed to prepare_data().
+        Optimizer, learning rate, epoch budget, batch size and device settings.
+        An explicit ``rng_seed`` reseeds training; ``None`` does not reseed.
+    variables : list[VariableInfo], optional
+        Column metadata for data preparation, including categorical encodings.
+        Names must match the normalized DataFrame column names.
 
     Returns
     -------
     SEM2
-        The same object with updated parameters. Repeated fits create a fresh
-        optimizer, not fresh weights. No convergence or successful-fit claim is
-        made; per-update finiteness checks, rollback and fit histories are absent.
+        The supplied model with updated parameters, left in training mode.
+
+    Notes
+    -----
+    Each call uses a fresh optimizer without resetting model parameters.
+    Completing the epoch budget does not establish convergence.
     """
     return SEM2Trainer(config, model, data, objective, variables=variables).train()
 
