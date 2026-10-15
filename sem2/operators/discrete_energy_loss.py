@@ -3,14 +3,30 @@ import torch
 from ..data.records import DataBatch, ScalarResult
 from ..model.distributions import DiscreteJointDistribution
 from ..data.conversion import databatch_to_tensor
+from ..default_configs import TrainingConfig
+
+
+def _energy_values(batch: DataBatch) -> torch.Tensor:
+    """Use quantitative values or explicit scores, never arbitrary category codes."""
+    unscored = [v.name for v in batch.variables if v.categorical and v.numeric_mapping is None]
+    if unscored:
+        raise ValueError(f"Energy distances require a numeric_mapping for categories: {unscored}")
+    return databatch_to_tensor(batch)
+
+
+def _energy_distance(x: torch.Tensor, y: torch.Tensor, beta: float) -> torch.Tensor:
+    """Powered Euclidean distances, assigning zero gradients at coincident points."""
+    if not 0 < beta < 2:
+        raise ValueError("Energy beta must be strictly between zero and two.")
+    distances = torch.cdist(x, y)
+    # Avoid differentiating zero**beta for fractional beta; masking afterwards
+    # leaves an infinite derivative in the autograd graph.
+    positive = distances > 0
+    return distances.where(positive, 1).pow(beta).where(positive, 0)
 
 
 class DiscreteEnergyLoss:
-    """Provisional finite-energy calculation retained pending Step-7 review.
-
-    This executable implementation is a placeholder for the reviewed estimator,
-    not evidence that distance/scaling, pair correction or fitting validation has
-    been approved. The bounded Step-6 correction pass leaves its formulas intact.
+    """Energy scores and half-energy distances for finite probability laws.
 
     observations.values has shape [N, D], prediction.states.values [S, D],
     and prediction.probabilities [M, S], where M counts exogenous draws.
@@ -19,15 +35,18 @@ class DiscreteEnergyLoss:
 
     Parameters
     ----------
-    unbiased : bool, default=True
+    cfg : TrainingConfig
+        Supplies the default pair-correction setting.
+    unbiased : bool, optional
+        Overrides ``cfg.energy_score_unbiased``.
         Exclude same-row pairs from within-distribution distances. Corrected
         terms require at least two probability rows, and two observations when
         computing ``energy_dist``.
     """
 
-    def __init__(self, *, unbiased: bool = True) -> None:
+    def __init__(self, cfg: TrainingConfig, *, unbiased: bool | None = None) -> None:
         """Set pair correction; the caller supplies the resolved beta per evaluation."""
-        self.unbiased = unbiased
+        self.unbiased = cfg.energy_score_unbiased if unbiased is None else unbiased
 
     def _validate(self, observations: DataBatch, prediction: DiscreteJointDistribution, observed_pairs: bool = False) -> None:
         """Check sizes only, avoiding empty means and zero pair denominators."""
@@ -57,8 +76,8 @@ class DiscreteEnergyLoss:
     def _energy_components(
         self, observations: DataBatch, prediction: DiscreteJointDistribution,
         *, beta: float,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Return scalar cross/pair distances, empirical rows [N, S] and distances [S, S]."""
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Return cross/pair distances, empirical rows, state distances and cell errors."""
         # Sum over unobserved state coordinates and align the remainder by name.
         prediction = prediction.marginalize(observations.names)
         probabilities = prediction.probabilities
@@ -67,13 +86,14 @@ class DiscreteEnergyLoss:
         # One indicator row per observation, in enumerated-state order [N, S].
         # Match stored identities directly, without coercing them to integer indices.
         empirical = (observations.values[:, None, :] == states[None, :, :]).all(-1).to(probabilities)
-        numeric = databatch_to_tensor(DataBatch(states, observations.variables)).to(probabilities)
+        numeric = _energy_values(DataBatch(states, observations.variables)).to(probabilities)
         # D[i,j] = ||state_i - state_j||_2**beta, using the chosen numeric mapping.
-        distances = torch.cdist(numeric, numeric) ** beta
+        distances = _energy_distance(numeric, numeric, beta)
         # Average the cross-distance over independent data and model draws.
         cross = empirical.mean(0) @ distances @ probabilities.mean(0)
         pair = self._pair_distance(probabilities, distances)
-        return cross, pair, empirical, distances
+        error = (probabilities.mean(0) - empirical.mean(0)).abs()
+        return cross, pair, empirical, distances, error
 
     def energy_score(self, observations: DataBatch, prediction: DiscreteJointDistribution,
                      *, beta: float) -> tuple[ScalarResult, dict]:
@@ -97,12 +117,14 @@ class DiscreteEnergyLoss:
         result : ScalarResult
             Cross-distance minus half the model-pair distance, with gradients.
         diagnostics : dict
-            ``estimated-true distance`` and ``estimated-estimated distance``.
+            Cross and model-pair distances, ``total_variation`` and
+            ``max_cell_error`` between the empirical and predicted margins.
         """
         self._validate(observations, prediction)
-        cross, pair, _, _ = self._energy_components(observations, prediction, beta=beta)
+        cross, pair, _, _, error = self._energy_components(observations, prediction, beta=beta)
         result = ScalarResult(cross - pair / 2, "energy_score", observations.variables)
-        return result, {"estimated-true distance": cross, "estimated-estimated distance": pair}
+        return result, {"estimated-true distance": cross, "estimated-estimated distance": pair,
+                        "total_variation": error.sum() / 2, "max_cell_error": error.max()}
 
     def energy_dist(self, observations: DataBatch, prediction: DiscreteJointDistribution,
                     *, beta: float) -> tuple[ScalarResult, dict]:
@@ -129,10 +151,13 @@ class DiscreteEnergyLoss:
         diagnostics : dict
             Cross, model-pair and data-pair terms under ``estimated-true distance``,
             ``estimated-estimated distance`` and ``true-true distance``.
+            ``total_variation`` and ``max_cell_error`` compare the empirical and
+            predicted probability margins, independently of numerical scores.
         """
         self._validate(observations, prediction, observed_pairs=True)
-        cross, pair, empirical, distances = self._energy_components(observations, prediction, beta=beta)
+        cross, pair, empirical, distances, error = self._energy_components(observations, prediction, beta=beta)
         observed_pair = self._pair_distance(empirical, distances)
         result = ScalarResult(cross - pair / 2 - observed_pair / 2, "energy_distance", observations.variables)
         return result, {"estimated-true distance": cross, "estimated-estimated distance": pair,
-                        "true-true distance": observed_pair}
+                        "true-true distance": observed_pair,
+                        "total_variation": error.sum() / 2, "max_cell_error": error.max()}

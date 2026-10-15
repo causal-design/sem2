@@ -4,9 +4,8 @@ from typing import TYPE_CHECKING
 import torch
 from .operators_base import OperatorInput, OperatorOutput, SEM2Operator
 from .covariance import Covariance
-from .discrete_energy_loss import DiscreteEnergyLoss
+from .discrete_energy_loss import DiscreteEnergyLoss, _energy_distance, _energy_values
 from ..data.records import DataBatch, ScalarResult
-from ..data.conversion import databatch_to_tensor
 from ..model.construction.sem_types import SEMType
 from ..default_configs import TrainingConfig
 
@@ -15,11 +14,10 @@ if TYPE_CHECKING:
 
 
 class EnergyLoss(SEM2Operator):
-    """Compare observations with draws or probabilities using provisional energy code.
+    """Compare observations with model draws or finite probabilities.
 
-    The calculation is retained as an executable placeholder pending Step-7
-    distance/exponent/scaling and estimator review; no new estimator is approved
-    by this layout/dispatch correction. IV specialization remains separate.
+    Quantitative variables use their supplied scale; categorical variables require
+    explicit numeric mappings. No standardization or category scoring is inferred.
 
     Settings resolve as evaluation override > constructor override > config.
     Per-call overrides do not change the stored defaults.
@@ -31,20 +29,23 @@ class EnergyLoss(SEM2Operator):
     model : SEM2
         Model to compare with observations, on the configured device.
     sample_bs : int, optional
-        Model draws; overrides ``cfg.sample_bs``. Use at least two.
+        Model draws; overrides ``cfg.sample_bs``. Corrected pairs need two.
     beta : float, optional
         Power applied to distances; overrides ``cfg.energy_score_beta``.
+    unbiased : bool, optional
+        Pair correction; overrides ``cfg.energy_score_unbiased`` at construction.
     """
     input_type = OperatorInput.DATA
     output_type = OperatorOutput.SCALAR
 
     def __init__(self, cfg: TrainingConfig, model: SEM2, *,
-                 sample_bs: int | None = None, beta: float | None = None) -> None:
+                 sample_bs: int | None = None, beta: float | None = None,
+                 unbiased: bool | None = None) -> None:
         self.model = model
         self.device = cfg.device
         self.sample_bs = cfg.sample_bs if sample_bs is None else sample_bs
         self.beta = cfg.energy_score_beta if beta is None else beta
-        self.discrete_loss = DiscreteEnergyLoss()
+        self.discrete_loss = DiscreteEnergyLoss(cfg, unbiased=unbiased)
         self._evaluate_model = (self._evaluate_continuous if SEMType.is_continuous(model.sem_type)
                                 else self._evaluate_discrete)
 
@@ -69,7 +70,8 @@ class EnergyLoss(SEM2Operator):
             gradients. The continuous score omits the data/data constant.
         diagnostics : dict
             Cross and within-model distances; the discrete route also includes
-            the within-data term. Values are not detached.
+            the within-data term, total variation and largest cell-probability
+            error. Values are not detached.
         """
         sample_bs = self.sample_bs if sample_bs is None else sample_bs
         beta = self.beta if beta is None else beta
@@ -99,16 +101,17 @@ class EnergyLoss(SEM2Operator):
     def _energy_score(self, observations: DataBatch, prediction: DataBatch,
                       *, beta: float) -> tuple[ScalarResult, dict]:
         """Compare observations [N, D] with named draws [M, D], allowing N != M."""
-        targets = databatch_to_tensor(observations)
-        draws = databatch_to_tensor(DataBatch(prediction.select(observations.names), observations.variables)).to(targets)
+        targets = _energy_values(observations)
+        draws = _energy_values(DataBatch(prediction.select(observations.names), observations.variables)).to(targets)
         n = draws.shape[0]
-        if not len(observations) or n < 2:
-            raise ValueError("Energy score requires observations and at least two model draws.")
+        if not len(observations) or n < 1 or (self.discrete_loss.unbiased and n < 2):
+            raise ValueError("Energy score requires observations and enough model draws for the pair estimator.")
         # Cross term: average every observation/model pair, even when N != M.
-        cross = (torch.cdist(targets, draws) ** beta).mean()
-        distances = torch.cdist(draws, draws) ** beta
+        cross = _energy_distance(targets, draws, beta).mean()
+        distances = _energy_distance(draws, draws, beta)
         # Model pair term: omit self-pairs for the unbiased finite-sample estimate.
-        pair = (distances.sum() - distances.diagonal().sum()) / (n * (n - 1))
+        pair = ((distances.sum() - distances.diagonal().sum()) / (n * (n - 1))
+                if self.discrete_loss.unbiased else distances.mean())
         value = cross - pair / 2
         return ScalarResult(value, "energy_score", observations.variables), {
             "energy_score": value, "estimated-true distance": cross, "estimated-estimated distance": pair

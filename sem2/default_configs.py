@@ -102,7 +102,9 @@ class TrainingConfig(BaseModel):
     sample_bs : int, default=512
         Default operator Monte Carlo count, separate from data batch size.
     energy_score_beta : float, default=1.0
-        Default exponent used by energy operators.
+        Distance exponent, strictly between zero and two.
+    energy_score_unbiased : bool, default=True
+        Exclude same-draw pairs in energy losses. False uses all pairs.
 
     Examples
     --------
@@ -130,7 +132,8 @@ class TrainingConfig(BaseModel):
     sample_bs: int = 512                           # Sample batch size for distribution sampling
 
     # Energy score
-    energy_score_beta: float = 1.
+    energy_score_beta: float = Field(default=1., gt=0, lt=2)
+    energy_score_unbiased: bool = True
 
     @model_validator(mode="after")
     def _resolve_device(self) -> "TrainingConfig":

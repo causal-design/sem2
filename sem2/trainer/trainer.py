@@ -6,12 +6,25 @@ from torch.utils.data import DataLoader, TensorDataset
 
 from ..model.models.base import SEM2
 from ..operators.operators_base import OperatorInput, OperatorOutput, SEM2Operator
+from ..operators.discrete_iv import DiscreteIVEnergyLoss
+from ..operators.sem2_loss import SEM2Loss
 from ..default_configs import TrainingConfig
 from ..data.records import DataBatch, VariableInfo
 from ..data.preparation import prepare_data
 from ..utils import set_seed
 
 logger = logging.getLogger(__name__)
+
+
+def _check_iv_batch(objective: SEM2Operator, batch: DataBatch, batch_size: int) -> None:
+    """Check IV eligibility once on complete cases, including composed objectives."""
+    if isinstance(objective, SEM2Loss):
+        for component, _ in objective.loss_components:
+            _check_iv_batch(component, batch, batch_size)
+    elif isinstance(objective, DiscreteIVEnergyLoss):
+        objective._group_observations(batch)
+        if batch_size < len(batch):
+            raise ValueError(f"IV fitting requires a full-data batch; set batch_size >= {len(batch)}.")
 
 
 def get_optimiser(model: nn.Module, cfg: TrainingConfig) -> torch.optim.Optimizer:
@@ -42,8 +55,8 @@ def get_optimiser(model: nn.Module, cfg: TrainingConfig) -> torch.optim.Optimize
 class SEM2Trainer:
     """Prepare once, then minimize an explicit scalar objective in place.
 
-    Ordinary tensor minibatches use PyTorch's shuffled DataLoader. Specialized
-    IV-valid batching is deferred; no stratification or group balancing is done.
+    Ordinary tensor minibatches use PyTorch's shuffled DataLoader. IV objectives
+    require one full-data batch; no stratification or group balancing is done.
 
     Parameters
     ----------
@@ -79,6 +92,7 @@ class SEM2Trainer:
             sem, data, variables=variables, device=cfg.device,
         )
         self.variables = batch.variables
+        _check_iv_batch(objective, batch, cfg.batch_size)
         self.loader = DataLoader(TensorDataset(batch.values), batch_size=cfg.batch_size, shuffle=True)
         if self.preparation_report["dropped_rows"]:
             logger.warning("Dropped %d rows with missing values.", self.preparation_report["dropped_rows"])
@@ -138,6 +152,7 @@ def fit(model: SEM2, data: pd.DataFrame, objective: SEM2Operator, config: Traini
     config : TrainingConfig
         Optimizer, learning rate, epoch budget, batch size and device settings.
         An explicit ``rng_seed`` reseeds training; ``None`` does not reseed.
+        IV objectives require ``batch_size`` at least the retained row count.
     variables : list[VariableInfo], optional
         Column metadata for data preparation, including categorical encodings.
         Names must match the normalized DataFrame column names.
@@ -156,15 +171,14 @@ def fit(model: SEM2, data: pd.DataFrame, objective: SEM2Operator, config: Traini
 
 
 def main():
-    """Compatibility smoke demo, not validation of the deferred IV fitting API."""
+    """Small IV fitting smoke demo, not a fit-recovery benchmark."""
     from ..data.dummy import DummyDiscreteDataloader
     from ..default_configs import MLPConfig
     from ..model.models.discrete import SEM2Discrete
-    from ..operators.discrete_iv import DiscreteIVEnergyLoss
 
     set_seed(0)
     logging.basicConfig(level=logging.INFO)
-    cfg = TrainingConfig(device="cpu", epochs=1, batch_size=64, sample_bs=32)
+    cfg = TrainingConfig(device="cpu", epochs=1, batch_size=128, sample_bs=32)
     model = SEM2Discrete("Z ~ Categorical(probs=[1,1]); X <- d(Z; levels=2); Y <- d(X; levels=2)", node_cfgs={
         "X": MLPConfig(hidden_dims=[8]),
         "Y": MLPConfig(hidden_dims=[8]),
