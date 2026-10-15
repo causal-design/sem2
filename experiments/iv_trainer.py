@@ -1,7 +1,6 @@
-"""Compatibility smoke example using the canonical trainer and IV placeholder.
+"""Full-data IV fitting smoke example using the canonical trainer.
 
-This is not an IV fit-recovery/bounds validation example. The reviewed IV model
-API, valid-batch policy and full demonstrations are deferred to later work.
+This fixture-based run is not an IV fit-recovery or bounds validation example.
 """
 import logging
 import pandas as pd
@@ -20,7 +19,7 @@ from sem2.utils import set_seed
 def main():
     set_seed(0)
     logging.basicConfig(level=logging.INFO)
-    cfg = TrainingConfig(device="cpu", epochs=2, batch_size=64, sample_bs=32)
+    cfg = TrainingConfig(device="cpu", epochs=2, batch_size=128, sample_bs=32)
     formula = "U ~ Uniform(0,1); Z ~ Categorical(probs=[1,1]); X <- d(Z,U; levels=2); Y <- d(X,U; levels=2)"
     model = SEM2Discrete(formula, node_cfgs={
         "X": MLPConfig(hidden_dims=[8]),

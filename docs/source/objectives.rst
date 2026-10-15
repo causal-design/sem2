@@ -4,6 +4,31 @@ Objectives and composition
 Energy discrepancies
 --------------------
 
+Energy losses use Euclidean distances on quantitative values or explicitly scored
+categories. Supply ``VariableInfo.numeric_mapping`` for categorical variables;
+integer category codes alone do not define a distance.
+
+Set defaults in ``TrainingConfig``::
+
+    cfg = TrainingConfig(
+        sample_bs=512,
+        energy_score_beta=1.0,
+        energy_score_unbiased=True,
+    )
+    objective = EnergyLoss(cfg, model, beta=0.5)
+
+Constructor arguments override the config. ``evaluate(..., sample_bs=..., beta=...)``
+temporarily overrides the draw count and exponent without changing stored settings.
+``unbiased=False`` at construction includes same-draw pairs instead of applying
+the finite-sample correction. The continuous loss is an energy score; the discrete
+loss also subtracts the data/data term and uses half-energy-distance scaling.
+
+For IV fitting, set ``batch_size`` at least as large as the dataset. Eligibility
+is checked after incomplete rows are removed: every declared instrument level
+needs at least two observations. Conditional discrepancies use empirical group
+frequencies. The instrument itself does not need numerical scores because it
+selects groups rather than entering their distance calculation.
+
 .. autoclass:: sem2.operators.divergence.EnergyLoss
    :members: evaluate
 
