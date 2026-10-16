@@ -8,8 +8,11 @@ from torch import Tensor
 from collections import defaultdict
 
 from ..components.nodes import NodeMLPDiscrete, SEM2Node, DiscreteModes
-from ..construction import SEMType
+from ..construction.sem_types import SEMType
 from .base import SEM2
+from ...data.records import DataBatch
+from ..distributions import DiscreteJointDistribution
+from ...default_configs import LinearNodeConfig, MLPConfig
 
 
 class SEM2Discrete(SEM2):
@@ -17,7 +20,7 @@ class SEM2Discrete(SEM2):
     node_dict: nn.ModuleDict[str, SEM2Node]  # Maps node name to its SEM2Node object, registered as submodule for PyTorch tracking
     sem_type = SEMType.DISCRETE
 
-    def _check_sem_type(self):
+    def _check_sem_type(self) -> None:
         """A discrete SEM requires discrete endogenous nodes. Validate against the
         type inferred from the formula (not the class's desired type) so a non-
         discrete formula is rejected up front rather than failing later in sampling.
@@ -29,7 +32,8 @@ class SEM2Discrete(SEM2):
             )
         logging.info("Building a discrete SEM2 model.")
 
-    def __init__(self, model_formula: str, node_cfgs: dict = None, device="cpu"):
+    def __init__(self, model_formula: str,
+                 node_cfgs: dict[str, int | LinearNodeConfig | MLPConfig] | None = None, device: str | torch.device = "cpu") -> None:
         super().__init__(model_formula, node_cfgs, device=device)
         self.device = device
 
@@ -80,18 +84,19 @@ class SEM2Discrete(SEM2):
                     else:
                         self.cont_parents[node_name].append(pn)
 
-    def sample(self, batch_size=1, set_nodes: dict[str, torch.Tensor] = None) -> tuple[Tensor, dict]:
-        """ Discrete sampling: Sample every possible discrete outcome.
-            This involves sampling continuous variables, and computing every permutation of discrete variables.
+    def sample(self, batch_size: int = 1, set_nodes: DataBatch | None = None) -> tuple[DiscreteJointDistribution, dict]:
+        """Enumerate discrete states and compute their conditional probabilities.
+
+            Exogenous inputs are sampled; the returned DiscreteJointDistribution
+            integrates discrete outcomes rather than drawing categorical observations.
 
             Args:
-                batch_size: Number of samples to draw.
-                set_nodes: Optional dict of node name -> tensor to pin specific node
-                           values (e.g. for interventions). Shape: [batch_size, out_dim].
+                batch_size: Number of exogenous Monte Carlo samples.
+                set_nodes: Optional DataBatch of named intervention values.
         """
 
-        set_nodes = set_nodes if set_nodes is not None else {}
-        assert set(set_nodes.keys()).issubset(self.node_dict.keys()), f"Invalid nodes given: {set_nodes.keys()}"
+        # Unwrap valid interventions before enumerating conditional probabilities.
+        interventions = self._unpack_interventions(set_nodes, batch_size)
 
         device = self.device
         all_states = self.all_states  # [N_conf, N_discrete_nodes]
@@ -104,14 +109,14 @@ class SEM2Discrete(SEM2):
         for node_name in self.topological_order:
             node = self.node_dict[node_name]
             is_discrete = isinstance(node, NodeMLPDiscrete)
-            # ---- Intervention handling ----
-            if node_name in set_nodes:
-                node.set_value(set_nodes[node_name])
+            # An intervention replaces this node's probability factor with a point mass.
+            if node_name in interventions:
+                node.set_value(interventions[node_name])
 
                 if is_discrete:
                     # mask out configurations that don't match the intervened discrete state
                     # all_states[:, v.id] : [N_conf]
-                    target = set_nodes[node_name].long().view(batch_size, 1)  # [bs, 1]
+                    target = interventions[node_name].long().view(batch_size, 1)  # [bs, 1]
                     col = all_states[:, node.id].view(1, N_conf).expand(batch_size, N_conf)  # [bs, N_conf]
                     mask = (col == target)  # [bs, N_conf]
                     log_probs = torch.where(mask, log_probs, neg_inf)
@@ -141,22 +146,21 @@ class SEM2Discrete(SEM2):
                 M = unique_ctx.shape[0]
 
             # 2) Build parent_values for M contexts (NOT N_conf)
-            parent_values = []
+            parent_values = {}
 
             # discrete parents: [bs, M, 1] float (as your code expects)
             for j, pn in enumerate(disc_parents):
                 col = unique_ctx[:, j].to(torch.float32).view(1, M, 1).expand(batch_size, M, 1)
-                parent_values.append(col)
+                parent_values[pn.name] = col
 
             # continuous parents: [bs, M, dim] (expand, not repeat)
             for pn in cont_parents:
                 p_val = pn.get_value()  # [bs, dim]
                 p_val = p_val.unsqueeze(1).expand(batch_size, M, p_val.shape[-1])  # [bs, M, dim]
-                parent_values.append(p_val)
+                parent_values[pn.name] = p_val
 
-            # 3) Run NN only for M contexts
-            # IMPORTANT: v(...) must accept parent_values with second dim = M
-            node(parent_values, batch_size, mode=DiscreteModes.SOFTMAX)
+            # Evaluate each distinct parent context in the formula's declared order.
+            node([parent_values[p] for p in node.predecessors], batch_size, mode=DiscreteModes.SOFTMAX)
 
             # 4) Compute cond prob for each global configuration using inverse map
             # p_unique: [bs, M, n_outcome]
@@ -176,11 +180,16 @@ class SEM2Discrete(SEM2):
 
             log_cond_prob = torch.log(cond_prob)
             log_probs = log_probs + log_cond_prob
-            # if not torch.all(torch.isfinite(log_probs)):
-            #     print("Warning: All probabilities are zero. Check for underflow or incorrect model specification.")
+
         probs = torch.exp(log_probs)
 
-        # Return extra info
-        extra_dict = {"states": all_states}
-        extra_dict["full_state"] = {node: self.node_dict[node].get_value() for node in self.topological_order}
-        return probs, extra_dict
+        # Pair probability columns with their named states and preserve supplied metadata.
+        supplied = {} if set_nodes is None else dict(zip(set_nodes.names, set_nodes.variables))
+        variables = [supplied[name] if name in supplied else self._variable_info(name)
+                     for name in self.state_node_names]
+        result = DiscreteJointDistribution(DataBatch(all_states, variables), probs)
+        names = [name for name in self.state_node_names if not self.node_specs[name].is_helper]
+        if len(names) != len(self.state_node_names):
+            # Sum over internal helpers rather than exposing their state coordinates.
+            result = result.marginalize(names)
+        return result, {"interventions": set_nodes}

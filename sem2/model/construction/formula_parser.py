@@ -2,14 +2,14 @@
 
 FormulaParser turns a formula string into an AST (see sem_ast), validates it,
 and lowers it to NodeSpec objects. This is the natural home for everything that
-knows about the *surface syntax* of the language, including which distributions
-exist and which nodes are declared hidden via unobs(...) — so _DAG can stay a
-pure graph structure with no pytorch knowledge.
+knows about the *surface syntax* of the language and available distributions,
+so _DAG can stay a pure graph structure with no pytorch knowledge.
 """
 from __future__ import annotations
 import re
 import ast
 import difflib
+import keyword
 
 from .sem_ast import (
     Distribution,
@@ -59,7 +59,7 @@ class DistributionRegistry:
     the language frontend rather than scattered through node construction.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         import torch.distributions as D
 
         self._names = {
@@ -73,7 +73,7 @@ class DistributionRegistry:
     def __contains__(self, name: str) -> bool:
         return name in self._names
 
-    def validate(self, name: str):
+    def validate(self, name: str) -> None:
         """Raise ValueError (with a typo suggestion if possible) for an unknown name."""
         if name not in self._names:
             suggestion = difflib.get_close_matches(name, self._names, n=1)
@@ -83,6 +83,7 @@ class DistributionRegistry:
 
 # Shared across parser instances; building the name set touches torch once.
 _DISTRIBUTIONS = DistributionRegistry()
+_NUMBER = r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -99,11 +100,9 @@ class FormulaParser:
     formula), which downstream tooling (interventions, queries) can build on.
     """
 
-    def __init__(self, model_formula: str):
+    def __init__(self, model_formula: str) -> None:
         self.model_formula = model_formula
         self.statements: list[Statement] = []
-        self.unobserved_vars: list[str] = []
-        self._unobserved_declared = False
 
     def parse(self) -> tuple[dict[str, NodeSpec], set[str]]:
         """Parse the formula, returning (node_specs, input_node).
@@ -114,13 +113,21 @@ class FormulaParser:
         formula_list, input_node = self._parse_formula(self.model_formula)
         self.statements = [self._parse_statement(f) for f in formula_list]
         node_specs = {st.name: self._lower(st) for st in self.statements}
-        self._validate_unobserved_vars(node_specs)
+        for spec in node_specs.values():
+            if len(set(spec.predecessors)) != len(spec.predecessors):
+                raise ValueError(f"Repeated parent in equation for {spec.name!r}.")
         return node_specs, input_node
 
     # ── Statement parsing (string -> AST) ─────────────────────────────────────
 
     def _parse_statement(self, formula: str) -> Statement:
-        """Parse one fully-expanded ``name <sep> rhs`` formula into an AST node."""
+        """Convert one expanded equation into a typed, non-executable statement.
+
+        Expansion has already separated internal helper equations. A mechanism
+        term records n(...) or d(...; levels=N) with ordered parent names, not a
+        neural network. _lower() converts that syntax to a NodeSpec; SEM2 later
+        instantiates executable nodes and parameters in topological order.
+        """
         if "~" in formula:
             lhs, rhs = formula.split("~")
             dist_name, dist_args, dist_kwargs = self._parse_exogenous_rhs(lhs, rhs)
@@ -131,24 +138,38 @@ class FormulaParser:
 
         if "<-" in formula:
             lhs, rhs = formula.split("<-")
+            # Expansion gives private helper equations colon-separated names.
+            is_helper = ":" in lhs
             if rhs.startswith("n("):
                 # Continuous neural network node
                 parents = rhs[2:-1].split(",")
                 return EndogenousDecl(
                     name=lhs, rhs=rhs, node_type="mlp",
                     mechanism=MechanismTerm(kind="mlp", parents=parents),
+                    is_helper=is_helper,
                 )
             if rhs.startswith("d("):
-                parents = rhs[2:-1].split(",")
+                match = re.fullmatch(r"d\(([^;]+);levels=([1-9]\d*)\)", rhs)
+                if match is None:
+                    raise ValueError("Discrete nodes require d(parents; levels=N), with positive integer N.")
+                parents = match.group(1).split(",")
                 return EndogenousDecl(
                     name=lhs, rhs=rhs, node_type="discrete",
-                    mechanism=MechanismTerm(kind="discrete", parents=parents),
+                    mechanism=MechanismTerm(kind="discrete", parents=parents, levels=int(match.group(2))),
+                    is_helper=is_helper,
                 )
             # Linear node: parse coefficients and predecessors
-            terms = [self._parse_linear_term(t) for t in rhs.split("+")]
+            terms = []
+            intercept = None
+            for term in self._split_rhs(rhs, "+"):
+                if re.fullmatch(_NUMBER, term):
+                    intercept = (intercept if intercept is not None else 0.0) + float(term)
+                else:
+                    coeff, parent = self._parse_linear_term(term)
+                    terms.append(LinearTerm(coeff=coeff, parent=parent))
             return EndogenousDecl(
                 name=lhs, rhs=rhs, node_type="linear",
-                terms=[LinearTerm(coeff=c, parent=p) for c, p in terms],
+                terms=terms, intercept=intercept, is_helper=is_helper,
             )
 
         raise ValueError(f"Formula must contain '~' or '<-': {formula!r}")
@@ -156,7 +177,12 @@ class FormulaParser:
     # ── Lowering (AST -> NodeSpec) ────────────────────────────────────────────
 
     def _lower(self, st: Statement) -> NodeSpec:
-        """Lower an AST statement into the NodeSpec consumed by _DAG / SEM2."""
+        """Translate typed syntax into uniform node-construction metadata.
+
+        Preserve ordered parents, fixed versus learned coefficients, intercepts,
+        levels and helper status. No tensors, random draws or fitted parameters
+        are created here; _DAG checks graph structure and SEM2 constructs nodes.
+        """
         if isinstance(st, ExogenousDecl):
             return NodeSpec(
                 name=st.name, rhs=st.rhs, node_type="exogenous", predecessors=[],
@@ -168,11 +194,14 @@ class FormulaParser:
                 name=st.name, rhs=st.rhs, node_type="linear",
                 predecessors=[t.parent for t in st.terms],
                 coefficients=[t.coeff for t in st.terms],
+                intercept=st.intercept, is_helper=st.is_helper,
             )
         # mlp / discrete mechanism
         return NodeSpec(
             name=st.name, rhs=st.rhs, node_type=st.node_type,
             predecessors=list(st.mechanism.parents),
+            levels=st.mechanism.levels,
+            is_helper=st.is_helper,
         )
 
     # ── Exogenous rhs parsing (with error handling) ───────────────────────────
@@ -253,24 +282,29 @@ class FormulaParser:
             '0.5*x'  -> (0.5,   'x')
             '-0.5*x' -> (-0.5,  'x')
         """
-        match = re.match(r'^(-?[0-9]*\.?[0-9]+)\*(.+)$', term)
+        match = re.fullmatch(rf'({_NUMBER})\*(.+)', term)
         if match:
             return float(match.group(1)), match.group(2)
         return None, term
 
     # ── Formula parsing ───────────────────────────────────────────────────────
 
-    def _parse_formula(self, model_formula: str):
-        formula_list = model_formula.replace(" ", "").split(";")
+    def _parse_formula(self, model_formula: str) -> tuple[list[str], set[str]]:
+        # Semicolons inside d(...; levels=N) belong to that mechanism, not the statement list.
+        formula_list = self._split_rhs(re.sub(r"\s+", "", model_formula), ";")
 
         expanded_list = []
         input_node = set()
         for formula in formula_list:
-            if formula.startswith("unobs("):
-                self._parse_unobserved_statement(formula)
-                continue
+            if ":" in formula:
+                raise ValueError("':' is reserved for internal helper names.")
             vars_, formulas = self._expand_lhs(formula)
-            input_node.update(vars_)
+            for name in vars_:
+                if not name.isidentifier() or keyword.iskeyword(name):
+                    raise ValueError(f"Invalid node name: {name!r}")
+                if name in input_node:
+                    raise ValueError(f"Duplicate node definition: {name!r}")
+                input_node.add(name)
             expanded_list.extend(formulas)
 
         formula_list = []
@@ -279,37 +313,7 @@ class FormulaParser:
 
         return formula_list, input_node
 
-    def _parse_unobserved_statement(self, formula: str):
-        match = re.match(r"^unobs\((.*)\)$", formula)
-        if match is None:
-            raise ValueError(
-                f"Could not parse unobserved-variable statement: {formula!r}. "
-                "Expected unobs(x1,x2,...)."
-            )
-        body = match.group(1)
-        variables = [] if body == "" else body.split(",")
-        if any(v == "" for v in variables):
-            raise ValueError(
-                f"Could not parse unobserved-variable statement: {formula!r}. "
-                "Expected comma-separated variable names."
-            )
-        seen = set(self.unobserved_vars)
-        duplicates = []
-        for v in variables:
-            if v in seen:
-                duplicates.append(v)
-            seen.add(v)
-        if duplicates:
-            raise ValueError(f"Duplicate unobserved variables: {duplicates}")
-        self._unobserved_declared = True
-        self.unobserved_vars.extend(variables)
-
-    def _validate_unobserved_vars(self, node_specs: dict[str, NodeSpec]):
-        missing = [v for v in self.unobserved_vars if v not in node_specs]
-        if missing:
-            raise ValueError(f"Unobserved variables are not defined in the formula: {missing}")
-
-    def _expand_lhs(self, formula: str):
+    def _expand_lhs(self, formula: str) -> tuple[list[str], list[str]]:
         if "~" in formula:
             sep = "~"
         elif "<-" in formula:
@@ -321,14 +325,22 @@ class FormulaParser:
         variables = lhs.split(",")
         return variables, [var + sep + rhs for var in variables]
 
-    def _split_rhs(self, rhs: str, sep: str):
-        """Split by sep but ignore separators inside parentheses."""
+    def _split_rhs(self, rhs: str, sep: str) -> list[str]:
+        """Split outside parentheses, retaining minus signs in additive terms."""
         rhs = rhs.replace(" ", "")
         terms, current, depth = [], "", 0
         for ch in rhs:
-            if ch == sep and depth == 0:
+            # Split x-2 into x and -2, but keep the signs in -2*x and 1e-3.
+            # Parenthesis depth protects nested expressions; other separators
+            # (commas and statement semicolons) need only that depth check.
+            exponent_sign = current.endswith(("e", "E")) and re.fullmatch(_NUMBER, current[:-1])
+            additive_sep = (
+                sep == "+" and ch in "+-" and current
+                and current[-1] not in "+-*" and not exponent_sign
+            )
+            if depth == 0 and (additive_sep or (sep != "+" and ch == sep)):
                 terms.append(current)
-                current = ""
+                current = "-" if ch == "-" else ""
             else:
                 if ch == "(":
                     depth += 1
@@ -339,7 +351,7 @@ class FormulaParser:
             terms.append(current)
         return terms
 
-    def _expand_rhs(self, formula: str):
+    def _expand_rhs(self, formula: str) -> list[str]:
         formula = formula.replace(" ", "")
 
         if "~" in formula:
@@ -353,7 +365,9 @@ class FormulaParser:
             return [formula]
 
         plus_terms = self._split_rhs(rhs, "+")
-        if len(plus_terms) == 1 and rhs.startswith("n(") and rhs.count("n(") == 1:
+        if len(plus_terms) == 1 and rhs.startswith("n(") and all(
+            term.isidentifier() for term in self._split_rhs(rhs[2:-1], ",")
+        ):
             return [formula]  # single flat nonlinear term, nothing to expand
 
         expanded = []
@@ -362,7 +376,7 @@ class FormulaParser:
             new_formula = lhs + "<-n("
             comma_terms = self._split_rhs(rhs[2:-1], ",")
             for i, term in enumerate(comma_terms):
-                if term.startswith("n(") or "+" in term:
+                if not term.isidentifier():
                     new_rv = lhs + ":" + str(i)
                     expanded.extend(self._expand_rhs(new_rv + "<-" + term))
                     new_formula += new_rv
@@ -375,10 +389,11 @@ class FormulaParser:
             # Mix of linear and nonlinear plus-terms
             new_formula = lhs + "<-"
             for i, term in enumerate(plus_terms):
-                if term.startswith("n("):
+                coeff, expression = self._parse_linear_term(term)
+                if expression.startswith("n("):
                     new_rv = lhs + ":" + str(i)
-                    expanded.extend(self._expand_rhs(new_rv + "<-" + term))
-                    new_formula += new_rv
+                    expanded.extend(self._expand_rhs(new_rv + "<-" + expression))
+                    new_formula += f"{coeff if coeff is not None else 1}*{new_rv}"
                 else:
                     new_formula += term
                 if i < len(plus_terms) - 1:

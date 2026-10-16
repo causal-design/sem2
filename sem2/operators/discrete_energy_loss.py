@@ -1,153 +1,98 @@
+"""Energy calculations for named finite distributions."""
 import torch
-import torch.nn.functional as F
+from ..data.records import DataBatch, ScalarResult
+from ..model.distributions import DiscreteJointDistribution
+from ..data.conversion import databatch_to_tensor
+
 
 class DiscreteEnergyLoss:
-    def __init__(self, p: float, states: torch.Tensor, device, unbiased=True):
-        """
-        p: norm power
-        states: tensor of shape [num_states, state_dim] containing all possible states
-                Example binary state: tensor([[0, 0],
-                        [0, 1],
-                        [1, 0],
-                        [1, 1]])
-        unbiased: whether to use unbiased estimator for finite sample size correction. Unbiased can be negative.
-        """
+    """Provisional finite-energy calculation retained pending Step-7 review.
+
+    This executable implementation is a placeholder for the reviewed estimator,
+    not evidence that distance/scaling, pair correction or fitting validation has
+    been approved. The bounded Step-6 correction pass leaves its formulas intact.
+
+    observations.values has shape [N, D], prediction.states.values [S, D],
+    and prediction.probabilities [M, S], where M counts exogenous draws.
+    Callers supply valid state values and normalized probabilities; these are
+    not rechecked here on each evaluation.
+    """
+
+    def __init__(self, *, unbiased: bool = True) -> None:
+        """Set pair correction; the caller supplies the resolved beta per evaluation."""
         self.unbiased = unbiased
-        self.states = states.to(device)
-        self.num_states = states.shape[0]
 
-        # Dynamically generate distance matrix D_mat
-        # D_mat[i,j] = ||states[i] - states[j]||^p
-        self.D_mat = self._compute_distance_matrix(states, p, device)
+    def _validate(self, observations: DataBatch, prediction: DiscreteJointDistribution, observed_pairs: bool = False) -> None:
+        """Check sizes only, avoiding empty means and zero pair denominators."""
+        n, m = len(observations), prediction.probabilities.shape[0]
+        if not observations.variables or n < 1 or m < 1:
+            raise ValueError("Energy calculations require named observations and model draws.")
+        if self.unbiased and (m < 2 or (observed_pairs and n < 2)):
+            raise ValueError("Unbiased pair distances require at least two rows.")
 
-    def _compute_distance_matrix(self, states, p, device):
-        """Compute pairwise distance matrix between states."""
-        num_states = states.shape[0]
-        D_mat = torch.zeros((num_states, num_states), dtype=torch.float32, device=device)
+    def _pair_distance(self, probabilities: torch.Tensor, distances: torch.Tensor) -> torch.Tensor:
+        """Average pair distance for probabilities [M, S] and distances [S, S].
 
-        for i in range(num_states):
-            for j in range(num_states):
-                # Euclidean distance raised to power p
-                dist = torch.norm(states[i].float() - states[j].float(), p=2) ** p
-                D_mat[i, j] = dist
-
-        return D_mat
-
-    def idx_to_onehot(self, input_tensor):
-        """Convert input tensor to one-hot encoding based on self.states.
-            input_tensor: shape = [bs, n_samples, n_nodes]
-                         where each element represents a state configuration
-        Returns:
-            onehot: shape = [bs, n_samples, num_states]
-                   where num_states = self.states.shape[0]
+        The uncorrected term is mean(p).T @ D @ mean(p). Multiply by M*M
+        to recover the sum over all row pairs, subtract the same-row terms
+        p_i.T @ D @ p_i, then divide by M*(M-1). These terms can be nonzero
+        even when diag(D)=0:
+        a probability row is a distribution, not a realized state.
         """
-        # Get dimensions
-        bs, n_samples, n_nodes = input_tensor.shape
-        num_states = self.states.shape[0]
-
-        # Flatten input for easier comparison
-        input_flat = input_tensor.view(-1, n_nodes)  # [bs*n_samples, n_nodes]
-
-        # Vectorized comparison: find matching indices in self.states
-        # Expand dimensions for broadcasting: input_flat [bs*n_samples, 1, n_nodes], states [1, num_states, n_nodes]
-        input_expanded = input_flat.unsqueeze(1)  # [bs*n_samples, 1, n_nodes]
-        states_expanded = self.states.unsqueeze(0)  # [1, num_states, n_nodes]
-
-        # Find exact matches for each configuration
-        matches = (input_expanded == states_expanded).all(dim=2)  # [bs*n_samples, num_states]
-
-        # Get the index of the matching state for each input configuration
-        indices = torch.argmax(matches.float(), dim=1)  # [bs*n_samples]
-
-        # Convert to one-hot encoding
-        onehot = F.one_hot(indices, num_classes=num_states).float()
-
-        # Reshape back to original batch structure
-        onehot = onehot.view(bs, n_samples, num_states)
-
-        return onehot
-
-    def _energy_components(self, p_hat, x_true=None, p_true_mean=None):
-        """Compute shared components: pred_err and unbiased pair_pred_dist.
-
-        Args:
-            p_hat: [bs, n_samples, n_states]
-            x_true: [bs, n_samples, n_nodes] (optional, used if p_true_mean not given)
-            p_true_mean: [bs, n_states] (optional, precomputed)
-        Returns:
-            (pred_err, pair_pred_dist, p_true_mean, p_true)
-                p_true is None if p_true_mean was precomputed.
-        """
-        bs, n_samples, dim = p_hat.shape
-        precomputed = p_true_mean is not None
-        p_true = None
-
-        if not precomputed:
-            p_true = self.idx_to_onehot(x_true.long())
-            p_true_mean = p_true.mean(dim=1)
-
-        p_hat_mean = p_hat.mean(dim=1)
-
-        # Cross distance: true vs pred
-        prob_mat = p_true_mean.unsqueeze(-1) @ p_hat_mean.unsqueeze(1)
-        pred_err = (prob_mat * self.D_mat.unsqueeze(0)).mean(dim=0).sum()
-
-        # Pairwise pred distance
-        prob_mat = p_hat_mean.unsqueeze(-1) @ p_hat_mean.unsqueeze(1)
-        pair_pred_dist = (prob_mat * self.D_mat.unsqueeze(0)).mean(dim=0).sum()
-
-        # Bias correction
+        mean = probabilities.mean(0)
+        pair = mean @ distances @ mean
         if self.unbiased:
-            n_tot, n_corr = n_samples / (n_samples - 1), 1 / (n_samples * (n_samples - 1))
-            correct_hat = torch.einsum("bni,ij,bnj->bn", p_hat, self.D_mat, p_hat)
-            correct_hat = correct_hat.mean(dim=0).sum()
-            pair_pred_dist = pair_pred_dist * n_tot - correct_hat * n_corr
+            n = probabilities.shape[0]
+            diagonal = torch.einsum("ni,ij,nj->n", probabilities, distances, probabilities)
+            pair = (pair * n * n - diagonal.sum()) / (n * (n - 1))
+        return pair
 
-        return pred_err, pair_pred_dist, p_true_mean, p_true
+    def _energy_components(
+        self, observations: DataBatch, prediction: DiscreteJointDistribution,
+        *, beta: float,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Return scalar cross/pair distances, empirical rows [N, S] and distances [S, S]."""
+        # Sum over unobserved state coordinates and align the remainder by name.
+        prediction = prediction.marginalize(observations.names)
+        probabilities = prediction.probabilities
+        observations = observations.to(probabilities.device)
+        states = prediction.states.values
+        # One indicator row per observation, in enumerated-state order [N, S].
+        # Match stored identities directly, without coercing them to integer indices.
+        empirical = (observations.values[:, None, :] == states[None, :, :]).all(-1).to(probabilities)
+        numeric = databatch_to_tensor(DataBatch(states, observations.variables)).to(probabilities)
+        # D[i,j] = ||state_i - state_j||_2**beta, using the chosen numeric mapping.
+        distances = torch.cdist(numeric, numeric) ** beta
+        # Average the cross-distance over independent data and model draws.
+        cross = empirical.mean(0) @ distances @ probabilities.mean(0)
+        pair = self._pair_distance(probabilities, distances)
+        return cross, pair, empirical, distances
 
-    def energy_score(self, x_true, p_hat, p_true_mean=None):
-        """Energy score: E(|x_h - x_true|) - 1/2 E(|x_hi - x_hj|)
+    def energy_score(self, observations: DataBatch, prediction: DiscreteJointDistribution,
+                     *, beta: float) -> tuple[ScalarResult, dict]:
+        """Energy score from observations [N, D] and predictions [M, S].
 
-        Args:
-            x_true: [bs, n_samples, n_nodes] iid samples from true distribution.
-            p_hat:  [bs, n_samples, n_states] predicted probabilities.
-            p_true_mean: [bs, n_states] optional precomputed mean.
-        Returns:
-            (loss, log_dict)
+        The prediction owns its named state table [S, D]; N and M may differ.
+        Computes cross-distance minus half the model/model pair-distance.
+        Returns a ScalarResult and scalar distance diagnostics.
         """
-        pred_err, pair_pred_dist, _, _ = self._energy_components(
-            p_hat, x_true=x_true, p_true_mean=p_true_mean
-        )
-        loss = pred_err - pair_pred_dist / 2
-        return loss, {"estimated-true distance": pred_err,
-                      "estimated-estimated distance": pair_pred_dist}
+        self._validate(observations, prediction)
+        cross, pair, _, _ = self._energy_components(observations, prediction, beta=beta)
+        result = ScalarResult(cross - pair / 2, "energy_score", observations.variables)
+        return result, {"estimated-true distance": cross, "estimated-estimated distance": pair}
 
-    def energy_dist(self, p_hat, x_true=None, p_true_mean=None):
-        """Energy distance: E|x_h - x_true| - 1/2 E|x_hi - x_hj| - 1/2 E|x_truei - x_truej|
+    def energy_dist(self, observations: DataBatch, prediction: DiscreteJointDistribution,
+                    *, beta: float) -> tuple[ScalarResult, dict]:
+        """Half-energy distance from observations [N, D] and predictions [M, S].
 
-        Args:
-            p_hat:  [bs, n_samples, n_states] predicted probabilities.
-            x_true: [bs, n_samples, n_nodes] samples (optional if p_true_mean given).
-            p_true_mean: [bs, n_states] optional precomputed mean.
-        Returns:
-            (loss, log_dict)
+        The prediction owns its named state table [S, D]; each pair correction
+        uses its own sample count. Returns a ScalarResult and scalar diagnostics.
+        Subtracts half of each within-distribution distance from the cross term.
+        The unbiased estimate can be negative at finite sample sizes.
         """
-        pred_err, pair_pred_dist, p_true_mean, p_true = self._energy_components(
-            p_hat, x_true=x_true, p_true_mean=p_true_mean
-        )
-
-        # Pairwise true distance
-        prob_mat = p_true_mean.unsqueeze(-1) @ p_true_mean.unsqueeze(1)
-        pair_true_dist = (prob_mat * self.D_mat.unsqueeze(0)).mean(dim=0).sum()
-
-        if self.unbiased and p_true is not None:
-            n_samples = p_hat.shape[1]
-            n_tot, n_corr = n_samples / (n_samples - 1), 1 / (n_samples * (n_samples - 1))
-            correct_pred = torch.einsum("bni,ij,bnj->bn", p_true, self.D_mat, p_true)
-            correct_pred = correct_pred.mean(dim=0).sum()
-            pair_true_dist = pair_true_dist * n_tot - correct_pred * n_corr
-
-        loss = pred_err - pair_pred_dist / 2 - pair_true_dist / 2
-        return loss, {"estimated-true distance": pred_err,
-                      "estimated-estimated distance": pair_pred_dist,
-                      "true-true distance": pair_true_dist}
+        self._validate(observations, prediction, observed_pairs=True)
+        cross, pair, empirical, distances = self._energy_components(observations, prediction, beta=beta)
+        observed_pair = self._pair_distance(empirical, distances)
+        result = ScalarResult(cross - pair / 2 - observed_pair / 2, "energy_distance", observations.variables)
+        return result, {"estimated-true distance": cross, "estimated-estimated distance": pair,
+                        "true-true distance": observed_pair}

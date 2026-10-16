@@ -1,41 +1,40 @@
-""" Defining the types of operators
-    Operators are defined based on:
-        a) Inputs type
-        b) Output type
-"""
-# Defer annotation evaluation so the TYPE_CHECKING-only SEM2 hint on the
-# SEM2Operator.model class attribute does not crash at runtime on Python < 3.14.
+"""Operator input/output contracts."""
 from __future__ import annotations
 from typing import TYPE_CHECKING
 from abc import ABC, abstractmethod
+from enum import StrEnum
 import torch
 
-from .._compat import StrEnum
+from ..data.records import DataBatch, ScalarResult
+from ..model.distributions import DiscreteJointDistribution
 
 if TYPE_CHECKING:
-    from sem2.model.models import SEM2
+    from ..model.models.base import SEM2
 
 
 class OperatorInput(StrEnum):
-    """ Defines the input type of an operator, if the operator takes in data."""
-    DATA = "Data"       # Data required as input for the operator
-    SELF = "self"       # Operator takes in the model itself as input, and no data
+    DATA = "Data"       # Requires an observation DataBatch
+    SELF = "self"       # Model-only; may take query/intervention arguments
 
 
 class OperatorOutput(StrEnum):
-    """ Defines the output type of an operator. """
-    SCALAR = "Scalar"   # Output is a scalar value
-    VECTOR = "Vector"   # Output is a vector
+    SCALAR = "Scalar"   # ScalarResult, retaining gradients
+    MATRIX = "Matrix"   # Tensor with axis metadata in diagnostics
+    DATA_BATCH = "DataBatch"
+    DISCRETE_DISTRIBUTION = "DiscreteJointDistribution"
 
 
 class SEM2Operator(ABC):
-    """" Base class for operators of SEM2. """
+    """Common result contract; concrete evaluators declare explicit arguments.
+
+    Scalar objectives share optional sample_bs and beta keywords for composition.
+    sample_bs applies to Monte Carlo sampling, beta only to energy calculations.
+    Other terms accept these known settings without changing their calculation.
+    """
     model: SEM2
     input_type: OperatorInput
     output_type: OperatorOutput
 
     @abstractmethod
-    def evaluate(self, *args, **kwargs) -> tuple[torch.Tensor|any, dict]:
-        """ Evaluates the operator. Returns a tuple of (output, metrics_dict). The output is the value of the operator,
-        and the metrics_dict contains useful debug / tracking information.
-        """
+    def evaluate(self, *args, **kwargs) -> tuple[ScalarResult | DataBatch | DiscreteJointDistribution | torch.Tensor, dict]:
+        """Return a typed result and a dictionary of diagnostics."""

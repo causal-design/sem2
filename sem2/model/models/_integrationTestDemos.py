@@ -1,9 +1,10 @@
 """Runnable demos for the SEM2 model classes.
 
-Run with:  python -m sem2.model.models._demo
+Run with:  python -m sem2.model.models._integrationTestDemos
 (Slated to be folded into integration tests.)
 """
-from ..models import SEM2, SEM2Discrete
+from .base import SEM2
+from .discrete import SEM2Discrete
 from ...default_configs import MLPConfig, LinearNodeConfig
 
 
@@ -12,12 +13,12 @@ def main():
     # ── Example 1: Linear SEM ─────────────────────────────────────────────────
 
     # Fixed coefficients on x1 and x2, learned weight on noise.
-    # Example of how to edit Public Linear Config if needed for the experiment: use_bias=False forces the relationship through the origin 
+    # use_intercept=False omits a learned intercept when the formula has no constant.
     # Otherwise usually dont need touch LinearNodeConfig at all, dont need to specify and just use defaults it should work ok.
     print("=== Linear SEM ===")
     linear_model = SEM2(
         "x1, x2, noise ~ Normal(0,1); y <- 0.5*x1 + -1*x2 + noise",
-        node_cfgs={"y": LinearNodeConfig(use_bias=False)},
+        node_cfgs={"y": LinearNodeConfig(use_intercept=False)},
     )
     print(linear_model.sample(batch_size=3))
 
@@ -50,10 +51,10 @@ def main():
 
     # Example 4: Mixed discrete SEM, with sampling over discrete nodes
     formula1 = "U ~ Normal(0,1); eps_d ~ Uniform(0,1); eps_y ~ Uniform(0,1); Z ~ Categorical(probs=[1, 1, 1]);"
-    formula2 = "X <- d(Z, U, eps_d); Y <- d(X, U, eps_y)"
+    formula2 = "X <- d(Z, U, eps_d; levels=2); Y <- d(X, U, eps_y; levels=3)"
     mlp_cfgs = {"U": 2, "eps_d": 2, "eps_y": 2,
-                "X": MLPConfig(hidden_dims=[1024, 1024, 1024], output_dim=2),
-                "Y": MLPConfig(hidden_dims=[1024, 1024, 1024], output_dim=3)}
+                "X": MLPConfig(hidden_dims=[1024, 1024, 1024]),
+                "Y": MLPConfig(hidden_dims=[1024, 1024, 1024])}
 
     model = SEM2(formula1 + formula2, node_cfgs=mlp_cfgs, device="cpu")
     model.eval()
