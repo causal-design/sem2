@@ -11,8 +11,8 @@ SEM2 is a research-stage PyTorch implementation of structural equation models. R
 - `sem2/model/models/linear.py`: scalar linear path coefficients and model-implied moments.
 - `sem2/model/models/discrete.py`: finite-state probability calculation and discrete interventions.
 - `sem2/operators/linear.py`: Gaussian likelihood and covariance-based linear objectives.
-- `sem2/operators/scalar_operators.py`: experimental energy and causal-query operators.
-- `sem2/sem2trainer.py`: current package trainer; do not assume it is the sole or stable fitting path.
+- `sem2/operators/divergence.py` and `sem2/operators/potential_outcomes.py`: distributional-loss and causal-query operators.
+- `sem2/trainer/trainer.py`: package trainer.
 - `tests/`: parser, construction, sampling, and linear-model tests.
 - `experiments/` and `notebooks/`: research code and demonstrations; some imports and dependencies are stale.
 
@@ -21,7 +21,10 @@ SEM2 is a research-stage PyTorch implementation of structural equation models. R
 Use the supported model imports:
 
 ```python
-from sem2.model import SEM2, SEM2Discrete, SEM2Linear, SEMType
+from sem2.model.models.base import SEM2
+from sem2.model.models.discrete import SEM2Discrete
+from sem2.model.models.linear import SEM2Linear
+from sem2.model.construction.sem_types import SEMType
 ```
 
 Use public node configurations from `sem2.default_configs`, notably `LinearNodeConfig` and `MLPConfig`.
@@ -32,10 +35,10 @@ Formula statements are separated by semicolons:
 - `y <- x + z` declares learned linear coefficients.
 - `y <- 1*x + 0.5*z` fixes coefficients written explicitly.
 - `y <- n(x,z)` declares a continuous MLP mechanism.
-- `y <- d(x,z)` declares a finite discrete mechanism.
-- `unobs(u)` marks variables as unobserved in the current implementation.
+- `y <- d(x,z; levels=2)` declares a finite discrete mechanism with two states.
+- Observed variables belong to the supplied data; `unobs(...)` is no longer part of the formula syntax.
 
-Call `model.sample(...)`; `forward(...)` deliberately raises `NotImplementedError`. Continuous sampling returns a node-to-tensor dictionary plus an auxiliary dictionary. Discrete sampling returns probabilities over `model.all_states` plus state metadata.
+Call `model.sample(...)`; `forward(...)` deliberately raises `NotImplementedError`. Continuous sampling returns a `DataBatch` plus an auxiliary dictionary. Discrete sampling returns a `DiscreteJointDistribution` plus an auxiliary dictionary. Pass intervention assignments as a `DataBatch` through `set_nodes`.
 
 Pass node configurations through `node_cfgs`, keyed by the left-hand-side node name. Treat tensor column order as unsafe unless it is checked against named model variables.
 
@@ -43,7 +46,7 @@ Pass node configurations through `node_cfgs`, keyed by the left-hand-side node n
 
 Before changing model, data, or operator boundaries, read the agreed design direction in [`PROJECT.md`](PROJECT.md). Preserve compatibility with existing formulas, require named variable mappings at data boundaries, and keep application-specific roles out of graph-generic components.
 
-For v0.1 work, start with the [planning review](docs/plan/v0.1.md) and its linked support/data and trainer specifications. Distinguish target interfaces from inspected current behavior. Keep plan review separate from implementation review; the linked closed code PRs are unmerged examples, not approved dependencies. Do not infer a numeric-column default from storage dtype or existing arithmetic on state codes.
+Detailed v0.1 plans are maintained in the private [documentation repository](https://github.com/causal-design/sem2-docs). Public issues and PRs must include the requirements and acceptance criteria needed to review their changes without private access. Distinguish target interfaces from inspected current behavior. Keep plan review separate from implementation review. Do not infer a numeric-column default from storage dtype or existing arithmetic on state codes.
 
 ## Capability and claim discipline
 
@@ -91,6 +94,8 @@ Keep generic infrastructure separate from application-specific workflows. In par
 - `README.md` contains stable, user-facing context and the supported entry points.
 - `PROJECT.md` records current capabilities, open problems, evidence, and the agreed order of work.
 - `AGENTS.md` contains durable contribution and verification guidance.
-- `docs/meetings/` contains dated historical records; do not rewrite them to represent later implementation status.
+- The private documentation repository contains dated historical records; do not rewrite them to represent later implementation status or copy private discussions into public issues and PRs.
+
+Keep research records and detailed internal plans in the private repository. The root `/docs/` path is ignored to reduce accidental reintroduction; this is a convenience, not an access control or history-cleanup mechanism. Public API contracts belong in docstrings, executable examples, and the root guidance files.
 
 Update the relevant memory file when an interface, capability, limitation, or agreed priority changes. Preserve evidence and do not invent project facts. Current code and executed tests outrank stale prose.

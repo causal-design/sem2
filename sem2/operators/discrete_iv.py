@@ -23,7 +23,8 @@ class DiscreteIVEnergyLoss(EnergyLoss):
 
     Callers supply a model encoding the IV assumptions. This class checks neither
     those causal assumptions nor identification, and does not certify effect or
-    bound recovery. See docs/plan/v0.1.md, Step 7 and later IV/example stages.
+    bound recovery. The deferred work above requires separate implementation
+    and validation before this can be treated as a supported IV fitting API.
     """
 
     def __init__(self, cfg: TrainingConfig, model: SEM2Discrete, instrument: str, *,
