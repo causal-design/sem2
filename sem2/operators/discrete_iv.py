@@ -94,13 +94,14 @@ class DiscreteIVEnergyLoss(EnergyLoss):
         if unknown:
             raise ValueError(f"Unknown or internal observed variables: {sorted(unknown)}")
         groups = self._group_observations(observations)
+        loss = self._prepare_discrete_loss(groups[0])
         instrument = observations.subset(self.instrument)
         total = 0
         metrics = {}
         for level, group in zip(self.levels, groups):
             intervention = DataBatch(instrument.values.new_full((sample_bs, 1), level), instrument.variables)
             prediction, _ = self.model.sample(batch_size=sample_bs, set_nodes=intervention)
-            result, details = self.discrete_loss.energy_dist(group, prediction, beta=beta)
+            result, details = loss.energy_dist(group, prediction, beta=beta)
             weight = len(group) / len(observations)
             total = total + weight * result.value
             prefix = f"{self.instrument}={level}/"

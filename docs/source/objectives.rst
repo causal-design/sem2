@@ -23,6 +23,13 @@ temporarily overrides the draw count and exponent without changing stored settin
 the finite-sample correction. The continuous loss is an energy score; the discrete
 loss also subtracts the data/data term and uses half-energy-distance scaling.
 
+``DiscreteEnergyLoss(cfg, states)`` precomputes its distance matrix at construction
+from the named state support and numerical mappings. ``EnergyLoss`` and
+``DiscreteIVEnergyLoss`` construct it when the observed variables and scores are
+first available, then reuse it across batches and instrument groups. Changing
+the observed variables or scores rebuilds it. A temporary exponent override
+reuses the underlying Euclidean distances without changing the default matrix.
+
 For IV fitting, set ``batch_size`` at least as large as the dataset. Eligibility
 is checked after incomplete rows are removed: every declared instrument level
 needs at least two observations. Conditional discrepancies use empirical group
