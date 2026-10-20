@@ -9,7 +9,7 @@ import torch
 import torch.nn.functional as F
 import warnings
 from torch import nn
-from torch.distributions import Distribution, constraints
+from torch.distributions import Distribution, Normal, constraints
 
 from .nn_models import _LinearConfig, _LinearModel, _MLP
 from ...default_configs import LinearNodeConfig, MLPConfig
@@ -170,8 +170,9 @@ class NodeExogenous(SEM2Node):
     rhs : str
         Distribution expression retained for display.
     dist : torch.distributions.Distribution
-        Instantiated law, already on the intended device. Sampling uses
-        ``dist.sample``, not reparameterized ``rsample``.
+        Instantiated law, already on the intended device. Draws have no gradient
+        through distribution parameters. Normal draws use ``rsample`` under
+        ``no_grad`` to avoid repeating ``torch.normal``'s scale checks.
     out_dim : int, default=1
         Draw width prepended to the distribution's batch/event dimensions.
     device : str or torch.device, default="cpu"
@@ -196,6 +197,10 @@ class NodeExogenous(SEM2Node):
         self.dist = dist
 
     def _forward_inner(self, x: list[torch.Tensor], batch_size: int = 1) -> torch.Tensor:
+        if isinstance(self.dist, Normal):
+            # Parameters were validated at construction; keep draws nondifferentiable.
+            with torch.no_grad():
+                return self.dist.rsample([batch_size, self.out_dim])
         return self.dist.sample([batch_size, self.out_dim])
 
 

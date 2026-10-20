@@ -4,7 +4,8 @@ from typing import TYPE_CHECKING
 import torch
 from .operators_base import OperatorInput, OperatorOutput, SEM2Operator
 from .covariance import Covariance
-from .discrete_energy_loss import DiscreteEnergyLoss, _energy_distance, _energy_values
+from .discrete_energy_loss import DiscreteEnergyLoss, _check_beta, _energy_distance, _energy_values
+from ..data.conversion import databatch_to_tensor
 from ..data.records import DataBatch, ScalarResult
 from ..model.construction.sem_types import SEMType
 from ..default_configs import TrainingConfig
@@ -46,6 +47,7 @@ class EnergyLoss(SEM2Operator):
         self.device = cfg.device
         self.sample_bs = cfg.sample_bs if sample_bs is None else sample_bs
         self.beta = cfg.energy_score_beta if beta is None else beta
+        _check_beta(self.beta)
         self.unbiased = cfg.energy_score_unbiased if unbiased is None else unbiased
         self.discrete_loss: DiscreteEnergyLoss | None = None
         self._evaluate_model = (self._evaluate_continuous if SEMType.is_continuous(model.sem_type)
@@ -77,8 +79,6 @@ class EnergyLoss(SEM2Operator):
         """
         sample_bs = self.sample_bs if sample_bs is None else sample_bs
         beta = self.beta if beta is None else beta
-        if not isinstance(observations, DataBatch):
-            raise TypeError("observations must be a DataBatch.")
         observations = observations.to(self.device)
         unknown = set(observations.names) - self.model.input_node
         if unknown:
@@ -113,8 +113,11 @@ class EnergyLoss(SEM2Operator):
     def _energy_score(self, observations: DataBatch, prediction: DataBatch,
                       *, beta: float) -> tuple[ScalarResult, dict]:
         """Compare observations [N, D] with named draws [M, D], allowing N != M."""
+        if beta != self.beta:
+            _check_beta(beta)
         targets = _energy_values(observations)
-        draws = _energy_values(DataBatch(prediction.select(observations.names), observations.variables)).to(targets)
+        # The same scoring metadata was checked for the observations above.
+        draws = databatch_to_tensor(DataBatch(prediction.select(observations.names), observations.variables)).to(targets)
         n = draws.shape[0]
         if not len(observations) or n < 1 or (self.unbiased and n < 2):
             raise ValueError("Energy score requires observations and enough model draws for the pair estimator.")
@@ -193,8 +196,6 @@ class WeightedFrobeniusDistance(SEM2Operator):
         diagnostics : dict
             Detached scalar under ``weighted_frobenius_distance``.
         """
-        if not isinstance(observations, DataBatch):
-            raise TypeError("observations must be a DataBatch.")
         batch = observations if self.observed_vars is None else observations.subset(self.observed_vars)
         covariance, _ = self.covariance.evaluate(sample_bs=sample_bs)
         indices = [i for n in batch.names for i in self.covariance.columns[n]]

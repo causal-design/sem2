@@ -53,16 +53,11 @@ class DiscreteIVEnergyLoss(EnergyLoss):
             raise ValueError("The instrument requires at least two declared levels.")
 
     def _group_observations(self, observations: DataBatch) -> list[DataBatch]:
-        """Select conditional margins and report ineligible levels before sampling."""
+        """Select conditional margins; the trainer checks level counts once."""
         names = [n for n in observations.names if n in self.model.state_node_names]
         outcomes = observations.subset(names)
         z = observations.select(self.instrument)[:, 0]
-        groups = [outcomes[z == level] for level in self.levels]
-        counts = dict(zip(self.levels, map(len, groups)))
-        if min(counts.values()) < 2:
-            raise ValueError(f"Instrument {self.instrument!r} requires at least two observations "
-                             f"per declared level; counts={counts}.")
-        return groups
+        return [outcomes[z == level] for level in self.levels]
 
     def evaluate(self, observations: DataBatch, *, sample_bs: int | None = None,
                  beta: float | None = None) -> tuple[ScalarResult, dict]:
