@@ -1,6 +1,6 @@
 """Fit PoliticalDemocracy with the package trainer and compare with lavaan.
 
-Run ``python -m experiments.political_democracy --epochs 1000 --seed 0`` from
+Run ``python -m experiments.political_democracy --epochs 2000 --seed 0`` from
 an installed repository checkout. This is a numerical experiment, not a test:
 coefficient differences and fit diagnostics are reported without a tolerance.
 The reference is https://lavaan.ugent.be/tutorial/sem.html (unstandardized ML).
@@ -66,7 +66,7 @@ def _structural_coefs(model: SEM2Linear) -> dict[str, float]:
     }
 
 
-def run_example(epochs: int = 1000, seed: int = 0, lr: float = 0.05
+def run_example(epochs: int = 2000, seed: int = 0, lr: float = 0.05
                 ) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, float | int]]:
     """Return scaled coefficients, observed covariances and final-fit diagnostics.
 
@@ -120,7 +120,7 @@ def run_example(epochs: int = 1000, seed: int = 0, lr: float = 0.05
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--epochs", type=int, default=1000)
+    parser.add_argument("--epochs", type=int, default=2000)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--lr", type=float, default=0.05)
     args = parser.parse_args()
