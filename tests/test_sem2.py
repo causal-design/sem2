@@ -43,8 +43,8 @@ def batch(values, *names):
     return DataBatch(values, [VariableInfo(name) for name in names])
 
 
-def run(model, bs=BS, set_nodes=None):
-    res, _ = model.sample(batch_size=bs, set_nodes=set_nodes)
+def run(model, bs=BS, do_intervention=None):
+    res, _ = model.sample(batch_size=bs, do_intervention=do_intervention)
     return res
 
 
@@ -585,22 +585,22 @@ class TestSEM2Forward:
         for bs in [1, 4, 32]:
             assert run(m, bs=bs).select("y").shape == (bs, 1)
 
-    def test_set_nodes_overrides_value(self):
+    def test_do_intervention_overrides_value(self):
         m = make_model("e ~ Normal(0,1); y <- e")
         fixed = torch.zeros(BS, 1)
-        assert torch.allclose(run(m, set_nodes=batch(fixed, "e")).select("e"), fixed)
+        assert torch.allclose(run(m, do_intervention=batch(fixed, "e")).select("e"), fixed)
 
-    def test_set_nodes_invalid_key_raises(self):
+    def test_do_intervention_invalid_key_raises(self):
         m = make_model("e ~ Normal(0,1); y <- e")
         with pytest.raises(ValueError):
-            run(m, set_nodes=batch(torch.zeros(BS, 1), "bad"))
+            run(m, do_intervention=batch(torch.zeros(BS, 1), "bad"))
 
     def test_fixed_coeff_one_passthrough(self):
         """y <- 1*e with no bias — output should equal input."""
         m = make_model("e ~ Normal(0,1); y <- 1*e",
                        cfgs={"y": LinearNodeConfig(use_intercept=False)})
         e_val = torch.tensor([[1.0], [2.0], [3.0], [4.0]])
-        out = run(m, set_nodes=batch(e_val, "e"))
+        out = run(m, do_intervention=batch(e_val, "e"))
         assert torch.allclose(out.select("y"), e_val)
 
     def test_fixed_coeff_negative(self):
@@ -608,7 +608,7 @@ class TestSEM2Forward:
         m = make_model("e ~ Normal(0,1); y <- -1*e",
                        cfgs={"y": LinearNodeConfig(use_intercept=False)})
         e_val = torch.tensor([[1.0], [2.0], [3.0], [4.0]])
-        out = run(m, set_nodes=batch(e_val, "e"))
+        out = run(m, do_intervention=batch(e_val, "e"))
         assert torch.allclose(out.select("y"), -e_val)
 
     def test_fixed_coeff_fractional(self):
@@ -616,7 +616,7 @@ class TestSEM2Forward:
         m = make_model("e ~ Normal(0,1); y <- 0.5*e",
                        cfgs={"y": LinearNodeConfig(use_intercept=False)})
         e_val = torch.ones(BS, 1)
-        out = run(m, set_nodes=batch(e_val, "e"))
+        out = run(m, do_intervention=batch(e_val, "e"))
         assert torch.allclose(out.select("y"), e_val * 0.5)
 
     def test_fixed_sum(self):
@@ -625,7 +625,7 @@ class TestSEM2Forward:
                        cfgs={"y": LinearNodeConfig(use_intercept=False)})
         e1 = torch.ones(BS, 1) * 3
         e2 = torch.ones(BS, 1) * 1
-        out = run(m, set_nodes=batch(torch.cat([e1, e2], dim=-1), "e1", "e2"))
+        out = run(m, do_intervention=batch(torch.cat([e1, e2], dim=-1), "e1", "e2"))
         assert torch.allclose(out.select("y"), torch.ones(BS, 1) * 2)
 
     def test_multi_output_node(self):
@@ -668,14 +668,14 @@ class TestSEM2Forward:
     def test_gradients_flow(self):
         cfg = MLPConfig(hidden_dims=[8], output_dim=1)
         m = make_model("e ~ Normal(0,1); y <- n(e)", cfgs={"y": cfg})
-        out = run(m, set_nodes=batch(torch.randn(BS, 1), "e"))
+        out = run(m, do_intervention=batch(torch.randn(BS, 1), "e"))
         out.select("y").sum().backward()
         for name, p in m.named_parameters():
             assert p.grad is not None, f"No gradient for {name}"
 
     def test_intervention_does_not_corrupt_upstream(self):
         m = make_model("e ~ Normal(0,1); x <- e; y <- x")
-        out = run(m, set_nodes=batch(torch.zeros(BS, 1), "y"))
+        out = run(m, do_intervention=batch(torch.zeros(BS, 1), "y"))
         assert out.select("x").shape == (BS, 1)
         assert torch.allclose(out.select("y"), torch.zeros(BS, 1))
 

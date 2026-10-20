@@ -98,7 +98,7 @@ class TrainingConfig(BaseModel):
     epochs : int, default=12
         Positive number of passes through the data.
     rng_seed : int, optional
-        Explicit training/query seed; None does not reseed.
+        Explicit training seed; None does not reseed. Queries have independent seeds.
     sample_bs : int, default=512
         Default operator Monte Carlo count, separate from data batch size.
     energy_score_beta : float, default=1.0

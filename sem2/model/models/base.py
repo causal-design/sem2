@@ -176,7 +176,7 @@ class SEM2(_DAG, nn.Module):
         categorical = isinstance(node, NodeMLPDiscrete) or isinstance(node.dist, torch.distributions.Categorical)
         return VariableInfo(name, dim=node.out_dim, categorical=categorical)
 
-    def _unpack_interventions(self, set_nodes: DataBatch | None, batch_size: int) -> dict[str, Tensor]:
+    def _unpack_interventions(self, do_intervention: DataBatch | None, batch_size: int) -> dict[str, Tensor]:
         """Unpack a named intervention batch into per-node tensors.
 
         Input has shape [batch_size, sum(variable.dim)]; each dictionary value
@@ -187,32 +187,32 @@ class SEM2(_DAG, nn.Module):
         """
         if batch_size < 1:
             raise ValueError("batch_size must be positive.")
-        if set_nodes is None:
+        if do_intervention is None:
             return {}
-        if not isinstance(set_nodes, DataBatch):
-            raise TypeError("set_nodes must be a DataBatch.")
-        if len(set_nodes) != batch_size:
+        if not isinstance(do_intervention, DataBatch):
+            raise TypeError("do_intervention must be a DataBatch.")
+        if len(do_intervention) != batch_size:
             raise ValueError("Intervention rows must match batch_size.")
         values = {}
-        for variable in set_nodes.variables:
+        for variable in do_intervention.variables:
             name = variable.name
             if name not in self.input_node:
                 raise ValueError(f"Unknown or internal intervention node: {name!r}")
             node = self.node_dict[name]
-            value = set_nodes.select(name)
+            value = do_intervention.select(name)
             if variable.dim != node.out_dim:
                 raise ValueError(f"Intervention dimension does not match {name!r}.")
             values[name] = value
         return values
 
-    def sample(self, batch_size: int = 1, set_nodes: DataBatch | None = None) -> tuple[DataBatch, dict]:
+    def sample(self, batch_size: int = 1, do_intervention: DataBatch | None = None) -> tuple[DataBatch, dict]:
         """Return named draws and intervention provenance, excluding helpers.
 
         Parameters
         ----------
         batch_size : int, default=1
             Positive number of draws.
-        set_nodes : DataBatch, optional
+        do_intervention : DataBatch, optional
             Intervention values with one row per draw and matching node widths.
             Supply valid stored values on the model device; no broadcasting,
             category encoding or support validation is performed.
@@ -223,7 +223,7 @@ class SEM2(_DAG, nn.Module):
             Values of shape (batch_size, total_width), in topological order.
             Internal helper nodes are excluded.
         details : dict
-            ``interventions`` contains the supplied ``set_nodes`` object.
+            ``interventions`` contains the supplied ``do_intervention`` object.
 
         Notes
         -----
@@ -231,9 +231,9 @@ class SEM2(_DAG, nn.Module):
         structural equations; they do not establish causal identification.
         """
         # Share the sampling loop with queries that stop at a specific target.
-        return self._sample(batch_size, set_nodes)
+        return self._sample(batch_size, do_intervention)
 
-    def _sample(self, batch_size: int, set_nodes: DataBatch | None,
+    def _sample(self, batch_size: int, do_intervention: DataBatch | None,
                 target: str | None = None) -> tuple[DataBatch, dict]:
         """One traversal for full samples and target-only queries.
 
@@ -243,8 +243,8 @@ class SEM2(_DAG, nn.Module):
         if target is not None and target not in self.input_node:
             raise ValueError(f"Unknown or internal target node: {target!r}")
         # Unwrap interventions once and retain their supplied variable metadata.
-        interventions = self._unpack_interventions(set_nodes, batch_size)
-        supplied = {} if set_nodes is None else dict(zip(set_nodes.names, set_nodes.variables))
+        interventions = self._unpack_interventions(do_intervention, batch_size)
+        supplied = {} if do_intervention is None else dict(zip(do_intervention.names, do_intervention.variables))
         values, variables = [], []
         # Evaluate parents first, replacing intervened equations with fixed values.
         for name in self.topological_order:
@@ -261,7 +261,7 @@ class SEM2(_DAG, nn.Module):
                 break
         # Stack variable blocks in the same order as their metadata.
         result = DataBatch(torch.cat(values, dim=-1), variables)
-        return result, {"interventions": set_nodes}
+        return result, {"interventions": do_intervention}
 
     def forward(self, *args, **kwargs):
         raise NotImplementedError(f"call the sample() method instead of forward() or calling the model directly.")
