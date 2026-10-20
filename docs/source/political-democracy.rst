@@ -7,7 +7,7 @@ From an installed source checkout, run:
 
 .. code-block:: console
 
-   python -m experiments.political_democracy --epochs 1000 --seed 0
+   python -m experiments.political_democracy --epochs 2000 --seed 0
 
 The example centers the observed indicators, fixes intercepts at zero and
 performs one full-data Adam update per epoch. It reports the three structural
