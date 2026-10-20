@@ -31,10 +31,14 @@ the observed variables or scores rebuilds it. A temporary exponent override
 reuses the underlying Euclidean distances without changing the default matrix.
 
 For IV fitting, set ``batch_size`` at least as large as the dataset. Eligibility
-is checked after incomplete rows are removed: every declared instrument level
-needs at least two observations. Conditional discrepancies use empirical group
-frequencies. The instrument itself does not need numerical scores because it
-selects groups rather than entering their distance calculation.
+is checked once before training, after incomplete rows are removed: every declared
+instrument level needs at least two observations. Conditional discrepancies use
+empirical group frequencies. The instrument itself does not need numerical scores
+because it selects groups rather than entering their distance calculation.
+
+Energy exponents are checked at construction and for explicit overrides, rather
+than for each distance calculation. Batch-size checks protect pair denominators;
+they inspect tensor shapes, not device values.
 
 .. autoclass:: sem2.operators.divergence.EnergyLoss
    :members: evaluate

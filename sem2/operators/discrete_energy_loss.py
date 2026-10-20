@@ -22,12 +22,16 @@ def _energy_distance(x: torch.Tensor, y: torch.Tensor, beta: float) -> torch.Ten
 
 def _power_distances(distances: torch.Tensor, beta: float) -> torch.Tensor:
     """Apply the exponent without differentiating a fractional power at zero."""
-    if not 0 < beta < 2:
-        raise ValueError("Energy beta must be strictly between zero and two.")
     # Avoid differentiating zero**beta for fractional beta; masking afterwards
     # leaves an infinite derivative in the autograd graph.
     positive = distances > 0
     return distances.where(positive, 1).pow(beta).where(positive, 0)
+
+
+def _check_beta(beta: float) -> None:
+    """Validate a default at construction or an explicit exponent override."""
+    if not 0 < beta < 2:
+        raise ValueError("Energy beta must be strictly between zero and two.")
 
 
 class DiscreteEnergyLoss:
@@ -59,6 +63,7 @@ class DiscreteEnergyLoss:
         """Precompute state distances in the same ordering used by marginalize()."""
         self.unbiased = cfg.energy_score_unbiased if unbiased is None else unbiased
         self.beta = cfg.energy_score_beta if beta is None else beta
+        _check_beta(self.beta)
         self.states = DataBatch(torch.unique(states.values, dim=0), deepcopy(states.variables))
         numeric = _energy_values(self.states)
         # D[i,j] = ||state_i - state_j||_2**beta, using the chosen numeric mapping.
@@ -104,6 +109,8 @@ class DiscreteEnergyLoss:
         # Match stored identities directly, without coercing them to integer indices.
         empirical = (observations.values[:, None, :] == states[None, :, :]).all(-1).to(probabilities)
         # Reuse the precomputed matrix; overrides only change the power, not D_mat.
+        if beta is not None and beta != self.beta:
+            _check_beta(beta)
         distances = (self.D_mat if beta is None or beta == self.beta
                      else _power_distances(self._distances, beta)).to(probabilities)
         # Average the cross-distance over independent data and model draws.

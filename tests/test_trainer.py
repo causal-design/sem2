@@ -5,6 +5,7 @@ import logging
 import numpy as np
 import pandas as pd
 import torch
+from torch.profiler import ProfilerActivity, profile
 from torch.utils.data import DataLoader, TensorDataset
 
 from experiments.trainer import run_example
@@ -13,6 +14,7 @@ from sem2.data.records import DataBatch
 from sem2.default_configs import TrainingConfig
 from sem2.model.models.linear import SEM2Linear
 from sem2.operators.linear import LogLikelihood
+from sem2.operators.divergence import EnergyLoss, WeightedFrobeniusDistance
 from sem2.operators.sem2_loss import SEM2Loss
 from sem2.trainer.trainer import SEM2Trainer, fit
 from sem2.utils import set_seed
@@ -53,6 +55,23 @@ def test_fit_and_trainer_agree_in_place_with_execution_time_seed_and_progress(ca
     previous_optimizer = trainer.optim
     trainer.train()
     assert trainer.optim is not previous_optimizer
+
+
+def test_objective_updates_avoid_scalar_validation_and_solver_error_checks():
+    model = SEM2Linear('u,v ~ Normal(0,1); x <- u; y <- x + v')
+    model.node_dict['u'].dist.loc.requires_grad_(True)
+    cfg = TrainingConfig(device='cpu', sample_bs=8)
+    batch = DataBatch(torch.tensor([[0., 1.], [1., 2.], [2., -1.]]), ['x', 'y'])
+    objectives = [LogLikelihood(model), WeightedFrobeniusDistance(model), EnergyLoss(cfg, model)]
+    # Setup validation is outside the measured evaluation/backward path.
+    with profile(activities=[ProfilerActivity.CPU]) as execution:
+        for objective in objectives:
+            objective.evaluate(batch)[0].value.backward()
+    events = {event.key for event in execution.key_averages()}
+    assert 'aten::_local_scalar_dense' not in events
+    assert 'aten::_linalg_check_errors' not in events
+    # Normal's sampling implementation must still detach exogenous draws.
+    assert not model.node_dict['u'].get_value().requires_grad
 
 
 def test_default_fit_does_not_reseed_the_shared_stream():

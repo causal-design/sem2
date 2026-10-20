@@ -138,16 +138,12 @@ class SEM2Linear(SEM2):
             i = self._node_index[name]
             if isinstance(node, NodeExogenous):
                 mean = torch.as_tensor(node.dist.mean, device=self.device).reshape(-1)[0]
-                if not torch.isfinite(mean):
-                    raise ValueError(
-                        f"SEM2Linear mean_vector requires finite exogenous means. "
-                        f"Node '{name}' has mean {mean}."
-                    )
                 c[i] = mean
             elif isinstance(node, NodeLinear) and node.intercept() is not None:
                 c[i] = node.intercept().reshape(-1)[0]
         eye = torch.eye(N, device=self.device)
-        return torch.linalg.solve(eye - B, c)
+        # Topological order makes I-B unit lower triangular; no solver checks needed.
+        return torch.linalg.solve_triangular(eye - B, c[:, None], upper=False, unitriangular=True)[:, 0]
 
     def cov_matrix(self, nodes: list[str] | None = None) -> Tensor:
         """Model-implied covariance Sigma = (I - B)^-1 Omega (I - B)^-T.
@@ -178,15 +174,10 @@ class SEM2Linear(SEM2):
                 variance = torch.as_tensor(
                     node.dist.variance, device=self.device
                 ).reshape(-1)[0]
-                if not torch.isfinite(variance):
-                    raise ValueError(
-                        f"SEM2Linear covariance requires finite second moments. "
-                        f"Node '{name}' has variance {variance}."
-                    )
                 omega[self._node_index[name]] = variance
 
         eye = torch.eye(N, device=self.device)
-        a_inv = torch.linalg.inv(eye - B)
+        a_inv = torch.linalg.solve_triangular(eye - B, eye, upper=False, unitriangular=True)
         sigma = a_inv @ torch.diag(omega) @ a_inv.T
 
         if nodes is not None:

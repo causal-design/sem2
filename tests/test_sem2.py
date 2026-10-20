@@ -1239,9 +1239,8 @@ class TestLinearOperators:
         m = SEM2Linear("e ~ Cauchy(0,1); y <- 1*e",
                        node_cfgs={"y": LinearNodeConfig(use_intercept=False)})
         with pytest.warns(UserWarning, match="pseudo-log-likelihood"):
-            op = LogLikelihood(m, ["y"], loc=torch.zeros(1))
-        with pytest.raises(ValueError, match="finite second moments"):
-            op.evaluate(batch(torch.zeros(3, 1), "y"))
+            with pytest.raises(ValueError, match="finite second moments"):
+                LogLikelihood(m, ["y"], loc=torch.zeros(1))
 
     def test_weighted_frobenius_zero_on_model_data(self):
         m = _chain_linear()

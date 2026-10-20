@@ -22,7 +22,10 @@ def _check_iv_batch(objective: SEM2Operator, batch: DataBatch, batch_size: int) 
         for component, _ in objective.loss_components:
             _check_iv_batch(component, batch, batch_size)
     elif isinstance(objective, DiscreteIVEnergyLoss):
-        objective._group_observations(batch)
+        counts = dict(zip(objective.levels, map(len, objective._group_observations(batch))))
+        if min(counts.values()) < 2:
+            raise ValueError(f"Instrument {objective.instrument!r} requires at least two observations "
+                             f"per declared level; counts={counts}.")
         if batch_size < len(batch):
             raise ValueError(f"IV fitting requires a full-data batch; set batch_size >= {len(batch)}.")
 

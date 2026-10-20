@@ -201,5 +201,5 @@ def test_iv_full_data_fit_weights_and_eligibility(levels):
     with pytest.raises(ValueError, match='counts='):
         SEM2Trainer(cfg, model, missing, objective, variables=variables)
     singleton = batch[batch.select('instrument')[:, 0] == 0][:1]
-    with pytest.raises(ValueError, match='counts='):
+    with pytest.raises(ValueError, match='at least two rows'):
         loss.evaluate(singleton)
