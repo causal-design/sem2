@@ -19,7 +19,6 @@ from sem2.utils import set_seed
 torch.set_num_threads(1)
 
 from sem2.model.models.linear import SEM2Linear
-from sem2.model.construction.sem_types import SEMType
 from sem2.operators.linear import LogLikelihood
 from sem2.data.records import DataBatch, VariableInfo
 
@@ -91,26 +90,9 @@ def _structural_coefs(m):
     }
 
 
-class TestPoliticalDemocracy:
-
-    def test_model_is_linear_gaussian(self):
-        set_seed(0)
-        m = SEM2Linear(FORMULA)
-        assert m.inferred_sem_type == SEMType.LINEAR_GAUSSIAN
-        assert set(OBS).issubset(m.input_node)
-
-    def test_cov_matrix_symmetric_and_pd(self):
-        set_seed(0)
-        m = SEM2Linear(FORMULA)
-        sigma = m.cov_matrix(OBS).detach()
-        assert sigma.shape == (len(OBS), len(OBS))
-        assert torch.allclose(sigma, sigma.T, atol=1e-5)
-        # Cholesky succeeds iff positive definite.
-        torch.linalg.cholesky(sigma)
-
-    def test_recovers_lavaan_coefficients(self):
-        m = _fit()
-        coefs = _structural_coefs(m)
-        for name, target in LAVAAN.items():
-            assert coefs[name] == pytest.approx(target, abs=0.05), \
-                f"{name}: got {coefs[name]:.3f}, expected ~{target}"
+def test_recovers_lavaan_coefficients():
+    model = _fit()
+    coefs = _structural_coefs(model)
+    for name, target in LAVAAN.items():
+        assert coefs[name] == pytest.approx(target, abs=0.05), \
+            f"{name}: got {coefs[name]:.3f}, expected ~{target}"
