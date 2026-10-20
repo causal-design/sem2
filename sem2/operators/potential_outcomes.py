@@ -1,16 +1,49 @@
-"""Sampling and scalar queries under model-implied interventions."""
+"""Population means and contrasts under fixed model-implied interventions."""
 from __future__ import annotations
+from copy import deepcopy
+from math import isfinite
 from typing import TYPE_CHECKING
+import warnings
 import torch
 from .operators_base import OperatorInput, OperatorOutput, SEM2Operator
 from ..model.construction.sem_types import SEMType
 from ..data.records import DataBatch, ScalarResult, VariableInfo
 from ..data.conversion import databatch_to_tensor
 from ..utils import set_seed
-from ..default_configs import TrainingConfig
 
 if TYPE_CHECKING:
     from ..model.models.base import SEM2
+
+
+def _fixed_intervention(model: SEM2, assignments: dict[str, float]) -> DataBatch | None:
+    """Validate scalar assignments once, before casting to the sampler dtype."""
+    variables = []
+    for name, value in assignments.items():
+        if name not in model.input_node:
+            raise ValueError(f"Unknown or internal intervention node: {name!r}")
+        node = model.node_dict[name]
+        if node.out_dim != 1 or not isinstance(value, (int, float)) or not isfinite(value):
+            raise ValueError(f"Intervention on {name!r} requires a finite scalar number.")
+        support = node.support
+        if support.values is not None:
+            # Compare Python values before float32 rounding or integer conversion.
+            if support.values.detach().cpu().flatten().tolist().count(value) != 1:
+                raise ValueError(f"Intervention {name}={value} is outside its declared states.")
+        elif support.constraint is not None:
+            if support.constraint.is_discrete and value != int(value):
+                raise ValueError(f"Intervention {name}={value} requires an integer state.")
+            candidate = torch.tensor(value, dtype=torch.float64, device=model.device)
+            if not support.constraint.check(candidate).all():
+                raise ValueError(f"Intervention {name}={value} is outside its declared support.")
+        variables.append(model._variable_info(name))
+    if not variables:
+        return None
+    parameter = next(model.parameters(), None)
+    dtype = parameter.dtype if parameter is not None else torch.get_default_dtype()
+    values = torch.tensor([list(assignments.values())], device=model.device, dtype=dtype)
+    if not torch.isfinite(values).all():
+        raise ValueError("Interventions must be finite in the model's floating dtype.")
+    return DataBatch(values, variables)
 
 
 class PotentialOutcomeSample(SEM2Operator):
@@ -19,7 +52,7 @@ class PotentialOutcomeSample(SEM2Operator):
     Parameters
     ----------
     model : SEM2
-        Continuous model to sample.
+        Continuous model to sample, using its current train/eval mode.
     target_node : str
         User-declared target variable; internal helpers cannot be selected.
     """
@@ -34,15 +67,16 @@ class PotentialOutcomeSample(SEM2Operator):
         self.model = model
         self.target_node = target_node
 
-    def evaluate(self, sample_bs: int = 1, set_nodes: DataBatch | None = None) -> tuple[DataBatch, dict]:
-        """Return target draws under optional interventions.
+    def evaluate(self, sample_bs: int = 1,
+                 do_intervention: DataBatch | None = None) -> tuple[DataBatch, dict]:
+        """Return target draws under optional, already-valid interventions.
 
         Parameters
         ----------
         sample_bs : int, default=1
             Positive number of draws.
-        set_nodes : DataBatch, optional
-            Valid named intervention values, one row per draw.
+        do_intervention : DataBatch, optional
+            Valid stored intervention values, one row per draw, on the model device.
 
         Returns
         -------
@@ -51,169 +85,210 @@ class PotentialOutcomeSample(SEM2Operator):
         details : dict
             ``interventions`` records the supplied intervention batch.
         """
-        return self.model._sample(sample_bs, set_nodes, target=self.target_node)
+        return self.model._sample(sample_bs, do_intervention, target=self.target_node)
 
 
 class MeanPotentialOutcome(SEM2Operator):
-    """Mean of a scalar outcome under constant named interventions.
-
-    sample_bs counts Monte Carlo samples; discrete outcomes are integrated over
-    their states. By default, sampling uses the existing RNG stream. An explicit
-    seed reseeds each evaluation; the previous RNG state is not restored.
-    Supply variable metadata for an explicit category-to-number mapping.
-    sample_bs overrides cfg.sample_bs; evaluate(sample_bs=...) overrides one call.
-    beta is accepted for scalar-objective composition but does not affect this query.
+    """Population mean of a scalar outcome under fixed named interventions.
 
     Parameters
     ----------
     model : SEM2
-        Continuous or finite-discrete model.
+        Model supplying the intervention law, not an identification guarantee.
     outcome : str
-        Scalar outcome variable.
+        User-declared scalar outcome.
     intervention : dict[str, float]
-        Constant assignments to scalar variables; an empty mapping gives the
-        observational model mean.
-    sample_bs : int, optional
-        Monte Carlo count, overriding the config default.
+        Fixed stored values, not numerical outcome scores. Omitted nodes follow
+        their equations; an empty dictionary is the natural regime.
+    sample_bs : int, default=512
+        Monte Carlo draw count, independent of training configuration.
     seed : int, optional
-        Reseed on every evaluation; ``None`` continues the current stream.
+        Explicitly reseed evaluation; None continues the current RNG stream.
     variable : VariableInfo, optional
-        Outcome metadata, including a category-to-number mapping.
-    cfg : TrainingConfig, optional
-        Supplies the default Monte Carlo count.
+        Outcome metadata. Categorical outcomes require a complete numeric_mapping;
+        without one, construction warns and raises ValueError. An explicit 0/1
+        event score gives a probability rather than a mean of arbitrary codes.
+
+    Notes
+    -----
+    Evaluation temporarily uses model.eval() but retains autograd and restores
+    every module's previous training flag. Parameters are unchanged; cached node
+    values and RNG state may change. Discrete outcome states are probability
+    weighted, with Monte Carlo integration over remaining exogenous draws.
     """
     input_type = OperatorInput.SELF
     output_type = OperatorOutput.SCALAR
 
     def __init__(self, model: SEM2, *, outcome: str, intervention: dict[str, float],
-                 sample_bs: int | None = None, seed: int | None = None,
-                 variable: VariableInfo | None = None, cfg: TrainingConfig | None = None) -> None:
-        cfg = cfg if cfg is not None else TrainingConfig(device=model.device)
+                 sample_bs: int = 512, seed: int | None = None,
+                 variable: VariableInfo | None = None) -> None:
+        if outcome not in model.input_node:
+            raise ValueError(f"Unknown or internal outcome: {outcome!r}")
         self.model = model
         self.outcome = outcome
         self.intervention = dict(intervention)
-        self.sample_bs = cfg.sample_bs if sample_bs is None else sample_bs
+        self.sample_bs = sample_bs
         self.seed = seed
-        if outcome not in model.input_node or set(intervention) - model.input_node:
-            raise ValueError("Query nodes must be user-declared model variables.")
-        self.variable = variable if variable is not None else model._variable_info(outcome)
-        if self.variable.name != outcome or self.variable.dim != 1 or model.node_dict[outcome].out_dim != 1:
+        declared = model._variable_info(outcome)
+        self.variable = deepcopy(variable if variable is not None else declared)
+        if self.variable.name != outcome or self.variable.dim != 1 or declared.dim != 1:
             raise ValueError("MeanPotentialOutcome requires scalar outcome metadata matching the model.")
-        if any(model.node_dict[name].out_dim != 1 for name in intervention):
-            raise ValueError("MeanPotentialOutcome requires scalar intervention nodes.")
+        if declared.categorical or self.variable.categorical:
+            self.variable.categorical = True
+            if self.variable.numeric_mapping is None:
+                message = (f"Categorical outcome {outcome!r} requires explicit numerical scores; "
+                           "supply a numeric_mapping, including an event-indicator score for probabilities.")
+                warnings.warn(message, stacklevel=2)
+                raise ValueError(message)
+        if self.variable.numeric_mapping is not None:
+            scores, encoding = self.variable.numeric_mapping, self.variable.encoding
+            support = model.node_dict[outcome].support.values
+            if encoding is not None and set(scores) != set(encoding):
+                raise ValueError("Outcome scores must cover every encoded label.")
+            codes = [encoding[label] if encoding is not None else label for label in scores]
+            if (support is None or len(set(codes)) != len(codes)
+                    or set(codes) != set(support.detach().cpu().flatten().tolist())
+                    or not all(isfinite(score) for score in scores.values())):
+                raise ValueError("Outcome scores must be finite and cover each declared state exactly once.")
+        self._intervention = _fixed_intervention(model, self.intervention)
         if SEMType.is_continuous(model.sem_type):
             self.sampler = PotentialOutcomeSample(model, outcome)
             self._evaluate_model = self._evaluate_continuous
+            self.method = "monte_carlo"
         else:
             self._evaluate_model = self._evaluate_discrete
+            self.method = ("probability_weighted" if outcome in model.state_node_names else "monte_carlo")
 
-    def evaluate(self, *, sample_bs: int | None = None,
+    def evaluate(self, *, sample_bs: int | None = None, seed: int | None = None,
                  beta: float | None = None) -> tuple[ScalarResult, dict]:
-        """Evaluate the configured intervention, reseeding only if requested.
+        """Evaluate without fitting or changing stored query settings.
 
         Parameters
         ----------
         sample_bs : int, optional
-            Monte Carlo count for this call.
+            Draw count for this call; None uses the constructor default.
+        seed : int, optional
+            Seed for this call; None uses the constructor default. Explicit
+            seeds reset the stream without restoring its previous state.
         beta : float, optional
-            Accepted for composition; unused.
+            Accepted for scalar-objective composition; unused.
 
         Returns
         -------
         result : ScalarResult
-            Mean outcome, labelled ``mean_potential_outcome``, with gradients.
+            Mean outcome with gradients, labelled ``mean_potential_outcome``.
         details : dict
-            ``interventions`` holds the broadcast intervention batch, or None.
+            Outcome, fixed intervention, integration method, sample_bs, seed
+            and evaluation_mode. No uncertainty or identification claim.
         """
         sample_bs = self.sample_bs if sample_bs is None else sample_bs
-        parameter = next(self.model.parameters(), None)
-        device = parameter.device if parameter is not None else torch.device(self.model.device)
-        dtype = parameter.dtype if parameter is not None else torch.get_default_dtype()
-        # Broadcast constant assignments once; samplers still consume named batches.
-        values = [torch.as_tensor(value, device=device, dtype=dtype).expand(sample_bs, 1)
-                  for value in self.intervention.values()]
-        set_nodes = DataBatch(torch.cat(values, dim=1),
-                              [self.model._variable_info(n) for n in self.intervention]) if values else None
+        seed = self.seed if seed is None else seed
+        intervention = None
+        if self._intervention is not None:
+            intervention = DataBatch(self._intervention.values.expand(sample_bs, -1),
+                                     self._intervention.variables)
+        modes = [(module, module.training) for module in self.model.modules()]
+        self.model.eval()
+        try:
+            set_seed(seed, device=self.model.device)
+            value = self._evaluate_model(sample_bs, intervention)
+        finally:
+            for module, training in modes:
+                module.training = training
+        return ScalarResult(value, "mean_potential_outcome", [self.variable]), {
+            "outcome": self.outcome, "intervention": dict(self.intervention),
+            "method": self.method, "sample_bs": sample_bs, "seed": seed, "evaluation_mode": "eval",
+        }
 
-        set_seed(self.seed, device=device)
-        value, details = self._evaluate_model(sample_bs, set_nodes)
-        return ScalarResult(value, "mean_potential_outcome", [self.variable]), details
-
-    def _evaluate_continuous(self, sample_bs: int,
-                             set_nodes: DataBatch | None) -> tuple[torch.Tensor, dict]:
+    def _evaluate_continuous(self, sample_bs: int, intervention: DataBatch | None) -> torch.Tensor:
         """Average target-only draws, retaining shared sampler early stopping."""
-        draws, details = self.sampler.evaluate(sample_bs=sample_bs, set_nodes=set_nodes)
-        value = databatch_to_tensor(DataBatch(draws.values, [self.variable])).mean()
-        return value, details
+        draws, _ = self.sampler.evaluate(sample_bs=sample_bs, do_intervention=intervention)
+        return databatch_to_tensor(DataBatch(draws.values, [self.variable])).mean()
 
-    def _evaluate_discrete(self, sample_bs: int,
-                          set_nodes: DataBatch | None) -> tuple[torch.Tensor, dict]:
-        """Integrate named outcome states, then average the exogenous draws."""
-        prediction, details = self.model.sample(batch_size=sample_bs, set_nodes=set_nodes)
+    def _evaluate_discrete(self, sample_bs: int, intervention: DataBatch | None) -> torch.Tensor:
+        """Integrate outcome states, or average draws of an exogenous outcome."""
+        prediction, _ = self.model.sample(batch_size=sample_bs, do_intervention=intervention)
+        if self.outcome not in self.model.state_node_names:
+            draws = DataBatch(self.model.node_dict[self.outcome].get_value(), [self.variable])
+            return databatch_to_tensor(draws).mean()
         prediction = prediction.marginalize([self.outcome])
-        states = DataBatch(prediction.states.values, [self.variable])
-        numeric = databatch_to_tensor(states)[:, 0].to(prediction.probabilities)
-        value = (prediction.probabilities @ numeric).mean()
-        return value, details
+        states = prediction.states.values.to(prediction.probabilities)
+        numeric = databatch_to_tensor(DataBatch(states, [self.variable]))[:, 0]
+        return (prediction.probabilities @ numeric).mean()
 
 
 class ATE(SEM2Operator):
-    """One-versus-zero treatment contrast with explicit graph roles.
-
-    sample_bs overrides cfg.sample_bs; evaluate(sample_bs=...) affects one call.
-    beta is accepted for scalar-objective composition but does not affect this contrast.
+    """Alternative-minus-reference population mean contrast.
 
     Parameters
     ----------
-    cfg : TrainingConfig
-        Default sample count and optional seed. An explicit seed pairs draws
-        across interventions; otherwise each uses the current stream.
     model : SEM2
-        Model supplying intervention distributions, not identification proof.
-    variable : VariableInfo, optional
-        Scalar outcome metadata and optional numerical scoring.
+        Model supplying both intervention laws.
     outcome : str
-        Outcome variable name.
-    treatment : str
-        Scalar treatment variable, assigned 1 and 0 respectively.
-    sample_bs : int, optional
-        Draw count per intervention, overriding the config value.
+        User-declared scalar outcome.
+    alternative, reference : dict[str, float]
+        Complete fixed regimes under the omission rule: missing nodes follow
+        their equations, not the other regime's assignments. Supports joint and
+        nonbinary interventions. An empty dictionary denotes the natural regime.
+    sample_bs : int, default=512
+        Monte Carlo count per regime.
+    seed : int, optional
+        Reseed once before both regimes. Draws consume the stream sequentially;
+        they are not guaranteed paired across regimes.
+    variable : VariableInfo, optional
+        Scalar outcome metadata and explicit categorical scores, as for
+        MeanPotentialOutcome.
+
+    Notes
+    -----
+    This is a population contrast under the supplied model, not ATT or an
+    identification check. Evaluation uses eval mode, restores previous module
+    modes, and retains gradients for composition with a fitting objective.
     """
     input_type = OperatorInput.SELF
     output_type = OperatorOutput.SCALAR
 
-    def __init__(self, cfg: TrainingConfig, model: SEM2, variable: VariableInfo | None = None,
-                 *, outcome: str, treatment: str, sample_bs: int | None = None) -> None:
+    def __init__(self, model: SEM2, *, outcome: str, alternative: dict[str, float],
+                 reference: dict[str, float], sample_bs: int = 512,
+                 seed: int | None = None, variable: VariableInfo | None = None) -> None:
         self.model = model
-        # Fixed 1-versus-0 treatment contrast, not a general multilevel effect.
-        # An explicit seed pairs the exogenous draws; otherwise use the current stream.
-        self.control = MeanPotentialOutcome(model, outcome=outcome, intervention={treatment: 0},
-                                            sample_bs=sample_bs, seed=cfg.rng_seed, variable=variable, cfg=cfg)
-        self.treatment = MeanPotentialOutcome(model, outcome=outcome, intervention={treatment: 1},
-                                              sample_bs=sample_bs, seed=cfg.rng_seed, variable=variable, cfg=cfg)
+        self.seed = seed
+        self.reference = MeanPotentialOutcome(model, outcome=outcome, intervention=reference,
+                                             sample_bs=sample_bs, variable=variable)
+        self.alternative = MeanPotentialOutcome(model, outcome=outcome, intervention=alternative,
+                                               sample_bs=sample_bs, variable=variable)
 
-    def evaluate(self, *, sample_bs: int | None = None,
+    def evaluate(self, *, sample_bs: int | None = None, seed: int | None = None,
                  beta: float | None = None) -> tuple[ScalarResult, dict]:
-        """Return the mean outcome at treatment 1 minus that at 0.
+        """Return the alternative mean minus the reference mean.
 
         Parameters
         ----------
         sample_bs : int, optional
-            Draw count per intervention for this call.
+            Draw count per regime for this call.
+        seed : int, optional
+            One-time seed override; None uses the constructor default.
         beta : float, optional
-            Accepted for composition; unused.
+            Accepted for scalar-objective composition; unused.
 
         Returns
         -------
         result : ScalarResult
             Difference of means, labelled ``ATE``, retaining gradients.
         details : dict
-            ``control`` and ``treatment`` hold the intervention batches.
+            Outcome, both assignments, detached component means, integration
+            methods, sample_bs, seed and evaluation_mode.
         """
-        y0, control = self.control.evaluate(sample_bs=sample_bs)
-        y1, treatment = self.treatment.evaluate(sample_bs=sample_bs)
+        seed = self.seed if seed is None else seed
+        set_seed(seed, device=self.model.device)
+        y0, reference = self.reference.evaluate(sample_bs=sample_bs)
+        y1, alternative = self.alternative.evaluate(sample_bs=sample_bs)
         return ScalarResult(y1.value - y0.value, "ATE", y1.variables), {
-            "control": control["interventions"], "treatment": treatment["interventions"]
+            "outcome": alternative["outcome"],
+            "alternative": alternative["intervention"], "reference": reference["intervention"],
+            "alternative_mean": y1.value.detach(), "reference_mean": y0.value.detach(),
+            "method": alternative["method"], "sample_bs": alternative["sample_bs"],
+            "seed": seed, "evaluation_mode": "eval",
         }
 
     def __repr__(self) -> str:

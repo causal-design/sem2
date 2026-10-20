@@ -95,7 +95,7 @@ class DiscreteIVEnergyLoss(EnergyLoss):
         metrics = {}
         for level, group in zip(self.levels, groups):
             intervention = DataBatch(instrument.values.new_full((sample_bs, 1), level), instrument.variables)
-            prediction, _ = self.model.sample(batch_size=sample_bs, set_nodes=intervention)
+            prediction, _ = self.model.sample(batch_size=sample_bs, do_intervention=intervention)
             result, details = loss.energy_dist(group, prediction, beta=beta)
             weight = len(group) / len(observations)
             total = total + weight * result.value
