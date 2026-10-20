@@ -42,10 +42,12 @@ class EnergyLoss(SEM2Operator):
                  sample_bs: int | None = None, beta: float | None = None,
                  unbiased: bool | None = None) -> None:
         self.model = model
+        self.cfg = cfg
         self.device = cfg.device
         self.sample_bs = cfg.sample_bs if sample_bs is None else sample_bs
         self.beta = cfg.energy_score_beta if beta is None else beta
-        self.discrete_loss = DiscreteEnergyLoss(cfg, unbiased=unbiased)
+        self.unbiased = cfg.energy_score_unbiased if unbiased is None else unbiased
+        self.discrete_loss: DiscreteEnergyLoss | None = None
         self._evaluate_model = (self._evaluate_continuous if SEMType.is_continuous(model.sem_type)
                                 else self._evaluate_discrete)
 
@@ -95,8 +97,18 @@ class EnergyLoss(SEM2Operator):
         names = [name for name in observations.names if name in self.model.state_node_names
                  and not self.model.node_specs[name].is_helper]
         outcomes = observations.subset(names)
+        loss = self._prepare_discrete_loss(outcomes)
         prediction, _ = self.model.sample(batch_size=sample_bs)
-        return self.discrete_loss.energy_dist(outcomes, prediction, beta=beta)
+        return loss.energy_dist(outcomes, prediction, beta=beta)
+
+    def _prepare_discrete_loss(self, observations: DataBatch) -> DiscreteEnergyLoss:
+        """Construct once when observed names and scoring are known; reuse thereafter."""
+        if self.discrete_loss is None or self.discrete_loss.states.variables != observations.variables:
+            states = DataBatch(self.model.all_states, self.model.state_node_names).select(observations.names)
+            self.discrete_loss = DiscreteEnergyLoss(
+                self.cfg, DataBatch(states, observations.variables), beta=self.beta, unbiased=self.unbiased,
+            )
+        return self.discrete_loss
 
     def _energy_score(self, observations: DataBatch, prediction: DataBatch,
                       *, beta: float) -> tuple[ScalarResult, dict]:
@@ -104,14 +116,14 @@ class EnergyLoss(SEM2Operator):
         targets = _energy_values(observations)
         draws = _energy_values(DataBatch(prediction.select(observations.names), observations.variables)).to(targets)
         n = draws.shape[0]
-        if not len(observations) or n < 1 or (self.discrete_loss.unbiased and n < 2):
+        if not len(observations) or n < 1 or (self.unbiased and n < 2):
             raise ValueError("Energy score requires observations and enough model draws for the pair estimator.")
         # Cross term: average every observation/model pair, even when N != M.
         cross = _energy_distance(targets, draws, beta).mean()
         distances = _energy_distance(draws, draws, beta)
         # Model pair term: omit self-pairs for the unbiased finite-sample estimate.
         pair = ((distances.sum() - distances.diagonal().sum()) / (n * (n - 1))
-                if self.discrete_loss.unbiased else distances.mean())
+                if self.unbiased else distances.mean())
         value = cross - pair / 2
         return ScalarResult(value, "energy_score", observations.variables), {
             "energy_score": value, "estimated-true distance": cross, "estimated-estimated distance": pair
