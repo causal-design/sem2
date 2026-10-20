@@ -28,6 +28,12 @@ identification.
    training
 
 .. toctree::
+   :maxdepth: 1
+   :caption: Examples
+
+   political-democracy
+
+.. toctree::
    :maxdepth: 2
    :caption: Operators
 
