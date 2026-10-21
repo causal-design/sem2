@@ -29,4 +29,4 @@ From the repository root:
    python -m sphinx -M html docs/source docs/_build -W --keep-going
 
 Open ``docs/_build/html/index.html``. Documentation builds import the real
-package; its runtime dependencies must be installed.
+package, hence its runtime dependencies must be installed.

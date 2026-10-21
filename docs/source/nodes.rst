@@ -35,3 +35,5 @@ Discrete mechanisms
 .. autoclass:: sem2.model.components.nodes.DiscreteModes
    :members:
    :undoc-members:
+
+   .. :undoc-members: renders in an ugly way, modify/delete?

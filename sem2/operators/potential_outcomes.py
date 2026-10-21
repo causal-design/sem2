@@ -14,6 +14,8 @@ if TYPE_CHECKING:
 
 
 class PotentialOutcomeSample(SEM2Operator):
+    # Perhaps clarify we are sampling from the distribution from some potential outcomes of a continuous model?
+    # What does 'target computed' mean?
     """Sample a continuous model, stopping as soon as the target is computed.
 
     Parameters
@@ -158,6 +160,7 @@ class MeanPotentialOutcome(SEM2Operator):
 
 
 class ATE(SEM2Operator):
+    # What does 'explicit graph role' mean?
     """One-versus-zero treatment contrast with explicit graph roles.
 
     sample_bs overrides cfg.sample_bs; evaluate(sample_bs=...) affects one call.

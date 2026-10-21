@@ -90,7 +90,7 @@ def _check_observation_shape(observations: torch.Tensor, n_vars: int, operator_n
 
 
 class LogLikelihood(SEM2LinearModelOperator):
-    """Evaluate mean Gaussian log-likelihood using a linear model's moments.
+    """Evaluate mean Gaussian (pseudo-)log-likelihood over the observations using a linear model's first and second moments.
 
     Parameters
     ----------
@@ -225,6 +225,7 @@ class LogLikelihood(SEM2LinearModelOperator):
 
 
 class PathAnalysis(SEM2LinearModelOperator):
+    # leave as-is for first release? or should leave out this class
     """Reserve the interface for path analysis; not implemented.
 
     Parameters

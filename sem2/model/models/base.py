@@ -18,6 +18,11 @@ from ...default_configs import LinearNodeConfig, MLPConfig
 # SEM2 - DAG + nn.Module
 # ════════════════════════════════════════════════════════════════════════════════════
 
+
+# Docs here should correspond better to docs for the linear/discrete model? 
+# Wording is currently quite different
+# E.g. here: continuous SEM. Associatied with a DAG whose nodes are PyTorch modules.
+# (see linear and discrete model definitions for the other comments)
 class SEM2(_DAG, nn.Module):
     """Structural Equation Model: a DAG whose nodes are PyTorch modules.
 

@@ -18,6 +18,7 @@ from ...default_configs import LinearNodeConfig, MLPConfig
 
 @dataclass
 class RandomVariableSupport:
+    # what does 'not necessarily every attainable value' mean?
     """Declared domain, not necessarily every attainable value.
 
     constraint is a PyTorch membership constraint, or None if unknown.
@@ -76,7 +77,7 @@ class SEM2Node(RandomVariable, ABC, nn.Module):
     """Base class for all SEM nodes.
     Conceptually every node is a random variable:
 
-    Each node is fully initialised in __init__ ===> predecessor nodes must be passed in at construction time 
+    Each node is fully initialised in __init__, so predecessor nodes must be passed in at construction time 
     so input dimensions can be computed immediately.
 
     Parameters
@@ -333,7 +334,7 @@ class NodeNonlinear(NodeEndogenous, ABC):
 # ── NodeMLP ───────────────────────────────────────────────────────────────────
 
 class NodeMLP(NodeNonlinear):
-    """Default nonlinear node — MLP as the linking function.
+    """Default nonlinear node with MLP as the linking function.
     Predecessors are parsed upstream in DAG (rhs is flat n(a,b,...) post-expansion).
 
     Parameters
@@ -392,6 +393,7 @@ class DiscreteModes(StrEnum):
 
 
 class NodeMLPDiscrete(SEM2Node):
+    # description could be more concrete?
     """Neural categorical mechanism with scalar state IDs.
 
     Parameters
