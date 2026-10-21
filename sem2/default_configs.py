@@ -11,10 +11,11 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 @dataclass
 class LinearNodeConfig:
+    # format variables/params with `` (not just here but elsewhere in docstrings too)
     """Public configuration for linear SEM nodes.
 
-    input_dim is not exposed as it is inferred from the graph structure.
-    init_weight_val and init_bias_val are not exposed since fixed coefficients
+    `input_dim` is not exposed as it is inferred from the graph structure.
+    `init_weight_val` and `init_bias_val` are not exposed since fixed coefficients
     are specified inline in the formula syntax (e.g. '1*x', '-0.5*x'),
     keeping the model formula self-contained and readable.
 
@@ -38,7 +39,7 @@ class LinearNodeConfig:
 
 @dataclass
 class MLPConfig:
-    """Network architecture; discrete output_dim is set by the formula's levels.
+    """Configuration for network architecture; discrete output_dim is set by the formula's levels.
 
     Parameters
     ----------

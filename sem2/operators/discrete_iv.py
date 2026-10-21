@@ -9,6 +9,7 @@ from ..model.models.discrete import SEM2Discrete
 
 
 class DiscreteIVEnergyLoss(EnergyLoss):
+    # provisional placeholder? not yet updated for release?
     """Provisional placeholder for the deferred, reviewed IV fitting interface.
 
     The existing executable calculation is retained for compatibility, not as

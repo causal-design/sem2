@@ -8,6 +8,8 @@ from ..data.records import DataBatch
 
 @dataclass
 class DiscreteJointDistribution:
+    # what does 'not realized observations' really mean?
+    # also notes seem a little technical and ambiguous, is this the intention?
     """Finite named states and probabilities, not realized observations.
 
     Parameters
@@ -50,6 +52,7 @@ class DiscreteJointDistribution:
         return DiscreteJointDistribution(self.states.to(device=probabilities.device), probabilities)
 
     def marginalize(self, names: str | Iterable[str]) -> DiscreteJointDistribution:
+        # should mean: marginalise to a subset of endogeneous variables? 
         """Combine equal projected states; retain the exogenous-draw axis.
 
         Parameters

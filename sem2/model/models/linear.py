@@ -15,8 +15,10 @@ from ...default_configs import LinearNodeConfig, MLPConfig
 # SEM2Linear
 # ══════════════════════════════════════════════════════════════════════════════
 
+# perhaps render Greek letters instead of writing 'Sigma' or 'Omega'?
+# also render every mathematical formula correctly (e.g. in docstring of )
 class SEM2Linear(SEM2):
-    """Linear SEM2: every endogenous node is a linear function of its parents.
+    """Linear subclass of SEM2: every endogenous node is a linear function of its parents.
 
     For a linear SEM the whole model is summarised by two matrices over the node
     set (ordered by `node_order`, the topological order):
@@ -26,9 +28,9 @@ class SEM2Linear(SEM2):
         - the model-implied covariance Sigma, with diagonal exogenous covariance
           Omega and structural propagation given by
 
-    .. math::
+        .. math::
 
-        \\Sigma = (I-B)^{-1}\\Omega(I-B)^{-\\mathsf{T}}.
+            \\Sigma = (I-B)^{-1}\\Omega(I-B)^{-\\mathsf{T}}.
 
     Linear SEMs are assumed to have scalar nodes (out_dim == 1) and scalar
     exogenous distributions; anything else raises a clear error.
@@ -92,6 +94,7 @@ class SEM2Linear(SEM2):
     # ── path coefficients ─────────────────────────────────────────────────────
 
     def coef_matrix(self) -> Tensor:
+        # don't understand what '(effective, i.e. fixed-or-learned)' means?
         """Path-coefficient matrix B over all nodes in `node_order`.
 
         B[i, j] is the (effective, i.e. fixed-or-learned) coefficient of node j
@@ -150,7 +153,7 @@ class SEM2Linear(SEM2):
         return torch.linalg.solve(eye - B, c)
 
     def cov_matrix(self, nodes: list[str] | None = None) -> Tensor:
-        """Model-implied covariance Sigma = (I - B)^-1 Omega (I - B)^-T.
+        r"""Model-implied covariance :math:`\Sigma = (I-B)^{-1}\Omega(I-B)^{-\mathsf{T}}`
 
         Omega is the diagonal covariance of the exogenous inputs (the variance of
         each exogenous node's distribution; 0 for endogenous nodes). If `nodes`

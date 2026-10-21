@@ -16,7 +16,8 @@ from ...default_configs import LinearNodeConfig, MLPConfig
 
 
 class SEM2Discrete(SEM2):
-    """Discrete SEM2 with enumeration of endogenous joint states.
+    # notes ambiguous? get the rough idea of approximation, but not clear what exactly we are approximating
+    """Discrete subclass of SEM2 with enumeration of endogenous joint states.
 
     Parameters
     ----------
@@ -101,6 +102,7 @@ class SEM2Discrete(SEM2):
                         self.cont_parents[node_name].append(pn)
 
     def sample(self, batch_size: int = 1, set_nodes: DataBatch | None = None) -> tuple[DiscreteJointDistribution, dict]:
+        # notes very ambiguous writing
         """Enumerate discrete states and compute their conditional probabilities.
 
         Exogenous inputs are sampled; the returned DiscreteJointDistribution
