@@ -17,6 +17,14 @@ class LinearNodeConfig:
     init_weight_val and init_bias_val are not exposed since fixed coefficients
     are specified inline in the formula syntax (e.g. '1*x', '-0.5*x'),
     keeping the model formula self-contained and readable.
+
+    Parameters
+    ----------
+    output_dim : int, default=1
+        Number of real-valued output coordinates, not category levels.
+    use_intercept : bool, default=True
+        Estimate an intercept when the formula omits a constant. An explicit
+        formula constant, including zero, takes precedence.
     """
 
     # Number of real-valued output coordinates. Discrete category counts belong
@@ -30,7 +38,22 @@ class LinearNodeConfig:
 
 @dataclass
 class MLPConfig:
-    """Network architecture; discrete output_dim is set by the formula's levels."""
+    """Network architecture; discrete output_dim is set by the formula's levels.
+
+    Parameters
+    ----------
+    input_dim : int, optional
+        Inferred from predecessor widths during node construction.
+    hidden_dims : list[int], optional
+        Hidden-layer widths; defaults to [512, 512, 512]. Copied at construction.
+    output_dim : int, default=1
+        Continuous output width; discrete nodes use the formula's level count.
+    dropout : float, default=0.0
+        Dropout probability after each hidden activation.
+    activation : str, default="relu"
+        Hidden activation: linear, relu, tanh, sigmoid, leaky_relu, elu, gelu or
+        selu. The output layer is linear.
+    """
 
     input_dim: int = None                                                   # Inferred from graph
     hidden_dims: list = field(default_factory=lambda: [512, 512, 512])      # Hidden layer widths
@@ -57,7 +80,36 @@ class TrainingConfig(BaseModel):
     Objectives are supplied separately; node architecture is configured via
     LinearNodeConfig and MLPConfig.
 
-    Usage:
+    Parameters
+    ----------
+    device : str or torch.device, optional
+        Defaults to CUDA, then MPS, then CPU according to availability.
+        Construct the model on the same device before fitting.
+    optim : {"AdamW", "Adam", "SGD"}, default="AdamW"
+        Optimizer family.
+    lr : float, default=0.0005
+        Positive learning rate.
+    weight_decay : float, default=0.0
+        Nonnegative optimizer weight decay.
+    momentum : float, default=0.9
+        Nonnegative SGD momentum; unused by Adam and AdamW.
+    batch_size : int, default=1024
+        Positive number of observations per training minibatch.
+    epochs : int, default=12
+        Positive number of passes through the data.
+    rng_seed : int, optional
+        Explicit training seed; None does not reseed. Queries have independent seeds.
+    sample_bs : int, default=512
+        Default operator Monte Carlo count, separate from data batch size.
+    energy_score_beta : float, default=1.0
+        Distance exponent, strictly between zero and two.
+    energy_score_unbiased : bool, default=True
+        Exclude same-draw pairs in energy losses. False uses all pairs.
+
+    Examples
+    --------
+    Configuration with automatic device selection or an explicit override::
+
         cfg = TrainingConfig()                        # auto-selects best device
         cfg = TrainingConfig(device="cpu", epochs=50) # explicit override
     """
@@ -80,7 +132,8 @@ class TrainingConfig(BaseModel):
     sample_bs: int = 512                           # Sample batch size for distribution sampling
 
     # Energy score
-    energy_score_beta: float = 1.
+    energy_score_beta: float = Field(default=1., gt=0, lt=2)
+    energy_score_unbiased: bool = True
 
     @model_validator(mode="after")
     def _resolve_device(self) -> "TrainingConfig":

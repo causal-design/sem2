@@ -16,7 +16,23 @@ from ...default_configs import LinearNodeConfig, MLPConfig
 
 
 class SEM2Discrete(SEM2):
-    """Discrete SEM2."""
+    """Discrete SEM2 with enumeration of endogenous joint states.
+
+    Parameters
+    ----------
+    model_formula : str
+        Exogenous laws and discrete equations using ``d(parents; levels=N)``.
+    node_cfgs : dict, optional
+        Per-node configurations, consumed during construction. Discrete nodes
+        use ``MLPConfig``; category counts come from the formula.
+    device : str or torch.device, default="cpu"
+        Device for model parameters, states and probabilities.
+
+    Notes
+    -----
+    Enumeration grows as the product of endogenous category counts. Sampling
+    integrates these states rather than drawing realized categorical outcomes.
+    """
     node_dict: nn.ModuleDict[str, SEM2Node]  # Maps node name to its SEM2Node object, registered as submodule for PyTorch tracking
     sem_type = SEMType.DISCRETE
 
@@ -84,19 +100,36 @@ class SEM2Discrete(SEM2):
                     else:
                         self.cont_parents[node_name].append(pn)
 
-    def sample(self, batch_size: int = 1, set_nodes: DataBatch | None = None) -> tuple[DiscreteJointDistribution, dict]:
+    def sample(self, batch_size: int = 1, do_intervention: DataBatch | None = None) -> tuple[DiscreteJointDistribution, dict]:
         """Enumerate discrete states and compute their conditional probabilities.
 
-            Exogenous inputs are sampled; the returned DiscreteJointDistribution
-            integrates discrete outcomes rather than drawing categorical observations.
+        Exogenous inputs are sampled; the returned DiscreteJointDistribution
+        integrates discrete outcomes rather than drawing categorical observations.
 
-            Args:
-                batch_size: Number of exogenous Monte Carlo samples.
-                set_nodes: Optional DataBatch of named intervention values.
+        Parameters
+        ----------
+        batch_size : int, default=1
+            Positive number of exogenous Monte Carlo draws.
+        do_intervention : DataBatch, optional
+            Named intervention values with one row per draw. Supply valid state
+            IDs or exogenous values on the model device, with matching widths.
+
+        Returns
+        -------
+        distribution : DiscreteJointDistribution
+            Named endogenous states and probabilities of shape
+            (batch_size, n_states). Internal helper states are marginalized out.
+        details : dict
+            ``interventions`` contains the supplied ``do_intervention`` object.
+
+        Notes
+        -----
+        Consumes randomness and updates cached node values. Average probability
+        rows to estimate the marginal law over exogenous inputs.
         """
 
         # Unwrap valid interventions before enumerating conditional probabilities.
-        interventions = self._unpack_interventions(set_nodes, batch_size)
+        interventions = self._unpack_interventions(do_intervention, batch_size)
 
         device = self.device
         all_states = self.all_states  # [N_conf, N_discrete_nodes]
@@ -184,7 +217,7 @@ class SEM2Discrete(SEM2):
         probs = torch.exp(log_probs)
 
         # Pair probability columns with their named states and preserve supplied metadata.
-        supplied = {} if set_nodes is None else dict(zip(set_nodes.names, set_nodes.variables))
+        supplied = {} if do_intervention is None else dict(zip(do_intervention.names, do_intervention.variables))
         variables = [supplied[name] if name in supplied else self._variable_info(name)
                      for name in self.state_node_names]
         result = DiscreteJointDistribution(DataBatch(all_states, variables), probs)
@@ -192,4 +225,4 @@ class SEM2Discrete(SEM2):
         if len(names) != len(self.state_node_names):
             # Sum over internal helpers rather than exposing their state coordinates.
             result = result.marginalize(names)
-        return result, {"interventions": set_nodes}
+        return result, {"interventions": do_intervention}

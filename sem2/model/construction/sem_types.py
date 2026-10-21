@@ -15,14 +15,16 @@ class SEMType(Enum):
     Types:
         - LINEAR_GAUSSIAN: all linear endogenous nodes, all exogenous nodes are Normal
         - LINEAR: all linear endogenous nodes, with non-Gaussian exogenous nodes.
-        - NONLINEAR: all endogenous nodes are MLPs.
+        - NONLINEAR: continuous endogenous mechanisms include at least one MLP.
         - DISCRETE: all endogenous nodes are discrete.
         - MIXED: some endogenous nodes are continuous, some are discrete.
 
-    Note: sem_type is descriptive metadata. It does not change core SEM
-    behaviour. Its intended future use is to gate type-specific functionals
-    (e.g. closed-form log-likelihood for LINEAR_GAUSSIAN) and guide the user
-    toward a specialised implementation when one exists.
+    Notes
+    -----
+    The label describes formula structure, not observation status or fitted
+    parameters. Model subclasses use it to reject incompatible mechanisms or
+    suggest a specialization. Gaussian likelihood also checks scalar Normal
+    exogenous distributions; the label alone is not sufficient.
     """
     LINEAR_GAUSSIAN     = "linear_gaussian"
     LINEAR              = "linear"
@@ -32,7 +34,7 @@ class SEMType(Enum):
 
     @staticmethod
     def is_continuous(sem_type: SEMType) -> bool:
-        """ If SEM is purely continuous"""
+        """Return whether sem_type is LINEAR_GAUSSIAN, LINEAR or NONLINEAR."""
         return sem_type in {
             SEMType.LINEAR_GAUSSIAN,
             SEMType.LINEAR,
@@ -41,7 +43,7 @@ class SEMType(Enum):
 
     @staticmethod
     def is_discrete(sem_type: SEMType) -> bool:
-        """ If SEM is purely discrete"""
+        """Return whether sem_type is DISCRETE, excluding MIXED models."""
         return sem_type in {
             SEMType.DISCRETE
         }

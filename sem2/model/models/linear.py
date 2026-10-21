@@ -23,11 +23,25 @@ class SEM2Linear(SEM2):
 
         - the path-coefficient matrix B, where B[i, j] is the coefficient of
           node j in node i's structural equation (0 if j is not a parent of i),
-        - the model-implied covariance Sigma = (I - B)^-1 Omega (I - B)^-T,
-          where Omega is the diagonal covariance of the exogenous inputs.
+        - the model-implied covariance Sigma, with diagonal exogenous covariance
+          Omega and structural propagation given by
+
+    .. math::
+
+        \\Sigma = (I-B)^{-1}\\Omega(I-B)^{-\\mathsf{T}}.
 
     Linear SEMs are assumed to have scalar nodes (out_dim == 1) and scalar
     exogenous distributions; anything else raises a clear error.
+
+    Parameters
+    ----------
+    model_formula : str
+        Semicolon-separated linear equations and independent exogenous laws.
+    node_cfgs : dict, optional
+        Per-node configurations, consumed during construction. Linear nodes use
+        ``LinearNodeConfig``; exogenous output dimensions must remain scalar.
+    device : str or torch.device, default="cpu"
+        Device for parameters, distribution tensors and moment calculations.
     """
     sem_type = SEMType.LINEAR
 
@@ -83,6 +97,11 @@ class SEM2Linear(SEM2):
         B[i, j] is the (effective, i.e. fixed-or-learned) coefficient of node j
         in node i's linear equation, and 0 if j is not a parent of i. Exogenous
         nodes have an all-zero row. Recomputed from current weights on each call.
+
+        Returns
+        -------
+        torch.Tensor
+            Shape (n_nodes, n_nodes), retaining gradients of learned coefficients.
         """
         N = len(self.node_order)
         B = torch.zeros(N, N, device=self.device)
@@ -98,9 +117,18 @@ class SEM2Linear(SEM2):
     # ── model-implied mean and covariance ─────────────────────────────────────
 
     def mean_vector(self) -> Tensor:
-        """Model-implied mean over all nodes: mu = (I - B)^-1 c, where c[i] is the
+        """Model-implied mean over all nodes, where c[i] is the
         exogenous distribution mean for exogenous nodes and the intercept for
         linear nodes (0 if the node has no intercept).
+
+        .. math::
+
+            \\mu = (I-B)^{-1}c.
+
+        Returns
+        -------
+        torch.Tensor
+            Shape (n_nodes,), in ``node_order``. Requires finite exogenous means.
         """
         N = len(self.node_order)
         B = self.coef_matrix()
@@ -110,16 +138,12 @@ class SEM2Linear(SEM2):
             i = self._node_index[name]
             if isinstance(node, NodeExogenous):
                 mean = torch.as_tensor(node.dist.mean, device=self.device).reshape(-1)[0]
-                if not torch.isfinite(mean):
-                    raise ValueError(
-                        f"SEM2Linear mean_vector requires finite exogenous means. "
-                        f"Node '{name}' has mean {mean}."
-                    )
                 c[i] = mean
             elif isinstance(node, NodeLinear) and node.intercept() is not None:
                 c[i] = node.intercept().reshape(-1)[0]
         eye = torch.eye(N, device=self.device)
-        return torch.linalg.solve(eye - B, c)
+        # Topological order makes I-B unit lower triangular; no solver checks needed.
+        return torch.linalg.solve_triangular(eye - B, c[:, None], upper=False, unitriangular=True)[:, 0]
 
     def cov_matrix(self, nodes: list[str] | None = None) -> Tensor:
         """Model-implied covariance Sigma = (I - B)^-1 Omega (I - B)^-T.
@@ -128,6 +152,17 @@ class SEM2Linear(SEM2):
         each exogenous node's distribution; 0 for endogenous nodes). If `nodes`
         is given, the covariance is restricted to those nodes (e.g. the observed
         variables), in the given order.
+
+        Parameters
+        ----------
+        nodes : list[str], optional
+            Selected node names. Defaults to all nodes in ``node_order``.
+
+        Returns
+        -------
+        torch.Tensor
+            Shape (n_selected, n_selected), retaining parameter gradients.
+            Requires finite variances and independent scalar exogenous inputs.
         """
         N = len(self.node_order)
         B = self.coef_matrix()
@@ -139,15 +174,10 @@ class SEM2Linear(SEM2):
                 variance = torch.as_tensor(
                     node.dist.variance, device=self.device
                 ).reshape(-1)[0]
-                if not torch.isfinite(variance):
-                    raise ValueError(
-                        f"SEM2Linear covariance requires finite second moments. "
-                        f"Node '{name}' has variance {variance}."
-                    )
                 omega[self._node_index[name]] = variance
 
         eye = torch.eye(N, device=self.device)
-        a_inv = torch.linalg.inv(eye - B)
+        a_inv = torch.linalg.solve_triangular(eye - B, eye, upper=False, unitriangular=True)
         sigma = a_inv @ torch.diag(omega) @ a_inv.T
 
         if nodes is not None:

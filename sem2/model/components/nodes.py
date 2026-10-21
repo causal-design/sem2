@@ -9,7 +9,7 @@ import torch
 import torch.nn.functional as F
 import warnings
 from torch import nn
-from torch.distributions import Distribution, constraints
+from torch.distributions import Distribution, Normal, constraints
 
 from .nn_models import _LinearConfig, _LinearModel, _MLP
 from ...default_configs import LinearNodeConfig, MLPConfig
@@ -26,6 +26,13 @@ class RandomVariableSupport:
     or numeric mappings assigned to categories.
     For example, Bernoulli enumerates 0 and 1. Normal and Poisson have no
     enumeration here; values=None alone does not distinguish continuous from discrete.
+
+    Parameters
+    ----------
+    constraint : torch.distributions.constraints.Constraint, optional
+        Membership constraint, or None when unknown.
+    values : torch.Tensor, optional
+        Enumerated values with native distribution batch/event dimensions.
     """
     constraint: constraints.Constraint | None = None
     values: torch.Tensor | None = None
@@ -71,6 +78,17 @@ class SEM2Node(RandomVariable, ABC, nn.Module):
 
     Each node is fully initialised in __init__ ===> predecessor nodes must be passed in at construction time 
     so input dimensions can be computed immediately.
+
+    Parameters
+    ----------
+    name : str
+        Node identifier.
+    rhs : str
+        Formula right-hand side retained for display.
+    predecessor_nodes : list[SEM2Node]
+        Constructed parents in formula order; their widths determine input_dim.
+    device : str or torch.device, default="cpu"
+        Device for the concrete node's tensors.
     """
 
     name: str
@@ -96,12 +114,15 @@ class SEM2Node(RandomVariable, ABC, nn.Module):
         return f'SEM2Node: {self.formula}'
 
     def set_value(self, value: torch.Tensor) -> None:
+        """Replace the cached tensor by reference, without validating its shape."""
         self.value = value
 
     def get_value(self) -> torch.Tensor:
+        """Return the cached tensor, or None before evaluation or after reset."""
         return self.value
 
     def reset_value(self) -> None:
+        """Clear the cached value without changing parameters or RNG state."""
         self.value = None
 
     def _collate_fn(self, x: list[torch.Tensor]) -> torch.Tensor:
@@ -109,6 +130,24 @@ class SEM2Node(RandomVariable, ABC, nn.Module):
         return torch.cat(x, dim=-1)
 
     def forward(self, x: list[torch.Tensor], batch_size: int = 1, **kwargs) -> torch.Tensor:
+        """Evaluate the mechanism and cache its result.
+
+        Parameters
+        ----------
+        x : list[torch.Tensor]
+            Parent tensors in predecessor order, each with the same leading
+            batch dimensions and its parent's width on the last axis.
+        batch_size : int, default=1
+            Number of draws for exogenous nodes or rows for parentless nodes.
+        **kwargs
+            Mechanism-specific arguments, such as a discrete representation mode.
+
+        Returns
+        -------
+        torch.Tensor
+            Mechanism output, also stored as ``value``. Discrete output shape
+            depends on mode; ordinary scalar sampling returns (batch_size, 1).
+        """
         self.value = self._forward_inner(x, batch_size=batch_size, **kwargs)
         return self.value
 
@@ -124,8 +163,25 @@ class NodeExogenous(SEM2Node):
     An exogenous node has no parents. The distribution is instantiated upstream
     in SEM2._build_and_initialize_nodes and passed in here directly.
 
-    Attributes:
-        dist: the instantiated torch Distribution object.
+    Parameters
+    ----------
+    name : str
+        Node identifier.
+    rhs : str
+        Distribution expression retained for display.
+    dist : torch.distributions.Distribution
+        Instantiated law, already on the intended device. Draws have no gradient
+        through distribution parameters. Normal draws use ``rsample`` under
+        ``no_grad`` to avoid repeating ``torch.normal``'s scale checks.
+    out_dim : int, default=1
+        Draw width prepended to the distribution's batch/event dimensions.
+    device : str or torch.device, default="cpu"
+        Node device metadata; does not move a supplied distribution.
+
+    Attributes
+    ----------
+    dist : torch.distributions.Distribution
+        The supplied distribution object.
     """
 
     def __init__(
@@ -141,6 +197,10 @@ class NodeExogenous(SEM2Node):
         self.dist = dist
 
     def _forward_inner(self, x: list[torch.Tensor], batch_size: int = 1) -> torch.Tensor:
+        if isinstance(self.dist, Normal):
+            # Parameters were validated at construction; keep draws nondifferentiable.
+            with torch.no_grad():
+                return self.dist.rsample([batch_size, self.out_dim])
         return self.dist.sample([batch_size, self.out_dim])
 
 
@@ -172,6 +232,23 @@ class NodeLinear(NodeEndogenous):
     An explicit formula constant is a fixed intercept, including zero. Without
     one, use_intercept selects a learned intercept or no intercept. Formula
     constants take precedence over that flag; neural offsets are separate.
+
+    Parameters
+    ----------
+    name : str
+        Node identifier.
+    rhs : str
+        Linear expression retained for display.
+    coefficients : list[float or None]
+        Fixed coefficient or learned-weight marker for each parent.
+    cfg : LinearNodeConfig or None
+        Output width and intercept policy; None uses defaults.
+    predecessor_nodes : list[SEM2Node]
+        Constructed parents in coefficient order.
+    device : str or torch.device, default="cpu"
+        Device for parameters and fixed-value buffers.
+    intercept : float, optional
+        Formula-specified fixed offset; None follows the config's intercept policy.
     """
     _support_constraint = constraints.real  # Domain bound, not propagated parent support.
 
@@ -263,6 +340,20 @@ class NodeNonlinear(NodeEndogenous, ABC):
 class NodeMLP(NodeNonlinear):
     """Default nonlinear node — MLP as the linking function.
     Predecessors are parsed upstream in DAG (rhs is flat n(a,b,...) post-expansion).
+
+    Parameters
+    ----------
+    name : str
+        Node identifier.
+    rhs : str
+        Flat nonlinear expression retained for display.
+    cfg : MLPConfig or None
+        Network architecture; None uses defaults. Its input_dim is updated from
+        the parents, and output_dim determines this node's width.
+    predecessor_nodes : list[SEM2Node]
+        Parents in concatenation order.
+    device : str or torch.device, default="cpu"
+        Device for network parameters.
     """
     _support_constraint = constraints.real  # The final network layer is unrestricted.
 
@@ -293,6 +384,12 @@ class NodeMLP(NodeNonlinear):
 # ── Discrete Node ───────────────────────────────────────────────────────────────────
 
 class DiscreteModes(StrEnum):
+    """Discrete output representations.
+
+    SOFTMAX returns probabilities; SAMPLE draws integer state IDs without
+    backpropagation. GUMBEL and SAMPLE_ONEHOT name unimplemented modes and raise
+    ``NotImplementedError`` when evaluated.
+    """
     GUMBEL = "gumbel"                   # Gumbel-Softmax, a soft approximation of a categorical distribution
     SOFTMAX = "softmax"                 # Return probabilities for each outcome
     SAMPLE_ONEHOT = "onehot"            # Return one-hot vectors sampled from the distribution
@@ -300,7 +397,32 @@ class DiscreteModes(StrEnum):
 
 
 class NodeMLPDiscrete(SEM2Node):
-    """ Discrete NN node. """
+    """Neural categorical mechanism with scalar state IDs.
+
+    Parameters
+    ----------
+    name : str
+        Node identifier.
+    rhs : str
+        Discrete expression retained for display.
+    cfg : MLPConfig or None
+        Network architecture; output_dim is the category count. Construction
+        updates input_dim from the parents. None uses the default MLPConfig.
+    predecessor_nodes : list[SEM2Node]
+        Parents in concatenation order.
+    mode : optional
+        Accepted by the constructor but not stored. Pass mode when calling the
+        node to select a representation.
+    device : str or torch.device, default="cpu"
+        Device for parameters and support enumeration.
+
+    Notes
+    -----
+    Calling with SOFTMAX returns (..., n_classes) probabilities with gradients.
+    SAMPLE returns (..., 1) integer state IDs and cannot backpropagate through
+    sampling. Other declared modes are not implemented. The model-level
+    ``SEM2Discrete.sample`` instead enumerates states and their probabilities.
+    """
     id: int = 0
     out_dim = 1         # The discrete node outputs 1 value, with n_classes categories.
 

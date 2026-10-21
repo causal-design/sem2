@@ -20,9 +20,9 @@ print("===== Test SEM2 Continuous =====")
 model = SEM2(formula1 + formula2, node_cfgs=node_cfgs, device="cpu")
 model.eval()
 
-set_nodes = DataBatch(torch.tensor([[1., 1.], [0., 0.], [2., 0.]]),
+do_intervention = DataBatch(torch.tensor([[1., 1.], [0., 0.], [2., 0.]]),
                       ["Z", "D"])
-all_states, _ = model.sample(3, set_nodes=set_nodes)
+all_states, _ = model.sample(3, do_intervention=do_intervention)
 print(f'{all_states = }')
 
 # Discrete SEM
@@ -37,8 +37,8 @@ print(node_cfgs)
 model = SEM2Discrete(formula1 + formula2, node_cfgs=node_cfgs, device="cpu")
 model.eval()
 
-set_nodes = DataBatch(torch.tensor([[1., 1.], [0., 0.], [2., 0.]]),
+do_intervention = DataBatch(torch.tensor([[1., 1.], [0., 0.], [2., 0.]]),
                       ["Z", "D"])
-all_states, _ = model.sample(3, set_nodes=set_nodes)
+all_states, _ = model.sample(3, do_intervention=do_intervention)
 print("===== Test SEM2 =====")
 print(f'{all_states = }')
