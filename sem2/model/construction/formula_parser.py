@@ -23,16 +23,18 @@ from .sem_ast import (
 
 
 def is_list_or_float_like(value):
-    """
-    Allows:
-      - float or int values
-      - lists/tuples containing only allowed values
+    """Test whether a distribution argument is a numeric literal or nested sequence.
 
-    Rejects:
-      - strings
-      - dicts
-      - booleans
-      - None
+    Parameters
+    ----------
+    value : object
+        Candidate argument. Lists and tuples are checked recursively.
+
+    Returns
+    -------
+    bool
+        True for Python int/float values and lists/tuples of accepted values.
+        Strings, dictionaries, booleans and None are rejected.
     """
     if isinstance(value, bool):
         return False
@@ -74,7 +76,19 @@ class DistributionRegistry:
         return name in self._names
 
     def validate(self, name: str) -> None:
-        """Raise ValueError (with a typo suggestion if possible) for an unknown name."""
+        """Validate a distribution name, suggesting a close match when possible.
+
+        Parameters
+        ----------
+        name : str
+            Exact torch.distributions class name; matching is case-sensitive.
+
+        Raises
+        ------
+        ValueError
+            If the name is not in the registry. Valid names return None;
+            constructor arguments and model compatibility are not checked here.
+        """
         if name not in self._names:
             suggestion = difflib.get_close_matches(name, self._names, n=1)
             hint = f" Did you mean '{suggestion[0]}'?" if suggestion else ""
@@ -93,11 +107,23 @@ _NUMBER = r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?"
 class FormulaParser:
     """Parse a SEM2 model formula into an AST and lower it to NodeSpec objects.
 
-    Usage:
-        node_specs, input_node = FormulaParser(formula).parse()
-
     After parse(), ``self.statements`` holds the AST (the typed parse of the
     formula), which downstream tooling (interventions, queries) can build on.
+
+    Parameters
+    ----------
+    model_formula : str
+        Semicolon-separated equations. Use ``~`` for exogenous distributions,
+        ``<-`` for mechanisms, ``n(parents)`` for neural nodes and
+        ``d(parents; levels=N)`` for discrete nodes. In linear equations, a
+        numeric coefficient is fixed and an unprefixed parent has a learned
+        coefficient. Colons are reserved for internal helper names.
+
+    Examples
+    --------
+    Parse a scalar linear model::
+
+        node_specs, input_node = FormulaParser("u ~ Normal(0,1); y <- 2*u").parse()
     """
 
     def __init__(self, model_formula: str) -> None:
@@ -109,6 +135,18 @@ class FormulaParser:
 
         node_specs maps node name -> lowered NodeSpec. input_node is the set of
         names that appear on any LHS.
+
+        Returns
+        -------
+        node_specs : dict[str, NodeSpec]
+            Expanded graph specifications, including private helper nodes.
+        input_node : set[str]
+            User-declared left-hand-side names, excluding generated helpers.
+
+        Notes
+        -----
+        Parsing validates syntax, distribution names and repeated parents;
+        graph construction separately validates references and acyclicity.
         """
         formula_list, input_node = self._parse_formula(self.model_formula)
         self.statements = [self._parse_statement(f) for f in formula_list]

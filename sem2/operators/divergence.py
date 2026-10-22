@@ -15,6 +15,8 @@ if TYPE_CHECKING:
 
 
 class EnergyLoss(SEM2Operator):
+    # what does 'provisional energy code' mean?
+    # step-7 review: refers to our group reviewing the code? should this be deleted/updated before release
     """Compare observations with draws or probabilities using provisional energy code.
 
     The calculation is retained as an executable placeholder pending Step-7
@@ -23,6 +25,17 @@ class EnergyLoss(SEM2Operator):
 
     Settings resolve as evaluation override > constructor override > config.
     Per-call overrides do not change the stored defaults.
+
+    Parameters
+    ----------
+    cfg : TrainingConfig
+        Device, default Monte Carlo count and energy exponent.
+    model : SEM2
+        Model to compare with observations, on the configured device.
+    sample_bs : int, optional
+        Model draws; overrides ``cfg.sample_bs``. Use at least two.
+    beta : float, optional
+        Power applied to distances; overrides ``cfg.energy_score_beta``.
     """
     input_type = OperatorInput.DATA
     output_type = OperatorOutput.SCALAR
@@ -39,6 +52,27 @@ class EnergyLoss(SEM2Operator):
 
     def evaluate(self, observations: DataBatch, *, sample_bs: int | None = None,
                  beta: float | None = None) -> tuple[ScalarResult, dict]:
+        """Compare named observations with the current model distribution.
+
+        Parameters
+        ----------
+        observations : DataBatch
+            Nonempty observations. Numeric mappings define category scores;
+            discrete evaluation selects observed endogenous variables.
+        sample_bs : int, optional
+            Draw count for this call, leaving stored defaults unchanged.
+        beta : float, optional
+            Distance exponent for this call.
+
+        Returns
+        -------
+        result : ScalarResult
+            Continuous energy score or discrete half-energy distance, with
+            gradients. The continuous score omits the data/data constant.
+        diagnostics : dict
+            Cross and within-model distances; the discrete route also includes
+            the within-data term. Values are not detached.
+        """
         sample_bs = self.sample_bs if sample_bs is None else sample_bs
         beta = self.beta if beta is None else beta
         if not isinstance(observations, DataBatch):
@@ -90,12 +124,29 @@ class WeightedFrobeniusDistance(SEM2Operator):
     """Weighted Frobenius distance between the sample covariance and the
     model-implied covariance.
 
-        F = sum_{i,j} W[i,j] * (S[i,j] - Sigma[i,j])^2
+    .. math::
+
+        F = \\sum_{i,j} W_{ij}(S_{ij}-\\Sigma_{ij})^2.
 
     With W all-ones this is the (squared) Frobenius / unweighted-least-squares
     discrepancy used in SEM estimation (cf. lavaan's ULS objective). A weight
-    matrix W can be supplied to recover weighted/GLS-style discrepancies.
+    matrix W supplies elementwise weighted least squares; this corresponds to
+    diagonal weighting of vectorized residuals, not a general GLS quadratic form.
     beta is accepted for scalar-objective composition but does not affect this loss.
+
+    Parameters
+    ----------
+    model : SEM2
+        Model providing analytical or sampled covariance.
+    observed_vars : list[str], optional
+        Selected variables in covariance order; defaults to batch names.
+    weight : torch.Tensor, optional
+        Elementwise weights broadcastable to the selected covariance matrix.
+        Defaults to ones; not a full weight matrix on vectorized residuals.
+    sample_bs : int, optional
+        Draw count for non-linear models, overriding the config default.
+    cfg : TrainingConfig, optional
+        Supplies the default draw count.
     """
     input_type = OperatorInput.DATA
     output_type = OperatorOutput.SCALAR
@@ -110,11 +161,24 @@ class WeightedFrobeniusDistance(SEM2Operator):
 
     def evaluate(self, observations: DataBatch, *, sample_bs: int | None = None,
                  beta: float | None = None) -> tuple[ScalarResult, dict]:
-        """
-        Args:
-            observations: named data, selected in observed_vars order.
-        Returns:
-            (weighted_frobenius_distance, metrics)
+        """Return the weighted squared covariance discrepancy.
+
+        Parameters
+        ----------
+        observations : DataBatch
+            Named values with at least two rows, selected in ``observed_vars``
+            order. Uses stored values, not numeric mappings.
+        sample_bs : int, optional
+            Draw-count override; unused for analytical linear covariance.
+        beta : float, optional
+            Accepted for composition; unused.
+
+        Returns
+        -------
+        result : ScalarResult
+            Weighted Frobenius discrepancy with parameter gradients.
+        diagnostics : dict
+            Detached scalar under ``weighted_frobenius_distance``.
         """
         if not isinstance(observations, DataBatch):
             raise TypeError("observations must be a DataBatch.")

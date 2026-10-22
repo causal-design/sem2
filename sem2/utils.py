@@ -7,6 +7,14 @@ def set_seed(seed: int | None = None, device: torch.device | str = "cpu") -> Non
 
     None is a no-op. Explicit seeds change the default generators in place;
     subsequent sampling advances them normally, without state restoration.
+
+    Parameters
+    ----------
+    seed : int, optional
+        Seed for the default Torch generators; ``None`` leaves them unchanged.
+    device : str or torch.device, default="cpu"
+        Also seed this CUDA device or the MPS generator, in addition to CPU.
+        NumPy and Python's random generators are not affected.
     """
     if seed is None:
         return

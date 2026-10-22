@@ -12,12 +12,20 @@ from ..data.records import DataBatch, ScalarResult
 
 
 class SEM2LinearModelOperator(SEM2Operator):
-    """Abstract base for operators that require a linear SEM (SEM2Linear).
+    """Validate the model and variable names shared by linear-model operators.
 
-    Validates linearity once at construction so concrete operators can rely on
-    coef_matrix / cov_matrix being available. Observation names belong to the
-    operator or its input batch, not the graph. Named for the *model* it serves,
-    not "a linear operator".
+    Parameters
+    ----------
+    model : SEM2Linear
+        Linear structural equation model providing analytical moments.
+    observed_vars : list[str], optional
+        Nonempty selection of model variable names. If omitted, the concrete
+        operator determines the selection from its input.
+
+    Notes
+    -----
+    Abstract base class; subclasses implement ``evaluate``. Observation names
+    belong to the operator, not the model's structural graph.
     """
 
     def __init__(self, model: SEM2Linear, observed_vars: list[str] | None = None) -> None:
@@ -64,6 +72,11 @@ class SEM2LinearModelOperator(SEM2Operator):
 
 
 def _check_observation_shape(observations: torch.Tensor, n_vars: int, operator_name: str) -> None:
+    """Require a two-dimensional tensor with ``n_vars`` columns.
+
+    ``observations`` contains rows of data; ``operator_name`` labels errors.
+    Return ``None`` on success; raise ``ValueError`` for an incorrect shape.
+    """
     if observations.ndim != 2:
         raise ValueError(
             f"{operator_name} expects observations with shape [n, p]; "
@@ -77,24 +90,27 @@ def _check_observation_shape(observations: torch.Tensor, n_vars: int, operator_n
 
 
 class LogLikelihood(SEM2LinearModelOperator):
-    """Gaussian log-likelihood of observed data under a linear SEM.
+    """Evaluate mean Gaussian (pseudo-)log-likelihood over the observations using a linear model's first and second moments.
 
-    The per-observation log density is computed as for a multivariate normal
-    (adapted from torch.distributions.MultivariateNormal.log_prob): with Sigma
-    the model-implied covariance over the observed variables and L its Cholesky
-    factor,
+    Parameters
+    ----------
+    model : SEM2Linear
+        Model supplying the mean and covariance of the selected variables.
+    observed_vars : list[str], optional
+        Variables to evaluate, in order. Defaults to the input batch's names.
+    loc : torch.Tensor, optional
+        Mean of shape (n_variables,), in the selected variable order.
+        Defaults to the model-implied mean.
+    centered : bool, default=False
+        Use a zero mean instead of the model mean. Does not center the data;
+        supply centered observations. Cannot be combined with ``loc``.
 
-        log p(x) = -0.5 * (k*log(2*pi) + ||L^-1 (x - loc)||^2) - sum(log diag(L)).
-
-    This is the exact likelihood for LINEAR_GAUSSIAN models. For other linear
-    SEMs it is a Gaussian pseudo-log-likelihood based only on the model-implied
-    first and second moments; a warning is issued once at construction.
-
-    evaluate() returns the mean log-likelihood over the batch. observed_vars
-    defaults to the input batch's names. loc defaults to the
-    model-implied mean; use centered=True for centred covariance-style fits.
-    sample_bs and beta are accepted for scalar-objective composition but do not
-    affect this analytic calculation.
+    Notes
+    -----
+    Exact for linear Gaussian models. Otherwise, this is a Gaussian
+    pseudo-log-likelihood based on finite first and second moments, and
+    construction emits a warning. The selected covariance must be positive
+    definite. Negate this objective when using a minimizing optimizer.
     """
     input_type = OperatorInput.DATA
     output_type = OperatorOutput.SCALAR
@@ -122,6 +138,12 @@ class LogLikelihood(SEM2LinearModelOperator):
             )
 
     def _loc(self, dtype: torch.dtype, names: tuple[str, ...]) -> torch.Tensor:
+        """Resolve a mean vector of shape (len(names),) on the model device.
+
+        ``dtype`` sets the output dtype; ``names`` sets the variable order.
+        Use zeros, the supplied mean, or model moments according to the
+        constructor settings. Raise ``ValueError`` for an incompatible shape.
+        """
         if self.centered:
             loc = torch.zeros(len(names), device=self.device, dtype=dtype)
         elif self.loc is not None:
@@ -140,11 +162,27 @@ class LogLikelihood(SEM2LinearModelOperator):
 
     def evaluate(self, observations: DataBatch, *, sample_bs: int | None = None,
                  beta: float | None = None) -> tuple[ScalarResult, dict]:
-        """
-        Args:
-            observations: named data, selected in observed_vars order.
-        Returns:
-            (mean_log_likelihood, metrics)
+        """Return the mean log-likelihood and detached batch diagnostics.
+
+        Parameters
+        ----------
+        observations : DataBatch
+            Named scalar observations with values of shape (n_rows, n_columns).
+            Selected columns are aligned by name and converted to the model's
+            device and covariance dtype. Supply at least one row.
+        sample_bs : int, optional
+            Accepted for objective composition; unused by this calculation.
+        beta : float, optional
+            Accepted for objective composition; unused by this calculation.
+
+        Returns
+        -------
+        result : ScalarResult
+            Mean log-likelihood, retaining gradients and selected variable
+            metadata; labelled ``log_likelihood``.
+        diagnostics : dict[str, torch.Tensor]
+            Detached scalar tensors: ``log_likelihood`` (mean) and
+            ``log_likelihood_sum`` (sum over rows).
         """
         if not isinstance(observations, DataBatch):
             raise TypeError("observations must be a DataBatch.")
@@ -187,12 +225,40 @@ class LogLikelihood(SEM2LinearModelOperator):
 
 
 class PathAnalysis(SEM2LinearModelOperator):
-    """Placeholder for future path-analysis functionality."""
+    # leave as-is for first release? or should leave out this class
+    """Reserve the interface for path analysis; not implemented.
+
+    Parameters
+    ----------
+    model : SEM2Linear
+        Linear model, validated at construction.
+    observed_vars : list[str], optional
+        Model variable names, validated but not used in a calculation.
+
+    Notes
+    -----
+    Construction only validates inputs. Calling ``evaluate`` always raises
+    ``NotImplementedError``; no path effects are computed.
+    """
     input_type = OperatorInput.SELF
     output_type = OperatorOutput.SCALAR
 
     def evaluate(self, *, sample_bs: int | None = None,
                  beta: float | None = None) -> tuple[torch.Tensor, dict]:
+        """Raise ``NotImplementedError`` without computing a result.
+
+        Parameters
+        ----------
+        sample_bs : int, optional
+            Unused composition argument.
+        beta : float, optional
+            Unused composition argument.
+
+        Raises
+        ------
+        NotImplementedError
+            Always; path analysis is not available.
+        """
         raise NotImplementedError(
             "PathAnalysis is not implemented yet; the API and automatic path "
             "enumeration still need to be designed."

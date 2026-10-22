@@ -18,25 +18,60 @@ from ...default_configs import LinearNodeConfig, MLPConfig
 # SEM2 - DAG + nn.Module
 # ════════════════════════════════════════════════════════════════════════════════════
 
+
+# Docs here should correspond better to docs for the linear/discrete model? 
+# Wording is currently quite different
+# E.g. here: continuous SEM. Associatied with a DAG whose nodes are PyTorch modules.
+# (see linear and discrete model definitions for the other comments)
 class SEM2(_DAG, nn.Module):
     """Structural Equation Model: a DAG whose nodes are PyTorch modules.
 
     Inherits graph structure and parsing from DAG, and parameter registration
     and training from nn.Module.
+
+    Attributes
+    ----------
+    node_dict : torch.nn.ModuleDict
+        Executable nodes keyed by name, including compiler-generated helpers.
+    node_specs : dict[str, NodeSpec]
+        Structural specifications for the expanded graph.
+    input_node : set[str]
+        User-declared names, excluding helpers; not observation status.
+    topological_order : list[str]
+        Parent-before-child order including helpers.
+    node_order : list[str]
+        Canonical matrix order, copied from topological_order.
+    graph : dict[str, list[str]]
+        Node names mapped to ordered parent names.
+    statements : list
+        Typed syntax records produced by formula parsing.
+    inferred_sem_type : SEMType
+        Structural family inferred from the formula.
+
+    Notes
+    -----
+    Use ``sample`` rather than calling the model directly: ``forward`` and the
+    generic ``likelihood`` method raise ``NotImplementedError``. Distribution
+    tensors are constructed on the requested device; construct the model there
+    rather than relying on a later module move to relocate distribution objects.
     """
     node_dict: nn.ModuleDict[str, SEM2Node]  # Maps node name to its SEM2Node object, registered as submodule for PyTorch tracking
     sem_type = SEMType.NONLINEAR
 
     def __init__(self, model_formula: str,
                  node_cfgs: dict[str, int | LinearNodeConfig | MLPConfig] | None = None, device: str | torch.device = "cpu") -> None:
-        """
-        Args:
-            model_formula: Semicolon-separated formulas defining the SEM.
-            node_cfgs: Optional dict mapping node name to its config.
-                - Exogenous node : int (output dimension), default 1.
-                - Linear node    : LinearNodeConfig.
-                - MLP node       : MLPConfig.
-            device: PyTorch device string.
+        """Construct and initialize the graph's executable nodes.
+
+        Parameters
+        ----------
+        model_formula : str
+            Semicolon-separated structural equations and exogenous distributions.
+        node_cfgs : dict, optional
+            Node names mapped to ``LinearNodeConfig``, ``MLPConfig``, or an
+            integer output dimension for an exogenous node (default 1).
+            Entries are consumed during construction; pass a copy to retain them.
+        device : str or torch.device, default="cpu"
+            Device for node parameters and exogenous distribution tensors.
         """
         _DAG.__init__(self, model_formula)
         nn.Module.__init__(self)
@@ -176,7 +211,30 @@ class SEM2(_DAG, nn.Module):
         return values
 
     def sample(self, batch_size: int = 1, set_nodes: DataBatch | None = None) -> tuple[DataBatch, dict]:
-        """Return named draws and intervention provenance, excluding helpers."""
+        """Return named draws and intervention provenance, excluding helpers.
+
+        Parameters
+        ----------
+        batch_size : int, default=1
+            Positive number of draws.
+        set_nodes : DataBatch, optional
+            Intervention values with one row per draw and matching node widths.
+            Supply valid stored values on the model device; no broadcasting,
+            category encoding or support validation is performed.
+
+        Returns
+        -------
+        draws : DataBatch
+            Values of shape (batch_size, total_width), in topological order.
+            Internal helper nodes are excluded.
+        details : dict
+            ``interventions`` contains the supplied ``set_nodes`` object.
+
+        Notes
+        -----
+        Consumes randomness and updates cached node values. Interventions replace
+        structural equations; they do not establish causal identification.
+        """
         # Share the sampling loop with queries that stop at a specific target.
         return self._sample(batch_size, set_nodes)
 

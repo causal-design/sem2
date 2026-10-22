@@ -16,6 +16,13 @@ class DiscreteEnergyLoss:
     and prediction.probabilities [M, S], where M counts exogenous draws.
     Callers supply valid state values and normalized probabilities; these are
     not rechecked here on each evaluation.
+
+    Parameters
+    ----------
+    unbiased : bool, default=True
+        Exclude same-row pairs from within-distribution distances. Corrected
+        terms require at least two probability rows, and two observations when
+        computing ``energy_dist``.
     """
 
     def __init__(self, *, unbiased: bool = True) -> None:
@@ -75,6 +82,22 @@ class DiscreteEnergyLoss:
         The prediction owns its named state table [S, D]; N and M may differ.
         Computes cross-distance minus half the model/model pair-distance.
         Returns a ScalarResult and scalar distance diagnostics.
+
+        Parameters
+        ----------
+        observations : DataBatch
+            Nonempty observed states with numerical mappings for distances.
+        prediction : DiscreteJointDistribution
+            Normalized conditional probabilities and their named state table.
+        beta : float
+            Exponent applied to Euclidean distances between numerical states.
+
+        Returns
+        -------
+        result : ScalarResult
+            Cross-distance minus half the model-pair distance, with gradients.
+        diagnostics : dict
+            ``estimated-true distance`` and ``estimated-estimated distance``.
         """
         self._validate(observations, prediction)
         cross, pair, _, _ = self._energy_components(observations, prediction, beta=beta)
@@ -89,6 +112,23 @@ class DiscreteEnergyLoss:
         uses its own sample count. Returns a ScalarResult and scalar diagnostics.
         Subtracts half of each within-distribution distance from the cross term.
         The unbiased estimate can be negative at finite sample sizes.
+
+        Parameters
+        ----------
+        observations : DataBatch
+            Observed states; corrected data-pair distances require two rows.
+        prediction : DiscreteJointDistribution
+            Normalized probability rows and the aligned named state table.
+        beta : float
+            Exponent applied to Euclidean distances between numerical states.
+
+        Returns
+        -------
+        result : ScalarResult
+            Half-energy distance, labelled ``energy_distance``, with gradients.
+        diagnostics : dict
+            Cross, model-pair and data-pair terms under ``estimated-true distance``,
+            ``estimated-estimated distance`` and ``true-true distance``.
         """
         self._validate(observations, prediction, observed_pairs=True)
         cross, pair, empirical, distances = self._energy_components(observations, prediction, beta=beta)

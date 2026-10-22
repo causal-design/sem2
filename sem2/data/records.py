@@ -86,13 +86,25 @@ class DataBatch:
 
     @property
     def names(self) -> tuple[str, ...]:
+        """Variable names in tensor-block order, as a tuple of strings."""
         return tuple(v.name for v in self.variables)
 
     def __len__(self) -> int:
         return self.values.shape[0]
 
     def select(self, names: str | Iterable[str]) -> torch.Tensor:
-        """Select whole variable blocks in the requested order."""
+        """Select whole variable blocks in the requested order.
+
+        Parameters
+        ----------
+        names : str or iterable of str
+            Unique variable names; unknown or repeated names raise ``ValueError``.
+
+        Returns
+        -------
+        torch.Tensor
+            Shape (n_rows, selected_width), preserving dtype, device and gradients.
+        """
         names = (names,) if isinstance(names, str) else tuple(names)
         if len(set(names)) != len(names):
             raise ValueError("Selected variable names must be unique.")
@@ -107,6 +119,18 @@ class DataBatch:
         return self.values[:, [i for name in names for i in columns[name]]]
 
     def subset(self, names: str | Iterable[str]) -> DataBatch:
+        """Return selected variable blocks with their metadata.
+
+        Parameters
+        ----------
+        names : str or iterable of str
+            Unique variable names in the desired output order.
+
+        Returns
+        -------
+        DataBatch
+            All rows of the selected variables, retaining gradients and metadata.
+        """
         names = (names,) if isinstance(names, str) else tuple(names)
         variables = dict(zip(self.names, self.variables))
         values = self.select(names)
@@ -122,6 +146,11 @@ class DataBatch:
         return DataBatch(values, self.variables)
 
     def to(self, *args, **kwargs) -> DataBatch:
+        """Return a batch with values converted by ``torch.Tensor.to``.
+
+        Conversion arguments are forwarded to the tensor; metadata is preserved.
+        The original batch is not reassigned.
+        """
         return DataBatch(self.values.to(*args, **kwargs), self.variables)
 
 
@@ -132,6 +161,15 @@ class ScalarResult:
     Associated variables describe the quantity, not observation columns.
     Consequently this record is separate from the two-dimensional DataBatch;
     it already has a name and need not inherit row/column slicing.
+
+    Parameters
+    ----------
+    value : torch.Tensor
+        Zero-dimensional result; not detached or converted at construction.
+    name : str
+        Label identifying the quantity.
+    variables : list[VariableInfo], optional
+        Associated variable metadata, copied into a new list.
     """
     value: torch.Tensor
     name: str
