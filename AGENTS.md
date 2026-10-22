@@ -96,6 +96,6 @@ Keep generic infrastructure separate from application-specific workflows. In par
 - `AGENTS.md` contains durable contribution and verification guidance.
 - The private documentation repository contains dated historical records; do not rewrite them to represent later implementation status or copy private discussions into public issues and PRs.
 
-Keep research records and detailed internal plans in the private repository. The root `/docs/` path is ignored to reduce accidental reintroduction; this is a convenience, not an access control or history-cleanup mechanism. Public API contracts belong in docstrings, executable examples, and the root guidance files.
+Keep meeting records, research reports, and detailed internal plans in the private repository. The paths `/docs/meetings/`, `/docs/plan/`, and `/docs/reports/` are ignored to reduce accidental reintroduction; this is a convenience, not an access control or history-cleanup mechanism. Keep public code documentation, Sphinx sources, API references, diagrams, and worked examples in `docs/`, alongside public docstrings and executable examples. Review new documents by content rather than assuming every file under `docs/` is public.
 
 Update the relevant memory file when an interface, capability, limitation, or agreed priority changes. Preserve evidence and do not invent project facts. Current code and executed tests outrank stale prose.

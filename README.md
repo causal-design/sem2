@@ -8,7 +8,7 @@ The project is designed around user-supplied causal structures rather than a fix
 
 See [`PROJECT.md`](PROJECT.md) for the maintained capability matrix, known limitations, design decisions, and work plan.
 
-Detailed plans and research records are maintained in the private [SEM2 documentation repository](https://github.com/causal-design/sem2-docs). Installing, using, and testing this package does not require access to it.
+Code documentation, API references, and worked examples belong in this repository's [`docs/`](docs/). Internal plans, meeting records, and research reports are maintained in the private [SEM2 documentation repository](https://github.com/causal-design/sem2-docs). Installing, using, and testing this package does not require private access.
 
 ## Installation
 
