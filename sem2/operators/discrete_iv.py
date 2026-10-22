@@ -24,7 +24,8 @@ class DiscreteIVEnergyLoss(EnergyLoss):
 
     Callers supply a model encoding the IV assumptions. This class checks neither
     those causal assumptions nor identification, and does not certify effect or
-    bound recovery.
+    bound recovery. The deferred work above requires separate implementation
+    and validation before this can be treated as a supported IV fitting API.
 
     Parameters
     ----------
