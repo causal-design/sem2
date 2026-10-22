@@ -1,6 +1,6 @@
 # Package documentation
 
-The Sphinx site lives in `source/`. Historical meetings, plans and reports are outside the Sphinx source tree and are not included in the site.
+The public Sphinx site lives in `source/`. Internal meeting records, plans, and research reports are maintained in the private [sem2-docs repository](https://github.com/causal-design/sem2-docs) and are not included in this repository or the site.
 
 From the repository root:
 

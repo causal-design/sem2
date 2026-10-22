@@ -4,3 +4,6 @@ __pycache__/
 /sem2.egg-info/
 /docs/_build/
 /docs/source/generated/
+/docs/meetings/
+/docs/plan/
+/docs/reports/
