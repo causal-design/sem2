@@ -8,7 +8,7 @@ The project is designed around user-supplied causal structures rather than a fix
 
 See [`PROJECT.md`](PROJECT.md) for the maintained capability matrix, known limitations, design decisions, and work plan.
 
-Start with the [v0.1 planning review](docs/plan/v0.1.md), which links the model–data, support/named-data, fitting/diagnostics, and identification specifications. These describe intended interfaces, not capabilities added to this checkout. The closed code PRs linked there are unmerged examples; implementation requires separate review.
+Code documentation, API references, and worked examples belong in this repository's [`docs/`](docs/). Internal plans, meeting records, and research reports are maintained in the private [SEM2 documentation repository](https://github.com/causal-design/sem2-docs). Installing, using, and testing this package does not require private access.
 
 ## Installation
 
@@ -24,29 +24,31 @@ The package dependencies are declared in [`pyproject.toml`](pyproject.toml). The
 
 ```python
 from sem2.default_configs import LinearNodeConfig
-from sem2.model import SEM2Linear
+from sem2.model.models.linear import SEM2Linear
 
 model = SEM2Linear(
     "ex, ey ~ Normal(0,1); "
     "x <- 1*ex; "
-    "y <- x + 1*ey; "
-    "unobs(ex,ey)",
+    "y <- x + 1*ey",
     node_cfgs={
-        "x": LinearNodeConfig(use_bias=False),
-        "y": LinearNodeConfig(use_bias=False),
+        "x": LinearNodeConfig(use_intercept=False),
+        "y": LinearNodeConfig(use_intercept=False),
     },
 )
 
 samples, _ = model.sample(batch_size=100)
-print(samples["x"].shape)
-print(samples["y"].shape)
-print(model.cov_matrix(nodes=model.observed_vars))
+print(samples.select("x").shape)
+print(samples.select("y").shape)
+print(model.cov_matrix(nodes=["x", "y"]))
 ```
 
 A model is sampled through `sample(...)`; calling the model directly is not part of the current API. The supported model imports are:
 
 ```python
-from sem2.model import SEM2, SEM2Discrete, SEM2Linear, SEMType
+from sem2.model.models.base import SEM2
+from sem2.model.models.discrete import SEM2Discrete
+from sem2.model.models.linear import SEM2Linear
+from sem2.model.construction.sem_types import SEMType
 ```
 
 ## Formula language
@@ -59,10 +61,9 @@ Statements are separated by semicolons.
 | `y <- x + z` | Declare a linear structural equation with learned coefficients. |
 | `y <- 1*x + 0.5*z` | Fix selected linear coefficients in the formula. |
 | `y <- n(x,z)` | Use a configurable MLP for a continuous mechanism. |
-| `y <- d(x,z)` | Use a finite discrete mechanism. |
-| `unobs(u)` | Mark variables as unobserved in the current API. |
+| `y <- d(x,z; levels=2)` | Use a finite discrete mechanism with two states. |
 
-`unobs(...)` currently determines the model's observed-variable list. See [`PROJECT.md`](PROJECT.md) for the proposed separation between structural formulas and dataset-specific observation status.
+Observed variables are determined by the data supplied to fitting and operators, rather than an `unobs(...)` clause in the structural formula. Select covariance variables explicitly by name, as in the example above.
 
 Node configuration is passed through `node_cfgs`, keyed by the variable on the left-hand side of the formula. Public node configurations live in [`sem2/default_configs.py`](sem2/default_configs.py).
 
@@ -72,11 +73,12 @@ Node configuration is passed through `node_cfgs`, keyed by the variable on the l
 
 ```python
 import torch
+from sem2.data.records import DataBatch
 
 n = 100
 samples_do_x1, _ = model.sample(
     batch_size=n,
-    set_nodes={"x": torch.ones(n, 1)},
+    set_nodes=DataBatch(torch.ones(n, 1), ["x"]),
 )
 ```
 
@@ -88,11 +90,9 @@ This computes the intervention implied by the specified structural model. It doe
 - [`sem2/model/components/`](sem2/model/components/) contains executable node and neural-network modules.
 - [`sem2/model/models/`](sem2/model/models/) contains the general, linear, and finite discrete model classes.
 - [`sem2/operators/`](sem2/operators/) contains likelihood, distributional-loss, and causal-query operators.
-- [`sem2/sem2trainer.py`](sem2/sem2trainer.py) contains the current package trainer; it remains experimental.
+- [`sem2/trainer/trainer.py`](sem2/trainer/trainer.py) contains the package trainer.
 - [`tests/`](tests/) contains the pytest suite.
 - [`experiments/`](experiments/) and [`notebooks/`](notebooks/) contain research and demonstration code, some of which uses older APIs.
-- [`docs/meetings/`](docs/meetings/) contains dated reviews and meeting records.
-- [`docs/reports/`](docs/reports/) contains the project research reports.
 
 ## Testing
 
@@ -108,6 +108,8 @@ When changing an estimator or causal operator, add tests for numerical values, g
 
 - [`PROJECT.md`](PROJECT.md) is the canonical record of current work, known limitations, and priorities.
 - [`AGENTS.md`](AGENTS.md) contains durable guidance for contributors and coding agents.
-- [`docs/meetings/2026-08-26-meeting.md`](docs/meetings/2026-08-26-meeting.md) is the concise meeting record.
-- [`docs/meetings/2026-08-26-ai-review-updated.md`](docs/meetings/2026-08-26-ai-review-updated.md) is the detailed review updated after that meeting.
-- [`docs/meetings/2026-08-26-ai-review.md`](docs/meetings/2026-08-26-ai-review.md) preserves the original review that preceded the meeting update.
+- Meeting records, reviews, reports, and detailed plans are kept in the private documentation repository linked above.
+
+## License
+
+SEM2 code is licensed under the GNU General Public License, version 3 only (`GPL-3.0-only`). See [`LICENSE`](LICENSE) for the full terms. This declaration does not license the separately maintained private research records.
