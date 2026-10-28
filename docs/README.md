@@ -19,7 +19,32 @@ To serve the built site on your own computer:
 python -m http.server 8000 --bind 127.0.0.1 --directory docs/_build/html
 ```
 
-Visit http://127.0.0.1:8000. After editing `docs/source/`, rebuild and refresh the browser. Stop the server with Ctrl+C. GitHub Pages and deployment automation are deferred.
+Visit http://127.0.0.1:8000. After editing `docs/source/`, rebuild and refresh the browser. Stop the server with Ctrl+C.
+
+## GitHub Pages
+
+The [Documentation workflow](../.github/workflows/docs.yml) builds the Sphinx
+site on pull requests targeting `main` and on pushes to `main`. Build warnings
+fail the check. It installs the real package with its documentation dependencies
+and uses CPU PyTorch to avoid downloading CUDA libraries on the runner.
+
+Pull requests only build the documentation. After a successful build on `main`,
+the workflow uploads `docs/_build/html` and deploys it to GitHub Pages. Generated
+HTML stays out of Git; a separate `gh-pages` branch is not needed.
+
+### One-time repository administrator setup
+
+1. Open **Settings → Pages → Build and deployment**.
+2. Set **Source** to **GitHub Actions**.
+3. If the `github-pages` environment restricts deployment branches, allow `main`.
+4. Merge the Pages setup pull request. The push to `main` starts the first build
+   and deployment. To retry after changing settings, open **Actions →
+   Documentation → Run workflow** and select `main`.
+
+The expected public URL is <https://causal-design.github.io/sem2/>. It becomes
+available after Pages is enabled and the first deployment succeeds. Contributors
+with write access can propose workflow changes, but a repository administrator
+must enable Pages. See [GitHub's custom workflow guide](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages).
 
 ## GitHub Wiki: maintainer setup
 
