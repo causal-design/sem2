@@ -10,6 +10,10 @@ See [`PROJECT.md`](PROJECT.md) for the maintained capability matrix, known limit
 
 Code documentation, API references, and worked examples belong in this repository's [`docs/`](docs/). Internal plans, meeting records, and research reports are maintained in the private [SEM2 documentation repository](https://github.com/causal-design/sem2-docs). Installing, using, and testing this package does not require private access.
 
+The documentation is configured for [GitHub Pages](https://causal-design.github.io/sem2/).
+The site becomes available after a repository administrator enables Pages and the
+first deployment succeeds; see the [build and publishing instructions](docs/README.md).
+
 ## Installation
 
 SEM2 requires Python 3.11 or later.
