@@ -49,7 +49,7 @@ def test_name_only_batch_keeps_canonical_metadata_and_supports_interventions():
         DataBatch(values, ['Z'])
     model = SEM2Discrete('Z ~ Categorical(probs=[1,1]); D <- d(Z; levels=2)',
                          node_cfgs={'D': MLPConfig(hidden_dims=[4])})
-    prediction, _ = model.sample(2, set_nodes=batch)
+    prediction, _ = model.sample(2, do_intervention=batch)
     torch.testing.assert_close(prediction.probabilities, torch.tensor([[1., 0.], [0., 1.]]))
 
 

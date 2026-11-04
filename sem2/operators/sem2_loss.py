@@ -50,8 +50,6 @@ class SEM2Loss(SEM2Operator):
             Unweighted detached component values and prefixed component details.
             Details retain each component's own gradient convention.
         """
-        if not isinstance(observations, DataBatch):
-            raise TypeError("observations must be a DataBatch.")
         # Start with a Python zero so the components determine tensor dtype/device.
         total = 0
         metrics, variables = {}, {}

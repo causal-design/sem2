@@ -73,7 +73,7 @@ Node configuration is passed through `node_cfgs`, keyed by the variable on the l
 
 ## Interventions and causal interpretation
 
-`set_nodes` replaces selected node values while the remaining equations are evaluated:
+`do_intervention` replaces selected node values while the remaining equations are evaluated:
 
 ```python
 import torch
@@ -82,7 +82,7 @@ from sem2.data.records import DataBatch
 n = 100
 samples_do_x1, _ = model.sample(
     batch_size=n,
-    set_nodes=DataBatch(torch.ones(n, 1), ["x"]),
+    do_intervention=DataBatch(torch.ones(n, 1), ["x"]),
 )
 ```
 
