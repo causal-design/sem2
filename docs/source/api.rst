@@ -14,6 +14,7 @@ Fitting and evaluation
 * :doc:`training` — fit models to named observations with a scalar objective.
 * :doc:`objectives` — energy and covariance discrepancies, IV losses and composition.
 * :doc:`queries` — covariance, potential outcomes and treatment-effect contrasts.
+* :doc:`identification` — graphical identification from an observed joint distribution.
 * :doc:`operators` — Gaussian log-likelihood and linear-model operator interfaces.
 * :doc:`operator-contracts` — operator input and output conventions.
 

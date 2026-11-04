@@ -45,6 +45,7 @@ identification.
 
    objectives
    queries
+   identification
    operators
    operator-contracts
 

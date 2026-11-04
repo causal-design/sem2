@@ -14,6 +14,7 @@ dependencies = [
     "numpy",
     "pandas",
     "pydantic>=2",
+    "y0==0.2.11",
     "pytest",
 ]
 
