@@ -15,6 +15,8 @@ if TYPE_CHECKING:
 
 
 class EnergyLoss(SEM2Operator):
+    # what does 'provisional energy code' mean?
+    # step-7 review: refers to our group reviewing the code? should this be deleted/updated before release
     """Compare observations with model draws or finite probabilities.
 
     Quantitative variables use their supplied scale; categorical variables require

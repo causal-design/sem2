@@ -9,6 +9,7 @@ from ..model.models.discrete import SEM2Discrete
 
 
 class DiscreteIVEnergyLoss(EnergyLoss):
+    # provisional placeholder? not yet updated for release?
     """Fit conditional outcome distributions at each declared instrument level.
 
     Conditional half-energy distances use empirical instrument frequencies.
@@ -17,7 +18,8 @@ class DiscreteIVEnergyLoss(EnergyLoss):
 
     Callers supply a model encoding the IV assumptions. This class checks neither
     those causal assumptions nor identification, and does not certify effect or
-    bound recovery.
+    bound recovery. The deferred work above requires separate implementation
+    and validation before this can be treated as a supported IV fitting API.
 
     Parameters
     ----------

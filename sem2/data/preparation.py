@@ -131,7 +131,7 @@ def prepare_data(
         Original named observations. Invalid column identifiers are normalized;
         collisions, unknown variables and internal helper names are rejected.
         Rows missing any supplied variable are dropped in a working copy.
-        Declare label columns with pandas.Categorical, including unused levels
+        Declare label columns with `pandas.Categorical`, including unused levels
         and optional ordering; default codes follow the declared category order.
         Other label columns require an explicit encoding. Numeric columns hold
         stored values, not labels awaiting automatic recoding.

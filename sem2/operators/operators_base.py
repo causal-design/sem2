@@ -27,6 +27,7 @@ class OperatorOutput(StrEnum):
 
 
 class SEM2Operator(ABC):
+    # maybe make even more clear this is shared between operators representing objectives?
     """Common result contract; concrete evaluators declare explicit arguments.
 
     Scalar objectives share optional sample_bs and beta keywords for composition.

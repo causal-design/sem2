@@ -6,7 +6,7 @@
 
 This file records the current capabilities, limitations, decisions, and order of work. [`README.md`](README.md) is the stable user entry point, while [`AGENTS.md`](AGENTS.md) contains contributor guidance. Fresh source and test evidence takes precedence over this record.
 
-The supporting evidence is in the [updated technical review](docs/meetings/2026-08-26-ai-review-updated.md), the [26 August meeting summary](docs/meetings/2026-08-26-meeting.md), and the [28 August meeting summary](docs/meetings/2026-08-28-meeting.md).
+**Release-preparation note (16 October 2026):** the capability assessment below is the August baseline, not a fresh review of the October code. Source and tests have advanced; the status refresh is tracked in PR #62. This file remains public. Supporting technical reviews and meeting records now live in the private [SEM2 documentation repository](https://github.com/causal-design/sem2-docs); public contributions must include enough requirements and evidence to be reviewed without private access.
 
 ## Current status
 
@@ -195,4 +195,4 @@ Unverified:
 - the best architectural location for multidimensional empirical covariate sampling; and
 - calibration and prior-shift robustness of any future PFN approach.
 
-The full source-backed assessment, equations, examples, and references remain in the [dated technical review](docs/meetings/2026-08-26-ai-review-updated.md). The meeting records preserve the discussion that led to the maintained directions above.
+The full dated assessment and meeting records are preserved in the private documentation repository. They record the discussion behind the directions above; current public code and executed tests remain the evidence for implemented behavior.

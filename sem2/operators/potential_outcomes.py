@@ -47,6 +47,8 @@ def _fixed_intervention(model: SEM2, assignments: dict[str, float]) -> DataBatch
 
 
 class PotentialOutcomeSample(SEM2Operator):
+    # Perhaps clarify we are sampling from the distribution from some potential outcomes of a continuous model?
+    # What does 'target computed' mean?
     """Sample a continuous model, stopping as soon as the target is computed.
 
     Parameters
@@ -218,6 +220,7 @@ class MeanPotentialOutcome(SEM2Operator):
 
 
 class ATE(SEM2Operator):
+    # What does 'explicit graph role' mean?
     """Alternative-minus-reference population mean contrast.
 
     Parameters

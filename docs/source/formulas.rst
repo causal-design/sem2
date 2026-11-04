@@ -8,6 +8,9 @@ Formula parsing
    :members:
    :undoc-members:
 
+   .. :undoc-members: currently displays the attributes in an ugly way
+      maybe just add the exact attribute names in the itemization in markdown?
+
 Syntax records
 --------------
 
