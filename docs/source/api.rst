@@ -15,6 +15,7 @@ Fitting and evaluation
 * :doc:`objectives` — energy and covariance discrepancies, IV losses and composition.
 * :doc:`queries` — covariance, potential outcomes and treatment-effect contrasts.
 * :doc:`identification` — graphical identification from an observed joint distribution.
+* :doc:`penalty-sweeps` — fresh-model fits across signed causal-target penalties.
 * :doc:`operators` — Gaussian log-likelihood and linear-model operator interfaces.
 * :doc:`operator-contracts` — operator input and output conventions.
 

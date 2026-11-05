@@ -46,6 +46,7 @@ identification.
    objectives
    queries
    identification
+   penalty-sweeps
    operators
    operator-contracts
 
