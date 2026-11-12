@@ -52,7 +52,7 @@ class DiscreteJointDistribution:
         return DiscreteJointDistribution(self.states.to(device=probabilities.device), probabilities)
 
     def marginalize(self, names: str | Iterable[str]) -> DiscreteJointDistribution:
-        # should mean: marginalise to a subset of endogeneous variables? 
+        # should mean: marginalise to a subset of endogeneous variables?
         """Combine equal projected states; retain the exogenous-draw axis.
 
         Parameters

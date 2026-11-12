@@ -14,11 +14,13 @@ dependencies = [
     "numpy",
     "pandas",
     "pydantic>=2",
+    "y0==0.2.11",
     "pytest",
 ]
 
 [project.optional-dependencies]
 docs = ["sphinx>=8,<9", "pydata-sphinx-theme>=0.15"]
+examples = ["scipy>=1.9"]
 
 [tool.setuptools.packages.find]
 where = ["."]

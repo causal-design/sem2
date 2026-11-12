@@ -53,14 +53,8 @@ class SEM2LinearModelOperator(SEM2Operator):
                 f"'{inferred_type.value}'."
             )
 
-        if not SEMType.is_linear(model.inferred_sem_type):
-            raise ValueError(
-                f"{type(self).__name__} requires a linear SEM2 model "
-                f"(SEM2Linear); got inferred type "
-                f"'{model.inferred_sem_type.value}'."
-            )
         self.model = model
-        self.device = getattr(model, "device", "cpu")
+        self.device = model.device
 
         vars_ = list(observed_vars) if observed_vars is not None else None
         if vars_ == []:
@@ -72,16 +66,7 @@ class SEM2LinearModelOperator(SEM2Operator):
 
 
 def _check_observation_shape(observations: torch.Tensor, n_vars: int, operator_name: str) -> None:
-    """Require a two-dimensional tensor with ``n_vars`` columns.
-
-    ``observations`` contains rows of data; ``operator_name`` labels errors.
-    Return ``None`` on success; raise ``ValueError`` for an incorrect shape.
-    """
-    if observations.ndim != 2:
-        raise ValueError(
-            f"{operator_name} expects observations with shape [n, p]; "
-            f"got shape {tuple(observations.shape)}."
-        )
+    """Require scalar observations; DataBatch already enforces two dimensions."""
     if observations.shape[1] != n_vars:
         raise ValueError(
             f"{operator_name} got {observations.shape[1]} data columns, but "
@@ -110,7 +95,9 @@ class LogLikelihood(SEM2LinearModelOperator):
     Exact for linear Gaussian models. Otherwise, this is a Gaussian
     pseudo-log-likelihood based on finite first and second moments, and
     construction emits a warning. The selected covariance must be positive
-    definite. Negate this objective when using a minimizing optimizer.
+    definite throughout fitting. Initial moment finiteness is checked at
+    construction; evaluation does not check finiteness or factorization status.
+    Negate this objective when using a minimizing optimizer.
     """
     input_type = OperatorInput.DATA
     output_type = OperatorOutput.SCALAR
@@ -137,6 +124,15 @@ class LogLikelihood(SEM2LinearModelOperator):
                 stacklevel=2,
             )
 
+        # Validate fixed inputs once, not tensor results on every optimizer step.
+        with torch.no_grad():
+            if not torch.isfinite(model.cov_matrix(observed_vars)).all():
+                raise ValueError("LogLikelihood requires finite second moments.")
+            if not centered:
+                mean = model.mean_vector() if loc is None else loc
+                if not torch.isfinite(mean).all():
+                    raise ValueError("LogLikelihood requires finite means; pass loc=... or use centered=True.")
+
     def _loc(self, dtype: torch.dtype, names: tuple[str, ...]) -> torch.Tensor:
         """Resolve a mean vector of shape (len(names),) on the model device.
 
@@ -153,7 +149,7 @@ class LogLikelihood(SEM2LinearModelOperator):
             idx = torch.tensor(self.model._index(names), device=self.device)
             loc = mu.index_select(0, idx).to(dtype=dtype)
 
-        if loc.ndim != 1 or loc.shape[0] != len(names):
+        if self.loc is not None and (loc.ndim != 1 or loc.shape[0] != len(names)):
             raise ValueError(
                 f"loc must have shape [{len(names)}]; "
                 f"got shape {tuple(loc.shape)}."
@@ -184,29 +180,14 @@ class LogLikelihood(SEM2LinearModelOperator):
             Detached scalar tensors: ``log_likelihood`` (mean) and
             ``log_likelihood_sum`` (sum over rows).
         """
-        if not isinstance(observations, DataBatch):
-            raise TypeError("observations must be a DataBatch.")
         batch = observations if self.observed_vars is None else observations.subset(self.observed_vars)
         x = batch.values.to(self.device)
         _check_observation_shape(x, len(batch.names), type(self).__name__)
 
         sigma = self.model.cov_matrix(batch.names)               # [p, p]
         x = x.to(dtype=sigma.dtype)
-        if not torch.isfinite(sigma).all():
-            raise ValueError(
-                f"{type(self).__name__} requires finite model-implied covariance. "
-                "Check that all exogenous distributions have finite second moments."
-            )
-
         loc = self._loc(dtype=sigma.dtype, names=batch.names)
-        if not torch.isfinite(loc).all():
-            raise ValueError(
-                f"{type(self).__name__} requires finite model-implied means. "
-                "Pass loc=... explicitly, use centered=True, or use exogenous "
-                "distributions with finite means."
-            )
-
-        L = torch.linalg.cholesky(sigma)                         # [p, p]
+        L = torch.linalg.cholesky_ex(sigma, check_errors=False).L  # [p, p]
         diff = (x - loc).T                                       # [p, n]
         # Mahalanobis term: ||L^-1 diff||^2 per observation.
         z = torch.linalg.solve_triangular(L, diff, upper=False)  # [p, n]
