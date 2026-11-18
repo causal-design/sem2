@@ -53,9 +53,9 @@ class DiscreteEnergyLoss:
         Overrides ``cfg.energy_score_beta``.
     unbiased : bool, optional
         Overrides ``cfg.energy_score_unbiased``.
-        Exclude same-row pairs from within-distribution distances. Corrected
-        terms require at least two probability rows, and two observations when
-        computing ``energy_dist``.
+        True uses distinct row pairs (U-statistic); False includes same-row
+        pairs (V-statistic). U-statistic terms require at least two probability
+        rows, and two observations when computing ``energy_dist``.
     """
 
     def __init__(self, cfg: TrainingConfig, states: DataBatch, *,

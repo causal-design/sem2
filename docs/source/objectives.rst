@@ -19,8 +19,13 @@ Set defaults in ``TrainingConfig``::
 
 Constructor arguments override the config. ``evaluate(..., sample_bs=..., beta=...)``
 temporarily overrides the draw count and exponent without changing stored settings.
-``unbiased=False`` at construction includes same-draw pairs instead of applying
-the finite-sample correction. The continuous loss is an energy score; the discrete
+For each within-sample pair term, ``unbiased=True`` uses a U-statistic: for
+``m`` rows it averages over the ``m * (m - 1)`` ordered pairs of distinct
+rows. ``unbiased=False`` uses a V-statistic: all ``m * m`` ordered pairs,
+including a row paired with itself. In the discrete model a row is a
+probability distribution, so its same-row contribution need not be zero.
+This setting does not change the cross term between data and model.
+The continuous loss is an energy score; the discrete
 loss also subtracts the data/data term and uses half-energy-distance scaling.
 
 ``DiscreteEnergyLoss(cfg, states)`` precomputes its distance matrix at construction

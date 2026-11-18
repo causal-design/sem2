@@ -50,7 +50,8 @@ def penalty_sweep(
     factory : callable
         Return a fresh model, a data-taking scalar fit loss to minimize, and a
         model-only scalar target. Both operators must use that model. The factory
-        controls initialization; returning a previously fitted model is rejected.
+        controls initialization. Reusing the same model for two weights in this
+        call is rejected.
     data : pandas.DataFrame
         Named observations, prepared with the existing complete-case policy.
     weights : sequence of float

@@ -15,8 +15,6 @@ if TYPE_CHECKING:
 
 
 class EnergyLoss(SEM2Operator):
-    # what does 'provisional energy code' mean?
-    # step-7 review: refers to our group reviewing the code? should this be deleted/updated before release
     """Compare observations with model draws or finite probabilities.
 
     Quantitative variables use their supplied scale; categorical variables require
@@ -104,7 +102,10 @@ class EnergyLoss(SEM2Operator):
         return loss.energy_dist(outcomes, prediction, beta=beta)
 
     def _prepare_discrete_loss(self, observations: DataBatch) -> DiscreteEnergyLoss:
-        """Construct once when observed names and scoring are known; reuse thereafter."""
+        """Reuse the state distances across batches and IV groups with the
+        same observed variables and scores. A different margin or scoring
+        requires a new distance matrix.
+        """
         if self.discrete_loss is None or self.discrete_loss.states.variables != observations.variables:
             states = DataBatch(self.model.all_states, self.model.state_node_names).select(observations.names)
             self.discrete_loss = DiscreteEnergyLoss(

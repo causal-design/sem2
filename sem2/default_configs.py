@@ -105,7 +105,8 @@ class TrainingConfig(BaseModel):
     energy_score_beta : float, default=1.0
         Distance exponent, strictly between zero and two.
     energy_score_unbiased : bool, default=True
-        Exclude same-draw pairs in energy losses. False uses all pairs.
+        Use distinct row pairs for within-sample energy terms (U-statistic).
+        False uses all row pairs, including the diagonal (V-statistic).
 
     Examples
     --------

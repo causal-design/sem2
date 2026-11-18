@@ -1,14 +1,21 @@
-Penalty sweeps
-==============
+Fitting across target weights
+=============================
 
 ``sem2.analysis`` provides higher-level analyses using the existing models,
 operators and trainer. ``penalty_sweep`` fits one fresh model per supplied weight,
 minimizing ``fit_loss + weight * target``. Positive weights favor smaller target
 values; negative weights favor larger ones. Zero requests an unpenalized fit.
 
-Supply a factory returning a fresh model, its data-taking scalar fit loss, and
-its model-only scalar target. Both operators must refer to that model. The fit
-loss must already follow a minimization convention; negate log-likelihood.
+Pass a function like ``build_problem`` below (without calling it).
+``penalty_sweep`` calls it once per weight so that training starts with a new
+model rather than the fit at the previous weight. It returns the model and two
+operators constructed for that model: a loss measuring fit to the data, and
+the target of interest. You choose the loss; ``fit`` does not select one from
+the model class. For maximum likelihood, for example, minimize the negative
+log-likelihood.
+
+The result is one fit per requested weight. The routine does not interpolate
+between these fits or extrapolate to zero weight.
 
 .. code-block:: python
 
@@ -21,7 +28,7 @@ loss must already follow a minimization convention; negate log-likelihood.
    from sem2.operators.potential_outcomes import MeanPotentialOutcome
    from sem2.operators.sem2_loss import SEM2Loss
 
-   def factory():
+   def build_problem():
        model = SEM2Linear("u ~ Normal(0,1); y <- 1*u", device="cpu")
        loss = SEM2Loss([(LogLikelihood(model), -1.)])
        # Fixing zero-mean noise at zero makes the target exactly the intercept.
@@ -30,7 +37,7 @@ loss must already follow a minimization convention; negate log-likelihood.
 
    config = TrainingConfig(device="cpu", optim="SGD", momentum=0., lr=0.5,
                            epochs=20, batch_size=3, sample_bs=1)
-   results = penalty_sweep(factory, pd.DataFrame({"y": [-1., 0., 1.]}),
+   results = penalty_sweep(build_problem, pd.DataFrame({"y": [-1., 0., 1.]}),
                            weights=[0.1, -0.1], config=config)
    for result in results:
        print(result.weight, result.fit_loss, result.target, result.max_abs_gradient)
@@ -52,9 +59,9 @@ weight decay. Small gradients do not prove global optimality, and Monte Carlo
 components make diagnostics noisy.
 
 Weights retain their input order. No warm starts, automatic weight selection,
-restart selection, extrapolation, or bound certification is performed. Repeat
-calls with fresh factories to assess initialization sensitivity. Factories control
-initialization; ``config.rng_seed`` retains its existing training-only meaning.
+restart selection, or bound certification is performed. To assess sensitivity
+to initialization, repeat the fits with different initial parameters in
+``build_problem``; ``config.rng_seed`` seeds training, not model construction.
 Without explicit seeds, the shared random stream is not reset. Returned models
 remain in memory; failures propagate rather than being silently omitted.
 

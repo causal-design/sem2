@@ -9,7 +9,6 @@ from ..model.models.discrete import SEM2Discrete
 
 
 class DiscreteIVEnergyLoss(EnergyLoss):
-    # provisional placeholder? not yet updated for release?
     """Fit conditional outcome distributions at each declared instrument level.
 
     Conditional half-energy distances use empirical instrument frequencies.
@@ -18,8 +17,7 @@ class DiscreteIVEnergyLoss(EnergyLoss):
 
     Callers supply a model encoding the IV assumptions. This class checks neither
     those causal assumptions nor identification, and does not certify effect or
-    bound recovery. The deferred work above requires separate implementation
-    and validation before this can be treated as a supported IV fitting API.
+    bound recovery.
 
     Parameters
     ----------
@@ -55,7 +53,11 @@ class DiscreteIVEnergyLoss(EnergyLoss):
             raise ValueError("The instrument requires at least two declared levels.")
 
     def _group_observations(self, observations: DataBatch) -> list[DataBatch]:
-        """Select conditional margins; the trainer checks level counts once."""
+        """Return one batch of endogenous observations per instrument level.
+
+        Group rows by their observed instrument value in ``self.levels`` order;
+        exclude the instrument column from the variables whose fit is scored.
+        """
         names = [n for n in observations.names if n in self.model.state_node_names]
         outcomes = observations.subset(names)
         z = observations.select(self.instrument)[:, 0]

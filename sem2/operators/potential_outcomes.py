@@ -16,7 +16,12 @@ if TYPE_CHECKING:
 
 
 def _fixed_intervention(model: SEM2, assignments: dict[str, float]) -> DataBatch | None:
-    """Validate scalar assignments once, before casting to the sampler dtype."""
+    """Pack a fixed regime into one named row for broadcasting across draws.
+
+    Check support before casting: rounding could turn an invalid state into
+    a valid one. Check finiteness again after casting to catch overflow.
+    An empty mapping leaves every equation unchanged.
+    """
     variables = []
     for name, value in assignments.items():
         if name not in model.input_node:
