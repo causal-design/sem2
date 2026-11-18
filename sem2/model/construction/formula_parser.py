@@ -10,7 +10,9 @@ import re
 import ast
 import difflib
 import keyword
+from itertools import pairwise
 
+from .admg import ADMG
 from .sem_ast import (
     Distribution,
     LinearTerm,
@@ -134,27 +136,32 @@ class FormulaParser:
         """Parse the formula, returning (node_specs, input_node).
 
         node_specs maps node name -> lowered NodeSpec. input_node is the set of
-        names that appear on any LHS.
+        names of individually addressable variables (endogenous variables and
+        isolated exogenous variables).
 
         Returns
         -------
         node_specs : dict[str, NodeSpec]
             Expanded graph specifications, including private helper nodes.
         input_node : set[str]
-            User-declared left-hand-side names, excluding generated helpers.
+            Addressable names, excluding generated helpers and clique sources
+            for variables with bidirected neighbours.
 
         Notes
         -----
         Parsing validates syntax, distribution names and repeated parents;
         graph construction separately validates references and acyclicity.
         """
-        formula_list, input_node = self._parse_formula(self.model_formula)
+        formula_list, input_node, edges = self._parse_formula(self.model_formula)
         self.statements = [self._parse_statement(f) for f in formula_list]
         node_specs = {st.name: self._lower(st) for st in self.statements}
         for spec in node_specs.values():
             if len(set(spec.predecessors)) != len(spec.predecessors):
                 raise ValueError(f"Repeated parent in equation for {spec.name!r}.")
-        return node_specs, input_node
+        self.admg = ADMG.from_equations(node_specs, edges)
+        self.clique_sources = self.admg.expand(node_specs)
+        # Names addressable on the executable DAG (a bundle is not a scalar).
+        return node_specs, input_node | (self.admg.exogenous & node_specs.keys())
 
     # ── Statement parsing (string -> AST) ─────────────────────────────────────
 
@@ -327,15 +334,20 @@ class FormulaParser:
 
     # ── Formula parsing ───────────────────────────────────────────────────────
 
-    def _parse_formula(self, model_formula: str) -> tuple[list[str], set[str]]:
+    def _parse_formula(self, model_formula: str) -> tuple[list[str], set[str], set[tuple[str, str]]]:
         # Semicolons inside d(...; levels=N) belong to that mechanism, not the statement list.
         formula_list = self._split_rhs(re.sub(r"\s+", "", model_formula), ";")
 
         expanded_list = []
         input_node = set()
+        edges = set()
         for formula in formula_list:
             if ":" in formula:
                 raise ValueError("':' is reserved for internal helper names.")
+            if "<->" in formula:
+                for a, b in pairwise(formula.split("<->")):
+                    edges.add((min(a, b), max(a, b)))
+                continue
             vars_, formulas = self._expand_lhs(formula)
             for name in vars_:
                 if not name.isidentifier() or keyword.iskeyword(name):
@@ -349,7 +361,7 @@ class FormulaParser:
         for formula in expanded_list:
             formula_list.extend(self._expand_rhs(formula))
 
-        return formula_list, input_node
+        return formula_list, input_node, edges
 
     def _expand_lhs(self, formula: str) -> tuple[list[str], list[str]]:
         if "~" in formula:

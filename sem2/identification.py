@@ -42,7 +42,7 @@ def project_to_admg(model: _DAG | str, *, observed: Collection[str]) -> NxMixedG
         raise TypeError("model must be a SEM2 model, parsed DAG, or formula string.")
     observed = _names(observed, "observed")
     scientific = {name for name, spec in dag.node_specs.items() if not spec.is_helper}
-    if unknown := observed - scientific:
+    if unknown := observed - dag.input_node:
         raise ValueError(f"Unknown or internal observed variables: {sorted(unknown)}")
 
     # Inline helper inputs in topological order, stopping at scientific variables.
