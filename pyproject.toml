@@ -11,6 +11,7 @@ license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = [
     "torch",
+    "networkx",
     "numpy",
     "pandas",
     "pydantic>=2",

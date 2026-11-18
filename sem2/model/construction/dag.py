@@ -28,7 +28,9 @@ class _DAG:
 
     Attributes:
         model_formula:     The original formula string.
-        input_node:        Set of node names that appear on any LHS.
+        input_node:        Individually addressable names in the executable model.
+        admg:              Named mixed graph before clique expansion.
+        clique_sources:    Mapping from each exogenous clique to its DAG root.
         statements:        The parsed AST (list of Statement) for downstream tooling.
         node_specs:        Dict of node_name -> NodeSpec. Single source of
                            truth for graph structure : built once, read by SEM2.
@@ -53,6 +55,8 @@ class _DAG:
         # only consumes the resulting specs.
         parser = FormulaParser(model_formula)
         self.node_specs, self.input_node = parser.parse()
+        self.admg = parser.admg
+        self.clique_sources = parser.clique_sources
         self.statements = parser.statements  # AST, for downstream tooling
 
         self._validate_referenced_nodes()

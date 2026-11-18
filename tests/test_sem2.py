@@ -27,7 +27,7 @@ def test_formula_lowering_preserves_names_coefficients_and_dependencies():
 
 @pytest.mark.parametrize('formula, message', [
     ('x <- y; y <- x', 'cycle'),
-    ('y <- x', 'undefined parent'),
+    ('y <- 2**x', 'Invalid exogenous variable'),
     ('e ~ Normal(0,', 'Could not parse'),
     ('e ~ NotARealDist(0,1)', 'Unknown distribution'),
     ('e ~ Normal(0,1); unobs(e)', 'Formula must contain'),
@@ -48,7 +48,7 @@ def test_nested_and_mixed_mechanisms_sample_and_backpropagate():
     assert model.inferred_sem_type == SEMType.NONLINEAR
     assert len([name for name in model.node_specs if name.startswith('y:')]) == 2
     draws, _ = model.sample(4)
-    assert set(draws.names) == {'e1', 'e2', 'e3', 'y'}
+    assert draws.names == ('y',)
     assert draws.select('y').shape == (4, 1)
     draws.select('y').sum().backward()
     parameters = list(model.parameters())
@@ -112,9 +112,8 @@ def test_intervention_replaces_incoming_edge_but_not_upstream_or_later_draws():
     natural, _ = model.sample(4)
     set_seed(7)
     intervened, _ = model.sample(4, do_intervention=DataBatch(torch.ones(4, 1), ['x']))
-    torch.testing.assert_close(intervened.select('e'), natural.select('e'))
     torch.testing.assert_close(intervened.select('x'), torch.ones(4, 1))
-    torch.testing.assert_close(intervened.select('y'), 3 + natural.select('e'))
+    torch.testing.assert_close(intervened.select('y'), 3 + natural.select('x') / 2)
     set_seed(7)
     subsequent, _ = model.sample(4)
     torch.testing.assert_close(subsequent.values, natural.values)

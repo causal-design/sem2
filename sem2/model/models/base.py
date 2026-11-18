@@ -1,6 +1,7 @@
 # Defer annotation evaluation so forward references in type hints resolve lazily
 # on Python < 3.14.
 from __future__ import annotations
+from collections.abc import Collection
 import warnings
 from dataclasses import replace
 import torch
@@ -211,7 +212,7 @@ class SEM2(_DAG, nn.Module):
         return values
 
     def sample(self, batch_size: int = 1, do_intervention: DataBatch | None = None) -> tuple[DataBatch, dict]:
-        """Return named draws and intervention provenance, excluding helpers.
+        """Return endogenous draws and intervention provenance.
 
         Parameters
         ----------
@@ -239,7 +240,7 @@ class SEM2(_DAG, nn.Module):
         return self._sample(batch_size, do_intervention)
 
     def _sample(self, batch_size: int, do_intervention: DataBatch | None,
-                target: str | None = None) -> tuple[DataBatch, dict]:
+                target: str | None = None, *, columns: Collection[str] | None = None) -> tuple[DataBatch, dict]:
         """One traversal for full samples and target-only queries.
 
         The private target option lets queries stop early without duplicating
@@ -247,6 +248,8 @@ class SEM2(_DAG, nn.Module):
         """
         if target is not None and target not in self.input_node:
             raise ValueError(f"Unknown or internal target node: {target!r}")
+        if columns is None:
+            columns = self.admg.endogenous if target is None else (target,)
         # Unwrap interventions once and retain their supplied variable metadata.
         interventions = self._unpack_interventions(do_intervention, batch_size)
         supplied = {} if do_intervention is None else dict(zip(do_intervention.names, do_intervention.variables))
@@ -259,13 +262,14 @@ class SEM2(_DAG, nn.Module):
             else:
                 node([self.node_dict[p].get_value() for p in node.predecessors], batch_size)
             # Keep compiler helpers out of the returned batch.
-            if not self.node_specs[name].is_helper and (target is None or name == target):
+            if name in columns:
                 values.append(node.get_value())
                 variables.append(supplied[name] if name in supplied else self._variable_info(name))
             if name == target:
                 break
         # Stack variable blocks in the same order as their metadata.
-        result = DataBatch(torch.cat(values, dim=-1), variables)
+        result = DataBatch(torch.cat(values, dim=-1) if values else
+                           torch.empty(batch_size, 0, device=self.device), variables)
         return result, {"interventions": do_intervention}
 
     def forward(self, *args, **kwargs):

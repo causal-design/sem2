@@ -66,6 +66,12 @@ Statements are separated by semicolons.
 | `y <- 1*x + 0.5*z` | Fix selected linear coefficients in the formula. |
 | `y <- n(x,z)` | Use a configurable MLP for a continuous mechanism. |
 | `y <- d(x,z; levels=2)` | Use a finite discrete mechanism with two states. |
+| `EX <-> EY` | Share exogenous inputs between neural or discrete mechanisms using bidirected clique expansion. |
+
+Right-hand-side variables without a defining equation default to independent
+standard-normal sources unless joined by bidirected edges. Ordinary samples
+return the endogenous variables defined by `<-`. See the
+[formula guide](docs/source/formulas.rst) for a worked example.
 
 Observed variables are determined by the data supplied to fitting and operators, rather than an `unobs(...)` clause in the structural formula. Select covariance variables explicitly by name, as in the example above.
 
