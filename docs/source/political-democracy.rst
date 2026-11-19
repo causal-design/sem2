@@ -20,8 +20,8 @@ does not establish convergence, and the reference estimates are not known causal
 effects. Shared residual noises impose a particular covariance parameterization;
 coefficient agreement alone does not establish equivalence to lavaan's model.
 
-The :download:`worked notebook <../linear_sem.ipynb>` explains the model,
+The :download:`worked notebook <../../notebooks/linear_sem_updated.ipynb>` explains the model,
 centering, latent-scale conversion and covariance comparisons. Open it in the
-checkout's ``docs/`` directory with a kernel using the installed SEM2 environment.
+checkout's ``notebooks/`` directory with a kernel using the installed SEM2 environment.
 The :download:`Python example <../../experiments/political_democracy.py>` contains
 the fitting and reporting code; the notebook calls the same functions.

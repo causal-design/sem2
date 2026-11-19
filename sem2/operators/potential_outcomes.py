@@ -1,5 +1,6 @@
 """Population means and contrasts under fixed model-implied interventions."""
 from __future__ import annotations
+from collections import Counter
 from copy import deepcopy
 from math import isfinite
 from typing import TYPE_CHECKING
@@ -19,36 +20,60 @@ def _intervention_batch(model: SEM2, assignments: dict[str, float]) -> DataBatch
     """Pack a fixed regime into one named row for broadcasting across draws.
 
     Check support before casting: rounding could turn an invalid state into
-    a valid one. Check finiteness again after casting to catch overflow.
+    a valid one. Check finiteness after casting to catch overflow.
     An empty mapping leaves every equation unchanged.
     """
+    if not assignments:
+        return None
     variables = []
     for name, value in assignments.items():
         if name not in model.input_node:
             raise ValueError(f"Unknown or internal intervention node: {name!r}")
         node = model.node_dict[name]
-        if node.out_dim != 1 or not isinstance(value, (int, float)) or not isfinite(value):
-            raise ValueError(f"Intervention on {name!r} requires a finite scalar number.")
+        if node.out_dim != 1 or not isinstance(value, (int, float)):
+            raise ValueError(f"Intervention on {name!r} requires a scalar number.")
         support = node.support
         if support.values is not None:
-            # Compare Python values before float32 rounding or integer conversion.
-            if support.values.detach().cpu().flatten().tolist().count(value) != 1:
-                raise ValueError(f"Intervention {name}={value} is outside its declared states.")
-        elif support.constraint is not None:
-            if support.constraint.is_discrete and value != int(value):
-                raise ValueError(f"Intervention {name}={value} requires an integer state.")
-            candidate = torch.tensor(value, dtype=torch.float64, device=model.device)
-            if not support.constraint.check(candidate).all():
-                raise ValueError(f"Intervention {name}={value} is outside its declared support.")
+            valid = value in support.values.flatten().tolist()
+        else:
+            valid = support.constraint is None or support.constraint.check(
+                torch.tensor(value, dtype=torch.float64, device=model.device)).all()
+        if not valid:
+            raise ValueError(f"Intervention {name}={value} is outside its declared support.")
         variables.append(model._variable_info(name))
-    if not variables:
-        return None
     parameter = next(model.parameters(), None)
     dtype = parameter.dtype if parameter is not None else torch.get_default_dtype()
     values = torch.tensor([list(assignments.values())], device=model.device, dtype=dtype)
     if not torch.isfinite(values).all():
         raise ValueError("Interventions must be finite in the model's floating dtype.")
     return DataBatch(values, variables)
+
+
+def _outcome_metadata(model: SEM2, outcome: str, variable: VariableInfo | None) -> VariableInfo:
+    """Resolve scalar outcome metadata and, if scored, match each state exactly once."""
+    if outcome not in model.input_node:
+        raise ValueError(f"Unknown or internal outcome: {outcome!r}")
+    declared = model._variable_info(outcome)
+    info = declared if variable is None else deepcopy(variable)
+    if info.name != outcome or info.dim != 1 or declared.dim != 1:
+        raise ValueError("MeanPotentialOutcome requires scalar outcome metadata matching the model.")
+    info.categorical = declared.categorical or info.categorical
+    scores = info.numeric_mapping
+    if scores is None:
+        if info.categorical:
+            message = f"Categorical outcome {outcome!r} requires explicit numerical scores (numeric_mapping)."
+            warnings.warn(message, stacklevel=3)
+            raise ValueError(message)
+        return info
+
+    if info.encoding is not None and scores.keys() != info.encoding.keys():
+        raise ValueError("Outcome scores must cover every encoded label.")
+    codes = info.encoding.values() if info.encoding is not None else scores.keys()
+    states = model.node_dict[outcome].support.values
+    if (states is None or Counter(codes) != Counter(states.flatten().tolist())
+            or not all(map(isfinite, scores.values()))):
+        raise ValueError("Outcome scores must be finite and cover each declared state exactly once.")
+    return info
 
 
 class PotentialOutcomeSample(SEM2Operator):
@@ -129,34 +154,12 @@ class MeanPotentialOutcome(SEM2Operator):
     def __init__(self, model: SEM2, *, outcome: str, intervention: dict[str, float],
                  sample_bs: int = 512, seed: int | None = None,
                  variable: VariableInfo | None = None) -> None:
-        if outcome not in model.input_node:
-            raise ValueError(f"Unknown or internal outcome: {outcome!r}")
         self.model = model
         self.outcome = outcome
         self.intervention = dict(intervention)
         self.sample_bs = sample_bs
         self.seed = seed
-        declared = model._variable_info(outcome)
-        self.variable = deepcopy(variable if variable is not None else declared)
-        if self.variable.name != outcome or self.variable.dim != 1 or declared.dim != 1:
-            raise ValueError("MeanPotentialOutcome requires scalar outcome metadata matching the model.")
-        if declared.categorical or self.variable.categorical:
-            self.variable.categorical = True
-            if self.variable.numeric_mapping is None:
-                message = (f"Categorical outcome {outcome!r} requires explicit numerical scores; "
-                           "supply a numeric_mapping, including an event-indicator score for probabilities.")
-                warnings.warn(message, stacklevel=2)
-                raise ValueError(message)
-        if self.variable.numeric_mapping is not None:
-            scores, encoding = self.variable.numeric_mapping, self.variable.encoding
-            support = model.node_dict[outcome].support.values
-            if encoding is not None and set(scores) != set(encoding):
-                raise ValueError("Outcome scores must cover every encoded label.")
-            codes = [encoding[label] if encoding is not None else label for label in scores]
-            if (support is None or len(set(codes)) != len(codes)
-                    or set(codes) != set(support.detach().cpu().flatten().tolist())
-                    or not all(isfinite(score) for score in scores.values())):
-                raise ValueError("Outcome scores must be finite and cover each declared state exactly once.")
+        self.variable = _outcome_metadata(model, outcome, variable)
         self._intervention = _intervention_batch(model, self.intervention)
         if SEMType.is_continuous(model.sem_type):
             self.sampler = PotentialOutcomeSample(model, outcome)

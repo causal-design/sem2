@@ -98,7 +98,7 @@ class DiscreteIVEnergyLoss(EnergyLoss):
         if unknown:
             raise ValueError(f"Unknown or internal observed variables: {sorted(unknown)}")
         groups = self._split_by_instrument(observations)
-        loss = self._loss_for_margin(groups[0])
+        loss = self._get_discrete_energy_loss(groups[0])
         instrument = observations.subset(self.instrument)
         total = 0
         metrics = {}

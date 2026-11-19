@@ -89,15 +89,12 @@ class EnergyLoss(SEM2Operator):
         names = [name for name in observations.names if name in self.model.state_node_names
                  and not self.model.node_specs[name].is_helper]
         outcomes = observations.subset(names)
-        loss = self._loss_for_margin(outcomes)
+        loss = self._get_discrete_energy_loss(outcomes)
         prediction, _ = self.model.sample(batch_size=sample_bs)
         return loss.energy_dist(outcomes, prediction)
 
-    def _loss_for_margin(self, observations: DataBatch) -> DiscreteEnergyLoss:
-        """Reuse the state distances across batches and IV groups with the
-        same observed variables and scores. A different margin or scoring
-        requires a new distance matrix.
-        """
+    def _get_discrete_energy_loss(self, observations: DataBatch) -> DiscreteEnergyLoss:
+        """Reuse cached state distances until the observed variables or their scores change."""
         if self.discrete_loss is None or self.discrete_loss.states.variables != observations.variables:
             states = DataBatch(self.model.all_states, self.model.state_node_names).select(observations.names)
             self.discrete_loss = DiscreteEnergyLoss(
