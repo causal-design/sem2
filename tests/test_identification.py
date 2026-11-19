@@ -1,7 +1,7 @@
 """Graphical identification against known causal graphs, without fitting."""
 import pytest
 
-from sem2.identification import is_identified, project_to_admg
+from sem2.identification import is_identified, marginalize_to_observed
 from sem2.model.models.base import SEM2
 from sem2.model.construction.admg import _ADMG
 
@@ -12,11 +12,11 @@ def test_marginalize_named_mixed_graph_without_expansion(monkeypatch):
 
     monkeypatch.setattr(_ADMG, "expand", no_expansion)
     formula = 'X <- n(a); Y <- n(b); Z <- n(c); a <-> b <-> c'
-    margin = project_to_admg(formula, observed=['X', 'Y', 'Z'])
+    margin = marginalize_to_observed(formula, observed=['X', 'Y', 'Z'])
     edges = {frozenset((a.name, b.name)) for a, b in margin.undirected.edges()}
     assert edges == {frozenset(('X', 'Y')), frozenset(('Y', 'Z'))}
     # b is a collider along a <-> b <-> c: hiding it cannot confound X and Z.
-    assert not project_to_admg(formula, observed=['X', 'Z']).undirected.edges()
+    assert not marginalize_to_observed(formula, observed=['X', 'Z']).undirected.edges()
     assert is_identified(formula, observed=['X', 'Z'], treatments='X', outcomes='Z')
 
 
@@ -29,8 +29,8 @@ def test_front_door_identification_depends_on_observing_the_mediator():
         is_identified(formula, observed=['A', 'Y'], treatments='U', outcomes='Y')
 
 
-def test_projection_preserves_paths_without_crossing_observed_nodes_or_colliders():
-    graph = project_to_admg(
+def test_marginalization_preserves_paths_without_crossing_observed_nodes_or_colliders():
+    graph = marginalize_to_observed(
         'U,E,F,I ~ Normal(0,1); A <- U; H <- A; B <- H; '
         'L <- U; C <- L; K <- E + F; Z <- K',
         observed=['A', 'B', 'C', 'E', 'F', 'Z', 'I'],
@@ -39,7 +39,7 @@ def test_projection_preserves_paths_without_crossing_observed_nodes_or_colliders
     assert {(a.name, b.name) for a, b in graph.directed.edges()} == {
         ('A', 'B'), ('E', 'Z'), ('F', 'Z'),
     }
-    # U confounds A and C, but the observed A blocks projection through to B.
+    # U confounds A and C; retaining A prevents an induced bidirected edge to B.
     # Marginalizing the collider K must not induce an E <-> F edge.
     assert {frozenset((a.name, b.name)) for a, b in graph.undirected.edges()} == {
         frozenset(('A', 'C')),
@@ -51,10 +51,10 @@ def test_helpers_preserve_scientific_graph():
     model = SEM2(formula)
     observed = ['u', 'x', 'y']
 
-    projected = project_to_admg(model, observed=observed)
-    flat = project_to_admg('u,v,w ~ Normal(0,1); x <- n(u,v,w); y <- n(x,w)',
-                           observed=observed)
-    assert projected == flat
+    margin = marginalize_to_observed(model, observed=observed)
+    flat = marginalize_to_observed('u,v,w ~ Normal(0,1); x <- n(u,v,w); y <- n(x,w)',
+                                   observed=observed)
+    assert margin == flat
     assert not is_identified(model, observed=observed, treatments='x', outcomes='y')
 
 

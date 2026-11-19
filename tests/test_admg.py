@@ -2,7 +2,7 @@ import pytest
 import torch
 
 from sem2.data.records import DataBatch
-from sem2.identification import is_identified, project_to_admg
+from sem2.identification import is_identified, marginalize_to_observed
 from sem2.model.models.base import SEM2
 from sem2.model.models.discrete import SEM2Discrete
 
@@ -22,7 +22,7 @@ def test_bow_agrees_with_explicit_dag_before_and_after_intervention():
             assert batch.names == ("X", "Y")
             draws.append(batch.values)
         torch.testing.assert_close(*draws)
-    graph = project_to_admg(models[0], observed=["X", "Y"])
+    graph = marginalize_to_observed(models[0], observed=["X", "Y"])
     assert [(u.name, v.name) for u, v in graph.directed.edges()] == [("X", "Y")]
     assert [{u.name, v.name} for u, v in graph.undirected.edges()] == [{"X", "Y"}]
     assert not is_identified(formula, observed=["X", "Y"], treatments="X", outcomes="Y")
@@ -59,5 +59,8 @@ def test_isolated_inferred_noise_matches_declared_standard_normal():
     ("X <- n(a); Y <- b; a <-> b", "linear term"),
 ])
 def test_unsupported_noise_declarations(formula, error):
-    with pytest.raises(ValueError, match=error):
+    with pytest.raises(ValueError, match=error) as construction:
         SEM2(formula)
+    with pytest.raises(ValueError, match=error) as identification:
+        is_identified(formula, observed=["X", "Y"], treatments="X", outcomes="Y")
+    assert str(identification.value) == str(construction.value)

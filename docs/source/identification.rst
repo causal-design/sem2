@@ -15,7 +15,7 @@ common cause of treatment and outcome:
 
 .. code-block:: python
 
-   from sem2.identification import is_identified, project_to_admg
+   from sem2.identification import is_identified, marginalize_to_observed
 
    formula = "U,e ~ Normal(0,1); A <- U; M <- A; Y <- M + U + e"
    observed = ["A", "M", "Y"]
@@ -25,7 +25,7 @@ common cause of treatment and outcome:
    assert not is_identified(formula, observed=["A", "Y"],
                             treatments="A", outcomes="Y")
 
-   graph = project_to_admg(formula, observed=observed)
+   graph = marginalize_to_observed(formula, observed=observed)
    # graph.directed stores causal edges; graph.undirected stores bidirected edges.
 
 Treatments and outcomes may each contain several names. They must be disjoint,
@@ -57,7 +57,7 @@ scores are needed for this graph-level check.
 API
 ---
 
-.. autofunction:: sem2.identification.project_to_admg
+.. autofunction:: sem2.identification.marginalize_to_observed
 
 .. autofunction:: sem2.identification.is_identified
 

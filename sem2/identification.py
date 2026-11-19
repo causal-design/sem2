@@ -12,7 +12,7 @@ from sem2.model.construction.formula_parser import FormulaParser
 from sem2.model.models.base import SEM2
 
 
-def project_to_admg(model: SEM2 | _ADMG | str, *, observed: Collection[str]) -> NxMixedGraph:
+def marginalize_to_observed(model: SEM2 | _ADMG | str, *, observed: Collection[str]) -> NxMixedGraph:
     """Marginalize the formula's ADMG to the observed variables for y0.
 
     Parameters
@@ -74,7 +74,7 @@ def is_identified(
     -------
     bool
         Whether the full intervention distribution is identified in the
-        nonparametric causal model represented by the projected graph.
+        nonparametric causal model represented by the marginalized graph.
 
     Raises
     ------
@@ -90,7 +90,7 @@ def is_identified(
     or identification under additional parametric or deterministic restrictions.
     Conditional queries, data fusion and latent targets are not supported.
     """
-    graph = project_to_admg(model, observed=observed)
+    graph = marginalize_to_observed(model, observed=observed)
     treatments = _names(treatments, "treatments")
     outcomes = _names(outcomes, "outcomes")
     if not outcomes:

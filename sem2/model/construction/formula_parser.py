@@ -141,7 +141,16 @@ class FormulaParser:
             if len(set(spec.predecessors)) != len(spec.predecessors):
                 raise ValueError(f"Repeated parent in equation for {spec.name!r}.")
         evaluation_order(node_specs)  # Reject directed cycles for graph-only queries too.
-        return node_specs, _ADMG.from_equations(node_specs, edges)
+        graph = _ADMG.from_equations(node_specs, edges)
+        # In the default SEM2 formula, these names denote collections of inputs
+        # to n(...) or d(...), not individual scalar variables.
+        shared = {n for edge in graph.bidirected for n in edge}
+        for spec in node_specs.values():
+            if spec.name in shared and spec.node_type == "exogenous":
+                raise ValueError(f"Cannot declare a distribution for bidirected variable {spec.name!r}.")
+            if spec.node_type == "linear" and shared.intersection(spec.predecessors):
+                raise ValueError(f"Bidirected exogenous variable in linear term of {spec.name!r} is unsupported.")
+        return node_specs, graph
 
     # ── Statement parsing (string -> AST) ─────────────────────────────────────
 

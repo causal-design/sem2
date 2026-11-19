@@ -44,6 +44,8 @@ Pass node configurations through `node_cfgs`, keyed by the left-hand-side node n
 
 ## Design conformance
 
+Use **marginalization** and **marginalize to** for product state spaces, probability distributions, and ADMGs. The graphical operation is motivated by taking the marginal probability distribution on the retained variables. Use these terms in code, tests, and documentation rather than “projection” or “latent projection” for this operation.
+
 Before changing model, data, or operator boundaries, read the agreed design direction in [`PROJECT.md`](PROJECT.md). Preserve compatibility with existing formulas, require named variable mappings at data boundaries, and keep application-specific roles out of graph-generic components.
 
 Detailed v0.1 plans are maintained in the private [documentation repository](https://github.com/causal-design/sem2-docs). Public issues and PRs must include the requirements and acceptance criteria needed to review their changes without private access. Distinguish target interfaces from inspected current behavior. Keep plan review separate from implementation review. Do not infer a numeric-column default from storage dtype or existing arithmetic on state codes.

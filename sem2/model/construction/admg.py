@@ -77,8 +77,6 @@ class _ADMG:
                 # ':' is reserved in user formulas. Each clique gets one draw.
                 name = "U:" + ":".join(clique)
                 for n in clique:
-                    if n in specs:
-                        raise ValueError(f"Cannot declare a distribution for bidirected variable {n!r}.")
                     bundles.setdefault(n, []).append(name)
             sources[clique] = name
             if name not in specs:
@@ -88,8 +86,6 @@ class _ADMG:
         for s in specs.values():
             if not any(p in bundles for p in s.predecessors):
                 continue
-            if s.node_type == "linear":
-                raise ValueError(f"Bidirected exogenous variable in linear term of {s.name!r} is unsupported.")
             # Within one n(...) or d(...), a shared input occurs only once.
             s.predecessors = list(dict.fromkeys(u for p in s.predecessors for u in bundles.get(p, [p])))
         return sources
