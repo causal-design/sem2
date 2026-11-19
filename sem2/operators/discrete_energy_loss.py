@@ -97,7 +97,7 @@ class DiscreteEnergyLoss:
 
     def _energy_components(
         self, observations: DataBatch, prediction: DiscreteJointDistribution,
-        *, beta: float | None,
+        *, beta: float | None, draw_weights: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """Return cross/pair distances, empirical rows, state distances and cell errors."""
         # Sum over unobserved state coordinates and align the remainder by name.
@@ -114,9 +114,22 @@ class DiscreteEnergyLoss:
         distances = (self.D_mat if beta is None or beta == self.beta
                      else _power_distances(self._distances, beta)).to(probabilities)
         # Average the cross-distance over independent data and model draws.
-        cross = empirical.mean(0) @ distances @ probabilities.mean(0)
-        pair = self._pair_distance(probabilities, distances)
-        error = (probabilities.mean(0) - empirical.mean(0)).abs()
+        if draw_weights is None:
+            mean = probabilities.mean(0)
+            pair = self._pair_distance(probabilities, distances)
+        else:
+            # Conditioning on a stratum changes the relative mass of each draw.
+            w = draw_weights / draw_weights.sum()
+            mean = w @ probabilities
+            pair = mean @ distances @ mean
+            if self.unbiased:
+                denom = 1 - w.square().sum()
+                if denom <= 0:
+                    raise ValueError("Conditional distinct-pair term needs two positive-weight draws.")
+                diagonal = ((probabilities @ distances) * probabilities).sum(1)
+                pair = (pair - w.square() @ diagonal) / denom
+        cross = empirical.mean(0) @ distances @ mean
+        error = (mean - empirical.mean(0)).abs()
         return cross, pair, empirical, distances, error
 
     def energy_score(self, observations: DataBatch, prediction: DiscreteJointDistribution,
@@ -151,7 +164,7 @@ class DiscreteEnergyLoss:
                         "total_variation": error.sum() / 2, "max_cell_error": error.max()}
 
     def energy_dist(self, observations: DataBatch, prediction: DiscreteJointDistribution,
-                    *, beta: float | None = None) -> tuple[ScalarResult, dict]:
+                    *, beta: float | None = None, draw_weights: torch.Tensor | None = None) -> tuple[ScalarResult, dict]:
         """Half-energy distance from observations [N, D] and predictions [M, S].
 
         Prediction states must match the fixed support; each pair correction
@@ -179,7 +192,8 @@ class DiscreteEnergyLoss:
             predicted probability margins, independently of numerical scores.
         """
         self._validate(observations, prediction, observed_pairs=True)
-        cross, pair, empirical, distances, error = self._energy_components(observations, prediction, beta=beta)
+        cross, pair, empirical, distances, error = self._energy_components(
+            observations, prediction, beta=beta, draw_weights=draw_weights)
         observed_pair = self._pair_distance(empirical, distances)
         result = ScalarResult(cross - pair / 2 - observed_pair / 2, "energy_distance", observations.variables)
         return result, {"estimated-true distance": cross, "estimated-estimated distance": pair,
