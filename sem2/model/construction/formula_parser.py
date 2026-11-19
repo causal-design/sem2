@@ -132,7 +132,7 @@ class FormulaParser:
         self.model_formula = model_formula
         self.statements: list[Statement] = []
 
-    def parse(self) -> tuple[dict[str, NodeSpec], _ADMG]:
+    def parse(self, *, joint_gaussian: bool = False) -> tuple[dict[str, NodeSpec], _ADMG]:
         """Return the mechanism specifications and named ADMG, before clique expansion."""
         formula_list, edges = self._parse_formula(self.model_formula)
         self.statements = [self._parse_statement(f) for f in formula_list]
@@ -142,6 +142,12 @@ class FormulaParser:
                 raise ValueError(f"Repeated parent in equation for {spec.name!r}.")
         evaluation_order(node_specs)  # Reject directed cycles for graph-only queries too.
         graph = _ADMG.from_equations(node_specs, edges)
+        if joint_gaussian:
+            if any(s.node_type != "linear" and
+                   not (s.node_type == "exogenous" and s.dist_name == "Normal")
+                   for s in node_specs.values()):
+                raise ValueError("SEM2LinearGaussian requires linear equations and Normal exogenous variables.")
+            return node_specs, graph
         # In the default SEM2 formula, these names denote collections of inputs
         # to n(...) or d(...), not individual scalar variables.
         shared = {n for edge in graph.bidirected for n in edge}
