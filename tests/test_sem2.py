@@ -4,7 +4,6 @@ import torch
 
 from sem2.data.records import DataBatch, VariableInfo
 from sem2.default_configs import LinearNodeConfig, MLPConfig
-from sem2.model.construction.dag import _DAG
 from sem2.model.construction.sem_types import SEMType
 from sem2.model.models.base import SEM2
 from sem2.model.models.linear import SEM2Linear
@@ -14,9 +13,9 @@ from sem2.utils import set_seed
 
 
 def test_formula_lowering_preserves_names_coefficients_and_dependencies():
-    dag = _DAG(' y <- -0.5*x + e2; x <- 1*e1; e1, e2 ~ Normal( 0 , 1 ) ')
+    dag = SEM2Linear(' y <- -0.5*x + e2; x <- 1*e1; e1, e2 ~ Normal( 0 , 1 ) ')
     assert dag.input_node == {'e1', 'e2', 'x', 'y'}
-    assert dag.graph == {'e1': [], 'e2': [], 'x': ['e1'], 'y': ['x', 'e2']}
+    assert dag.admg.directed == {('e1', 'x'), ('x', 'y'), ('e2', 'y')}
     assert dag.node_specs['e1'].dist_params == ([0., 1.], {})
     assert dag.node_specs['y'].coefficients == [-0.5, None]
     order = dag.topological_order
@@ -34,7 +33,7 @@ def test_formula_lowering_preserves_names_coefficients_and_dependencies():
 ])
 def test_invalid_formulas_fail_at_construction(formula, message):
     with pytest.raises(ValueError, match=message):
-        _DAG(formula)
+        SEM2Linear(formula)
 
 
 def test_unused_node_configuration_is_rejected():

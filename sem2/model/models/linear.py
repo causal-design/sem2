@@ -184,6 +184,6 @@ class SEM2Linear(SEM2):
         sigma = a_inv @ torch.diag(omega) @ a_inv.T
 
         if nodes is not None:
-            idx = torch.tensor(self._index(nodes), device=self.device)
+            idx = torch.tensor([self._node_index[n] for n in nodes], device=self.device)
             sigma = sigma.index_select(0, idx).index_select(1, idx)
         return sigma

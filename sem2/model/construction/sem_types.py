@@ -32,6 +32,16 @@ class SEMType(Enum):
     DISCRETE            = "discrete"
     MIXED               = "mixed"
 
+    @classmethod
+    def from_specs(cls, specs) -> SEMType:
+        kinds = {s.node_type for s in specs if s.node_type != "exogenous"}
+        if kinds <= {"linear"}:
+            gaussian = all(s.dist_name == "Normal" for s in specs if s.node_type == "exogenous")
+            return cls.LINEAR_GAUSSIAN if gaussian else cls.LINEAR
+        if "discrete" not in kinds:
+            return cls.NONLINEAR
+        return cls.DISCRETE if kinds == {"discrete"} else cls.MIXED
+
     @staticmethod
     def is_continuous(sem_type: SEMType) -> bool:
         """Return whether sem_type is LINEAR_GAUSSIAN, LINEAR or NONLINEAR."""

@@ -36,10 +36,11 @@ errors rather than returning ``False``.
 Graph semantics and limits
 --------------------------
 
-Compiler helpers are inlined before latent projection. The projection preserves
-directed paths through latent variables and latent common causes, rather than
-simply deleting unobserved vertices. The returned ``y0.graph.NxMixedGraph`` also
-retains isolated observed variables.
+Identification marginalizes the named ADMG directly; it does not generate
+clique sources or construct an executable model. For example, hiding ``a`` and
+``b`` on ``X <- a <-> b -> Y`` leaves ``X <-> Y``. Hiding the middle vertex of
+``a <-> b <-> c`` alone does not create ``a <-> c``. With no hidden vertices,
+the original edges and isolated vertices are passed directly to ``y0``.
 
 The check uses declared dependencies only, ignoring coefficients (including fixed
 zeros), noise distributions, fitted weights, and deterministic restrictions.

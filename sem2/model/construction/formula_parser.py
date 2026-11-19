@@ -3,7 +3,7 @@
 FormulaParser turns a formula string into an AST (see sem_ast), validates it,
 and lowers it to NodeSpec objects. This is the natural home for everything that
 knows about the *surface syntax* of the language and available distributions,
-so _DAG can stay a pure graph structure with no pytorch knowledge.
+including construction of the named mixed graph.
 """
 from __future__ import annotations
 import re
@@ -12,7 +12,7 @@ import difflib
 import keyword
 from itertools import pairwise
 
-from .admg import ADMG
+from .admg import _ADMG, evaluation_order
 from .sem_ast import (
     Distribution,
     LinearTerm,
@@ -125,43 +125,23 @@ class FormulaParser:
     --------
     Parse a scalar linear model::
 
-        node_specs, input_node = FormulaParser("u ~ Normal(0,1); y <- 2*u").parse()
+        node_specs, graph = FormulaParser("u ~ Normal(0,1); y <- 2*u").parse()
     """
 
     def __init__(self, model_formula: str) -> None:
         self.model_formula = model_formula
         self.statements: list[Statement] = []
 
-    def parse(self) -> tuple[dict[str, NodeSpec], set[str]]:
-        """Parse the formula, returning (node_specs, input_node).
-
-        node_specs maps node name -> lowered NodeSpec. input_node is the set of
-        names of individually addressable variables (endogenous variables and
-        isolated exogenous variables).
-
-        Returns
-        -------
-        node_specs : dict[str, NodeSpec]
-            Expanded graph specifications, including private helper nodes.
-        input_node : set[str]
-            Addressable names, excluding generated helpers and clique sources
-            for variables with bidirected neighbours.
-
-        Notes
-        -----
-        Parsing validates syntax, distribution names and repeated parents;
-        graph construction separately validates references and acyclicity.
-        """
-        formula_list, input_node, edges = self._parse_formula(self.model_formula)
+    def parse(self) -> tuple[dict[str, NodeSpec], _ADMG]:
+        """Return the mechanism specifications and named ADMG, before clique expansion."""
+        formula_list, edges = self._parse_formula(self.model_formula)
         self.statements = [self._parse_statement(f) for f in formula_list]
         node_specs = {st.name: self._lower(st) for st in self.statements}
         for spec in node_specs.values():
             if len(set(spec.predecessors)) != len(spec.predecessors):
                 raise ValueError(f"Repeated parent in equation for {spec.name!r}.")
-        self.admg = ADMG.from_equations(node_specs, edges)
-        self.clique_sources = self.admg.expand(node_specs)
-        # Names addressable on the executable DAG (a bundle is not a scalar).
-        return node_specs, input_node | (self.admg.exogenous & node_specs.keys())
+        evaluation_order(node_specs)  # Reject directed cycles for graph-only queries too.
+        return node_specs, _ADMG.from_equations(node_specs, edges)
 
     # ── Statement parsing (string -> AST) ─────────────────────────────────────
 
@@ -226,7 +206,7 @@ class FormulaParser:
 
         Preserve ordered parents, fixed versus learned coefficients, intercepts,
         levels and helper status. No tensors, random draws or fitted parameters
-        are created here; _DAG checks graph structure and SEM2 constructs nodes.
+        are created here; SEM2 constructs executable nodes.
         """
         if isinstance(st, ExogenousDecl):
             return NodeSpec(
@@ -334,7 +314,7 @@ class FormulaParser:
 
     # ── Formula parsing ───────────────────────────────────────────────────────
 
-    def _parse_formula(self, model_formula: str) -> tuple[list[str], set[str], set[tuple[str, str]]]:
+    def _parse_formula(self, model_formula: str) -> tuple[list[str], set[tuple[str, str]]]:
         # Semicolons inside d(...; levels=N) belong to that mechanism, not the statement list.
         formula_list = self._split_rhs(re.sub(r"\s+", "", model_formula), ";")
 
@@ -361,7 +341,7 @@ class FormulaParser:
         for formula in expanded_list:
             formula_list.extend(self._expand_rhs(formula))
 
-        return formula_list, input_node, edges
+        return formula_list, edges
 
     def _expand_lhs(self, formula: str) -> tuple[list[str], list[str]]:
         if "~" in formula:

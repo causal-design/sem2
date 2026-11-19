@@ -9,7 +9,8 @@ from torch import nn
 from torch import Tensor
 
 from ..components.nodes import NodeExogenous, NodeLinear, NodeMLP, NodeMLPDiscrete, SEM2Node
-from ..construction.dag import _DAG
+from ..construction.admg import evaluation_order
+from ..construction.formula_parser import FormulaParser
 from ..construction.sem_types import SEMType
 from ...data.records import DataBatch, VariableInfo
 from ...default_configs import LinearNodeConfig, MLPConfig
@@ -24,11 +25,8 @@ from ...default_configs import LinearNodeConfig, MLPConfig
 # Wording is currently quite different
 # E.g. here: continuous SEM. Associatied with a DAG whose nodes are PyTorch modules.
 # (see linear and discrete model definitions for the other comments)
-class SEM2(_DAG, nn.Module):
-    """Structural Equation Model: a DAG whose nodes are PyTorch modules.
-
-    Inherits graph structure and parsing from DAG, and parameter registration
-    and training from nn.Module.
+class SEM2(nn.Module):
+    """Structural equation model with a named ADMG and executable PyTorch nodes.
 
     Attributes
     ----------
@@ -42,8 +40,8 @@ class SEM2(_DAG, nn.Module):
         Parent-before-child order including helpers.
     node_order : list[str]
         Canonical matrix order, copied from topological_order.
-    graph : dict[str, list[str]]
-        Node names mapped to ordered parent names.
+    admg : _ADMG
+        The named mixed graph, before expansion into executable nodes.
     statements : list
         Typed syntax records produced by formula parsing.
     inferred_sem_type : SEMType
@@ -74,8 +72,17 @@ class SEM2(_DAG, nn.Module):
         device : str or torch.device, default="cpu"
             Device for node parameters and exogenous distribution tensors.
         """
-        _DAG.__init__(self, model_formula)
-        nn.Module.__init__(self)
+        super().__init__()
+        self.model_formula = model_formula
+        parser = FormulaParser(model_formula)
+        self.node_specs, self.admg = parser.parse()
+        self.statements = parser.statements
+        self.clique_sources = self.admg.expand(self.node_specs)
+        self.input_node = self.admg.endogenous | (self.admg.exogenous & self.node_specs.keys())
+        self.topological_order = evaluation_order(self.node_specs)
+        self.node_order = self.topological_order
+        self._node_index = {n: i for i, n in enumerate(self.node_order)}
+        self.inferred_sem_type = SEMType.from_specs(self.node_specs.values())
         self.device = device
 
         # Compare the formula's inferred type against the type this class expects,

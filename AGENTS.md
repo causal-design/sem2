@@ -5,7 +5,7 @@ SEM2 is a research-stage PyTorch implementation of structural equation models. R
 ## Source map
 
 - `sem2/model/construction/formula_parser.py`: formula grammar, validation, and lowering to node specifications.
-- `sem2/model/construction/dag.py`: graph validation, topological order, observed-variable list, and inferred model type.
+- `sem2/model/construction/admg.py`: the named mixed graph, marginalization, and clique expansion for execution.
 - `sem2/model/components/nodes.py`: exogenous, linear, continuous MLP, and discrete MLP nodes.
 - `sem2/model/models/base.py`: general continuous `SEM2` construction and sampling.
 - `sem2/model/models/linear.py`: scalar linear path coefficients and model-implied moments.

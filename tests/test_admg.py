@@ -3,7 +3,6 @@ import torch
 
 from sem2.data.records import DataBatch
 from sem2.identification import is_identified, project_to_admg
-from sem2.model.construction.dag import _DAG
 from sem2.model.models.base import SEM2
 from sem2.model.models.discrete import SEM2Discrete
 
@@ -31,12 +30,12 @@ def test_bow_agrees_with_explicit_dag_before_and_after_intervention():
 
 def test_chain_vs_triangle_and_shared_inputs_in_one_mechanism():
     text = "A <-> B <-> C; Z <- n(A,B,C)"
-    dag = _DAG(text)
+    dag = SEM2(text)
     expected = {("A",), ("B",), ("C",), ("A", "B"), ("B", "C")}
     assert set(dag.clique_sources) == expected
-    triangle = _DAG(text + "; C <-> A; B <-> A")
+    triangle = SEM2(text + "; C <-> A; B <-> A")
     assert set(triangle.clique_sources) == expected | {("A", "C"), ("A", "B", "C")}
-    assert len(triangle.graph["Z"]) == len(set(triangle.graph["Z"])) == 7
+    assert len(triangle.node_specs["Z"].predecessors) == len(set(triangle.node_specs["Z"].predecessors)) == 7
 
 
 def test_discrete_sources_are_integrated_conditionally():
@@ -61,4 +60,4 @@ def test_isolated_inferred_noise_matches_declared_standard_normal():
 ])
 def test_unsupported_noise_declarations(formula, error):
     with pytest.raises(ValueError, match=error):
-        _DAG(formula)
+        SEM2(formula)

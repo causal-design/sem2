@@ -3,6 +3,21 @@ import pytest
 
 from sem2.identification import is_identified, project_to_admg
 from sem2.model.models.base import SEM2
+from sem2.model.construction.admg import _ADMG
+
+
+def test_marginalize_named_mixed_graph_without_expansion(monkeypatch):
+    def no_expansion(*args):
+        pytest.fail("graphical queries must not expand cliques")
+
+    monkeypatch.setattr(_ADMG, "expand", no_expansion)
+    formula = 'X <- n(a); Y <- n(b); Z <- n(c); a <-> b <-> c'
+    margin = project_to_admg(formula, observed=['X', 'Y', 'Z'])
+    edges = {frozenset((a.name, b.name)) for a, b in margin.undirected.edges()}
+    assert edges == {frozenset(('X', 'Y')), frozenset(('Y', 'Z'))}
+    # b is a collider along a <-> b <-> c: hiding it cannot confound X and Z.
+    assert not project_to_admg(formula, observed=['X', 'Z']).undirected.edges()
+    assert is_identified(formula, observed=['X', 'Z'], treatments='X', outcomes='Z')
 
 
 def test_front_door_identification_depends_on_observing_the_mediator():
