@@ -54,7 +54,7 @@ class SEM2LinearGaussian(SEM2Linear):
             corr = corr + raw / (1 - torch.linalg.eigvalsh(raw)[0])
         return scale[:, None] * corr * scale
 
-    def _noise_covariance_in_node_order(self, reference):
+    def _full_noise_covariance(self, reference):
         """Embed the joint noise covariance in the full node-by-node matrix."""
         matrix = reference.new_zeros(reference.shape)
         ix = torch.tensor([self._node_index[n] for n in self.noise_names],

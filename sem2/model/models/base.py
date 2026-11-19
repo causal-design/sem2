@@ -37,9 +37,7 @@ class SEM2(nn.Module):
     input_node : set[str]
         User-declared names, excluding helpers; not observation status.
     topological_order : list[str]
-        Parent-before-child order including helpers.
-    node_order : list[str]
-        Canonical matrix order, copied from topological_order.
+        Parent-before-child order including helpers, also used for full model matrices.
     admg : _ADMG
         The named mixed graph, before expansion into executable nodes.
     statements : list
@@ -79,8 +77,7 @@ class SEM2(nn.Module):
         self.statements = parser.statements
         self.input_node = self.admg.endogenous | (self.admg.exogenous & self.node_specs.keys())
         self.topological_order = evaluation_order(self.node_specs)
-        self.node_order = self.topological_order
-        self._node_index = {n: i for i, n in enumerate(self.node_order)}
+        self._node_index = {n: i for i, n in enumerate(self.topological_order)}
         self.inferred_sem_type = SEMType.from_specs(self.node_specs.values())
         self.device = device
 
