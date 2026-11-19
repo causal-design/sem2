@@ -73,7 +73,7 @@ Node configuration is passed through `node_cfgs`, keyed by the variable on the l
 
 ## Interventions and causal interpretation
 
-`set_nodes` replaces selected node values while the remaining equations are evaluated:
+`do_intervention` replaces selected node values while the remaining equations are evaluated:
 
 ```python
 import torch
@@ -82,7 +82,7 @@ from sem2.data.records import DataBatch
 n = 100
 samples_do_x1, _ = model.sample(
     batch_size=n,
-    set_nodes=DataBatch(torch.ones(n, 1), ["x"]),
+    do_intervention=DataBatch(torch.ones(n, 1), ["x"]),
 )
 ```
 
@@ -97,6 +97,10 @@ This computes the intervention implied by the specified structural model. It doe
 - [`sem2/trainer/trainer.py`](sem2/trainer/trainer.py) contains the package trainer.
 - [`tests/`](tests/) contains the pytest suite.
 - [`experiments/`](experiments/) and [`notebooks/`](notebooks/) contain research and demonstration code, some of which uses older APIs.
+
+For fits across signed target weights, use `solution_path` from
+`sem2.analysis.solution_path`. Energy losses take a construction-time `beta`
+and `pair_estimator` (`"Ustat"` or `"Vstat"`); see the [objective guide](docs/source/objectives.rst).
 
 ## Testing
 

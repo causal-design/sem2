@@ -117,7 +117,7 @@ fitted models, empirical covariance and an independent numerical reference.
 - **Generated values:** `SEM2.sample` and `SEM2Linear.sample` return
   `(DataBatch, auxiliary)`. Columns cover user-declared nodes; select the observed
   subset explicitly rather than assuming latent variables were excluded.
-- **Interventions:** `set_nodes` is a `DataBatch` of fixed named values, with one
+- **Interventions:** `do_intervention` is a `DataBatch` of fixed named values, with one
   row per requested draw. The sampler replaces those node equations and retains
   the intervention batch in `auxiliary["interventions"]`. Callers supply valid
   stored values; this low-level input does not encode labels or broadcast rows.
@@ -128,7 +128,7 @@ Continuing the example:
 
 ```python
 fixed = DataBatch(torch.ones(3, 1), ["x"])
-draws, auxiliary = model.sample(3, set_nodes=fixed)
+draws, auxiliary = model.sample(3, do_intervention=fixed)
 observed_draws = draws.subset(["x", "y"])  # DataBatch: values and metadata.
 y_values = observed_draws.select("y")      # Tensor of shape [3, 1].
 assert torch.equal(observed_draws.select("x"), fixed.values)

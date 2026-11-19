@@ -42,8 +42,8 @@ def get_optimiser(model: nn.Module, cfg: TrainingConfig) -> torch.optim.Optimize
 class SEM2Trainer:
     """Prepare once, then minimize an explicit scalar objective in place.
 
-    Ordinary tensor minibatches use PyTorch's shuffled DataLoader. Specialized
-    IV-valid batching is deferred; no stratification or group balancing is done.
+    Ordinary tensor minibatches use PyTorch's shuffled DataLoader. IV objectives
+    require one full-data batch; no stratification or group balancing is done.
 
     Parameters
     ----------
@@ -79,6 +79,7 @@ class SEM2Trainer:
             sem, data, variables=variables, device=cfg.device,
         )
         self.variables = batch.variables
+        objective.validate_fit_data(batch, cfg.batch_size)
         self.loader = DataLoader(TensorDataset(batch.values), batch_size=cfg.batch_size, shuffle=True)
         if self.preparation_report["dropped_rows"]:
             logger.warning("Dropped %d rows with missing values.", self.preparation_report["dropped_rows"])
@@ -138,6 +139,7 @@ def fit(model: SEM2, data: pd.DataFrame, objective: SEM2Operator, config: Traini
     config : TrainingConfig
         Optimizer, learning rate, epoch budget, batch size and device settings.
         An explicit ``rng_seed`` reseeds training; ``None`` does not reseed.
+        IV objectives require ``batch_size`` at least the retained row count.
     variables : list[VariableInfo], optional
         Column metadata for data preparation, including categorical encodings.
         Names must match the normalized DataFrame column names.
@@ -156,15 +158,15 @@ def fit(model: SEM2, data: pd.DataFrame, objective: SEM2Operator, config: Traini
 
 
 def main():
-    """Compatibility smoke demo, not validation of the deferred IV fitting API."""
+    """Small IV fitting smoke demo, not a fit-recovery benchmark."""
+    from ..operators.discrete_iv import DiscreteIVEnergyLoss
     from ..data.dummy import DummyDiscreteDataloader
     from ..default_configs import MLPConfig
     from ..model.models.discrete import SEM2Discrete
-    from ..operators.discrete_iv import DiscreteIVEnergyLoss
 
     set_seed(0)
     logging.basicConfig(level=logging.INFO)
-    cfg = TrainingConfig(device="cpu", epochs=1, batch_size=64, sample_bs=32)
+    cfg = TrainingConfig(device="cpu", epochs=1, batch_size=128, sample_bs=32)
     model = SEM2Discrete("Z ~ Categorical(probs=[1,1]); X <- d(Z; levels=2); Y <- d(X; levels=2)", node_cfgs={
         "X": MLPConfig(hidden_dims=[8]),
         "Y": MLPConfig(hidden_dims=[8]),
