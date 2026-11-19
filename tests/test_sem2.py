@@ -123,7 +123,7 @@ def test_intervention_replaces_incoming_edge_but_not_upstream_or_later_draws():
 def test_linear_moments_and_named_order_match_analytical_chain():
     model = SEM2Linear('e ~ Normal(2,1); noise ~ Normal(0,1); '
                        'x <- 1*e + 0; y <- 2*x + 1*noise + 3')
-    indices = [model.node_order.index(name) for name in ['x', 'y']]
+    indices = [model.topological_order.index(name) for name in ['x', 'y']]
     torch.testing.assert_close(model.mean_vector()[indices], torch.tensor([2., 7.]))
     torch.testing.assert_close(model.cov_matrix(['y', 'x']), torch.tensor([[5., 2.], [2., 1.]]))
     coefficients = model.coef_matrix()

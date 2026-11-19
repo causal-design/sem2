@@ -37,9 +37,7 @@ class SEM2(nn.Module):
     input_node : set[str]
         User-declared names, excluding helpers; not observation status.
     topological_order : list[str]
-        Parent-before-child order including helpers.
-    node_order : list[str]
-        Canonical matrix order, copied from topological_order.
+        Parent-before-child order including helpers, also used for full model matrices.
     admg : _ADMG
         The named mixed graph, before expansion into executable nodes.
     statements : list
@@ -75,13 +73,11 @@ class SEM2(nn.Module):
         super().__init__()
         self.model_formula = model_formula
         parser = FormulaParser(model_formula)
-        self.node_specs, self.admg = parser.parse()
+        self.node_specs, self.admg, self.clique_sources = self._compile(parser)
         self.statements = parser.statements
-        self.clique_sources = self.admg.expand(self.node_specs)
         self.input_node = self.admg.endogenous | (self.admg.exogenous & self.node_specs.keys())
         self.topological_order = evaluation_order(self.node_specs)
-        self.node_order = self.topological_order
-        self._node_index = {n: i for i, n in enumerate(self.node_order)}
+        self._node_index = {n: i for i, n in enumerate(self.topological_order)}
         self.inferred_sem_type = SEMType.from_specs(self.node_specs.values())
         self.device = device
 
@@ -98,6 +94,18 @@ class SEM2(nn.Module):
         # Register all nodes as submodules so PyTorch tracks parameters
         self.node_dict = nn.ModuleDict(name_to_node)
         self.node_dict.to(device)
+
+    def _compile(self, parser):
+        specs, graph = parser.parse()
+        return specs, graph, graph.expand(specs)
+
+    def _draw_joint_exogenous(self, batch_size):
+        """Return named draws for exogenous variables that must be sampled together.
+
+        By default each exogenous node samples itself during traversal. The
+        Gaussian subclass supplies columns of a joint draw here instead.
+        """
+        return {}
 
     def _check_sem_type(self) -> None:
         """Warn if the formula's inferred sem_type differs from the sem_type this
@@ -259,6 +267,7 @@ class SEM2(nn.Module):
             columns = self.admg.endogenous if target is None else (target,)
         # Unwrap interventions once and retain their supplied variable metadata.
         interventions = self._unpack_interventions(do_intervention, batch_size)
+        joint = self._draw_joint_exogenous(batch_size)
         supplied = {} if do_intervention is None else dict(zip(do_intervention.names, do_intervention.variables))
         values, variables = [], []
         # Evaluate parents first, replacing intervened equations with fixed values.
@@ -266,6 +275,8 @@ class SEM2(nn.Module):
             node = self.node_dict[name]
             if name in interventions:
                 node.set_value(interventions[name])
+            elif name in joint:
+                node.set_value(joint[name])
             else:
                 node([self.node_dict[p].get_value() for p in node.predecessors], batch_size)
             # Keep compiler helpers out of the returned batch.

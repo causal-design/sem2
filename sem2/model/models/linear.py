@@ -21,7 +21,7 @@ class SEM2Linear(SEM2):
     """Linear subclass of SEM2: every endogenous node is a linear function of its parents.
 
     For a linear SEM the whole model is summarised by two matrices over the node
-    set (ordered by `node_order`, the topological order):
+    set in topological order:
 
         - the path-coefficient matrix B, where B[i, j] is the coefficient of
           node j in node i's structural equation (0 if j is not a parent of i),
@@ -72,7 +72,7 @@ class SEM2Linear(SEM2):
 
     def _assert_scalar_nodes(self) -> None:
         """coef_matrix / cov_matrix assume every node is scalar (out_dim == 1)."""
-        bad = [n for n in self.node_order if self.node_dict[n].out_dim != 1]
+        bad = [n for n in self.topological_order if self.node_dict[n].out_dim != 1]
         if bad:
             raise ValueError(
                 f"SEM2Linear requires scalar nodes (out_dim == 1). "
@@ -80,7 +80,7 @@ class SEM2Linear(SEM2):
             )
 
         vector_exog = []
-        for name in self.node_order:
+        for name in self.topological_order:
             node = self.node_dict[name]
             if isinstance(node, NodeExogenous) and (node.dist.batch_shape or node.dist.event_shape):
                 vector_exog.append(name)
@@ -95,7 +95,7 @@ class SEM2Linear(SEM2):
 
     def coef_matrix(self) -> Tensor:
         # don't understand what '(effective, i.e. fixed-or-learned)' means?
-        """Path-coefficient matrix B over all nodes in `node_order`.
+        """Path-coefficient matrix B over all nodes in topological order.
 
         B[i, j] is the (effective, i.e. fixed-or-learned) coefficient of node j
         in node i's linear equation, and 0 if j is not a parent of i. Exogenous
@@ -106,9 +106,9 @@ class SEM2Linear(SEM2):
         torch.Tensor
             Shape (n_nodes, n_nodes), retaining gradients of learned coefficients.
         """
-        N = len(self.node_order)
+        N = len(self.topological_order)
         B = torch.zeros(N, N, device=self.device)
-        for name in self.node_order:
+        for name in self.topological_order:
             node = self.node_dict[name]
             if isinstance(node, NodeLinear):
                 # effective_weight is [1, input_dim]; scalar parents -> one col each.
@@ -131,12 +131,12 @@ class SEM2Linear(SEM2):
         Returns
         -------
         torch.Tensor
-            Shape (n_nodes,), in ``node_order``. Requires finite exogenous means.
+            Shape (n_nodes,), in topological order. Requires finite exogenous means.
         """
-        N = len(self.node_order)
+        N = len(self.topological_order)
         B = self.coef_matrix()
         c = torch.zeros(N, device=self.device)
-        for name in self.node_order:
+        for name in self.topological_order:
             node = self.node_dict[name]
             i = self._node_index[name]
             if isinstance(node, NodeExogenous):
@@ -151,27 +151,39 @@ class SEM2Linear(SEM2):
     def cov_matrix(self, nodes: list[str] | None = None) -> Tensor:
         r"""Model-implied covariance :math:`\Sigma = (I-B)^{-1}\Omega(I-B)^{-\mathsf{T}}`
 
-        Omega is the diagonal covariance of the exogenous inputs (the variance of
-        each exogenous node's distribution; 0 for endogenous nodes). If `nodes`
+        Omega contains the exogenous covariance in the corresponding rows and
+        columns of the full matrix; endogenous rows and columns are zero. Its
+        exogenous block is diagonal for independent inputs. If `nodes`
         is given, the covariance is restricted to those nodes (e.g. the observed
         variables), in the given order.
 
         Parameters
         ----------
         nodes : list[str], optional
-            Selected node names. Defaults to all nodes in ``node_order``.
+            Selected node names. Defaults to all nodes in topological order.
 
         Returns
         -------
         torch.Tensor
             Shape (n_selected, n_selected), retaining parameter gradients.
-            Requires finite variances and independent scalar exogenous inputs.
+            Requires finite exogenous second moments.
         """
-        N = len(self.node_order)
+        N = len(self.topological_order)
         B = self.coef_matrix()
 
-        omega = torch.zeros(N, device=self.device)
-        for name in self.node_order:
+        eye = torch.eye(N, device=self.device)
+        a_inv = torch.linalg.solve_triangular(eye - B, eye, upper=False, unitriangular=True)
+        sigma = a_inv @ self._full_noise_covariance(B) @ a_inv.T
+
+        if nodes is not None:
+            idx = torch.tensor([self._node_index[n] for n in nodes], device=self.device)
+            sigma = sigma.index_select(0, idx).index_select(1, idx)
+        return sigma
+
+    def _full_noise_covariance(self, reference: Tensor) -> Tensor:
+        """Place independent noise variances on the diagonal at exogenous nodes."""
+        omega = reference.new_zeros(len(self.topological_order))
+        for name in self.topological_order:
             node = self.node_dict[name]
             if isinstance(node, NodeExogenous):
                 variance = torch.as_tensor(
@@ -179,11 +191,4 @@ class SEM2Linear(SEM2):
                 ).reshape(-1)[0]
                 omega[self._node_index[name]] = variance
 
-        eye = torch.eye(N, device=self.device)
-        a_inv = torch.linalg.solve_triangular(eye - B, eye, upper=False, unitriangular=True)
-        sigma = a_inv @ torch.diag(omega) @ a_inv.T
-
-        if nodes is not None:
-            idx = torch.tensor([self._node_index[n] for n in nodes], device=self.device)
-            sigma = sigma.index_select(0, idx).index_select(1, idx)
-        return sigma
+        return torch.diag(omega)
