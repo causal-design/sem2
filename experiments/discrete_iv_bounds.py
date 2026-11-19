@@ -1,4 +1,4 @@
-"""Binary-IV penalty sweeps compared with response-type linear-program bounds.
+"""Binary-IV solution paths compared with response-type linear-program bounds.
 
 Assumptions: randomized binary Z, exclusion of Z from Y's equation, binary A/Y,
 and unrestricted dependence among (A(0), A(1), Y(0), Y(1)). No monotonicity.
@@ -13,7 +13,7 @@ import torch
 from scipy.optimize import linprog
 from torch import nn
 
-from sem2.analysis.penalty_sweep import penalty_sweep
+from sem2.analysis.solution_path import solution_path
 from sem2.data.records import VariableInfo
 from sem2.default_configs import MLPConfig, TrainingConfig
 from sem2.model.models.discrete import SEM2Discrete
@@ -98,13 +98,13 @@ def run_example(
     *, n: int = 2048, epochs: int = 1500, seed: int = 7,
     weights: tuple[float, ...] = (0.03, 0.003, -0.03, -0.003),
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Fit fresh models; return sweep diagnostics and empirical/population bounds."""
+    """Fit fresh models; return path diagnostics and empirical/population bounds."""
     data, population, truth = simulate(n, seed)
     empirical = np.zeros((2, 2, 2))
     np.add.at(empirical, tuple(data[['Z', 'A', 'Y']].to_numpy().T), 1)
     counts = empirical.sum(axis=(1, 2))
-    if np.any(counts < 2):
-        raise ValueError('At least two observations are required at each instrument level.')
+    if np.any(counts == 0):
+        raise ValueError('At least one observation is required at each instrument level.')
     empirical /= counts[:, None, None]
     reference = pd.DataFrame(
         [reference_bounds(population), reference_bounds(empirical)],
@@ -114,19 +114,19 @@ def run_example(
     variables = [VariableInfo(name, categorical=True, numeric_mapping={0: 0., 1: 1.})
                  for name in ['A', 'Y']]
     config = TrainingConfig(device='cpu', optim='Adam', lr=0.05, epochs=epochs,
-                            batch_size=len(data), sample_bs=1, energy_score_unbiased=False)
+                            batch_size=len(data), sample_bs=1, energy_pair_estimator='Vstat')
 
-    def factory() -> tuple[SEM2Discrete, DiscreteIVEnergyLoss, ATE]:
+    def build_problem() -> tuple[SEM2Discrete, DiscreteIVEnergyLoss, ATE]:
         model = build_model()
         loss = DiscreteIVEnergyLoss(config, model, 'Z')
         target = ATE(model, outcome='Y', alternative={'A': 1}, reference={'A': 0},
                      sample_bs=1, variable=variables[-1])
         return model, loss, target
 
-    # One explicit seed before the sweep: successive models start afresh, without
+    # One explicit seed before the path: successive models start afresh, without
     # resetting to the same parameters or copying a previous fitted endpoint.
     set_seed(seed, device='cpu')
-    results = penalty_sweep(factory, data, weights, config, variables=variables)
+    results = solution_path(build_problem, data, weights, config, variables=variables)
     rows = []
     for result in results:
         endpoint = (reference.loc['empirical', 'lower' if result.weight > 0 else 'upper']
@@ -147,8 +147,8 @@ if __name__ == '__main__':
     parser.add_argument('--epochs', type=int, default=1500)
     parser.add_argument('--seed', type=int, default=7)
     args = parser.parse_args()
-    sweep, bounds = run_example(n=args.n, epochs=args.epochs, seed=args.seed)
+    path, bounds = run_example(n=args.n, epochs=args.epochs, seed=args.seed)
     print('Reference identification intervals (not confidence intervals):')
     print(bounds.to_string(float_format=lambda value: f'{value:.6f}'))
     print('\nPenalized estimates (nonzero penalties allow observational misfit):')
-    print(sweep.to_string(index=False, float_format=lambda value: f'{value:.6g}'))
+    print(path.to_string(index=False, float_format=lambda value: f'{value:.6g}'))

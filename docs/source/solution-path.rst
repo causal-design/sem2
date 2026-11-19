@@ -1,13 +1,13 @@
-Fitting across target weights
-=============================
+Solution paths
+==============
 
 ``sem2.analysis`` provides higher-level analyses using the existing models,
-operators and trainer. ``penalty_sweep`` fits one fresh model per supplied weight,
+operators and trainer. ``solution_path`` fits one fresh model per supplied weight,
 minimizing ``fit_loss + weight * target``. Positive weights favor smaller target
 values; negative weights favor larger ones. Zero requests an unpenalized fit.
 
 Pass a function like ``build_problem`` below (without calling it).
-``penalty_sweep`` calls it once per weight so that training starts with a new
+``solution_path`` calls it once per weight so that training starts with a new
 model rather than the fit at the previous weight. It returns the model and two
 operators constructed for that model: a loss measuring fit to the data, and
 the target of interest. You choose the loss; ``fit`` does not select one from
@@ -21,7 +21,7 @@ between these fits or extrapolate to zero weight.
 
    import pandas as pd
 
-   from sem2.analysis.penalty_sweep import penalty_sweep
+   from sem2.analysis.solution_path import solution_path
    from sem2.default_configs import TrainingConfig
    from sem2.model.models.linear import SEM2Linear
    from sem2.operators.linear import LogLikelihood
@@ -37,7 +37,7 @@ between these fits or extrapolate to zero weight.
 
    config = TrainingConfig(device="cpu", optim="SGD", momentum=0., lr=0.5,
                            epochs=20, batch_size=3, sample_bs=1)
-   results = penalty_sweep(build_problem, pd.DataFrame({"y": [-1., 0., 1.]}),
+   results = solution_path(build_problem, pd.DataFrame({"y": [-1., 0., 1.]}),
                            weights=[0.1, -0.1], config=config)
    for result in results:
        print(result.weight, result.fit_loss, result.target, result.max_abs_gradient)
@@ -45,7 +45,7 @@ between these fits or extrapolate to zero weight.
 Results and interpretation
 --------------------------
 
-Each ``SweepResult`` retains the fitted model in eval mode, the weight, final
+Each ``PathPoint`` retains the fitted model in eval mode, the weight, final
 fit loss, target, combined objective, maximum absolute parameter gradient, and
 component-prefixed diagnostics. The diagnostics also include the complete-case
 data preparation report. All reported values are evaluated after the last update
@@ -95,12 +95,12 @@ fit loss, total variation, maximum cell error, ATE, objective, final gradient an
 signed difference from the corresponding empirical reference endpoint. Nonzero
 penalties permit observational misfit, so estimates can lie outside the exact-fit
 reference interval. This comparison checks the numerical workflow; it does not
-turn arbitrary penalty-sweep extrema into certified bounds.
+turn arbitrary solution-path extrema into certified bounds.
 
 API
 ---
 
-.. autoclass:: sem2.analysis.penalty_sweep.SweepResult
+.. autoclass:: sem2.analysis.solution_path.PathPoint
    :members:
 
-.. autofunction:: sem2.analysis.penalty_sweep.penalty_sweep
+.. autofunction:: sem2.analysis.solution_path.solution_path

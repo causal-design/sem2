@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from ..model.models.base import SEM2
 
 
-def _fixed_intervention(model: SEM2, assignments: dict[str, float]) -> DataBatch | None:
+def _intervention_batch(model: SEM2, assignments: dict[str, float]) -> DataBatch | None:
     """Pack a fixed regime into one named row for broadcasting across draws.
 
     Check support before casting: rounding could turn an invalid state into
@@ -157,7 +157,7 @@ class MeanPotentialOutcome(SEM2Operator):
                     or set(codes) != set(support.detach().cpu().flatten().tolist())
                     or not all(isfinite(score) for score in scores.values())):
                 raise ValueError("Outcome scores must be finite and cover each declared state exactly once.")
-        self._intervention = _fixed_intervention(model, self.intervention)
+        self._intervention = _intervention_batch(model, self.intervention)
         if SEMType.is_continuous(model.sem_type):
             self.sampler = PotentialOutcomeSample(model, outcome)
             self._evaluate_model = self._evaluate_continuous
@@ -166,8 +166,7 @@ class MeanPotentialOutcome(SEM2Operator):
             self._evaluate_model = self._evaluate_discrete
             self.method = ("probability_weighted" if outcome in model.state_node_names else "monte_carlo")
 
-    def evaluate(self, *, sample_bs: int | None = None, seed: int | None = None,
-                 beta: float | None = None) -> tuple[ScalarResult, dict]:
+    def evaluate(self, *, sample_bs: int | None = None, seed: int | None = None) -> tuple[ScalarResult, dict]:
         """Evaluate without fitting or changing stored query settings.
 
         Parameters
@@ -177,8 +176,6 @@ class MeanPotentialOutcome(SEM2Operator):
         seed : int, optional
             Seed for this call; None uses the constructor default. Explicit
             seeds reset the stream without restoring its previous state.
-        beta : float, optional
-            Accepted for scalar-objective composition; unused.
 
         Returns
         -------
@@ -266,8 +263,7 @@ class ATE(SEM2Operator):
         self.alternative = MeanPotentialOutcome(model, outcome=outcome, intervention=alternative,
                                                sample_bs=sample_bs, variable=variable)
 
-    def evaluate(self, *, sample_bs: int | None = None, seed: int | None = None,
-                 beta: float | None = None) -> tuple[ScalarResult, dict]:
+    def evaluate(self, *, sample_bs: int | None = None, seed: int | None = None) -> tuple[ScalarResult, dict]:
         """Return the alternative mean minus the reference mean.
 
         Parameters
@@ -276,8 +272,6 @@ class ATE(SEM2Operator):
             Draw count per regime for this call.
         seed : int, optional
             One-time seed override; None uses the constructor default.
-        beta : float, optional
-            Accepted for scalar-objective composition; unused.
 
         Returns
         -------

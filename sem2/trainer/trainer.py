@@ -6,28 +6,12 @@ from torch.utils.data import DataLoader, TensorDataset
 
 from ..model.models.base import SEM2
 from ..operators.operators_base import OperatorInput, OperatorOutput, SEM2Operator
-from ..operators.discrete_iv import DiscreteIVEnergyLoss
-from ..operators.sem2_loss import SEM2Loss
 from ..default_configs import TrainingConfig
 from ..data.records import DataBatch, VariableInfo
 from ..data.preparation import prepare_data
 from ..utils import set_seed
 
 logger = logging.getLogger(__name__)
-
-
-def _check_iv_batch(objective: SEM2Operator, batch: DataBatch, batch_size: int) -> None:
-    """Check IV eligibility once on complete cases, including composed objectives."""
-    if isinstance(objective, SEM2Loss):
-        for component, _ in objective.loss_components:
-            _check_iv_batch(component, batch, batch_size)
-    elif isinstance(objective, DiscreteIVEnergyLoss):
-        counts = dict(zip(objective.levels, map(len, objective._group_observations(batch))))
-        if min(counts.values()) < 2:
-            raise ValueError(f"Instrument {objective.instrument!r} requires at least two observations "
-                             f"per declared level; counts={counts}.")
-        if batch_size < len(batch):
-            raise ValueError(f"IV fitting requires a full-data batch; set batch_size >= {len(batch)}.")
 
 
 def get_optimiser(model: nn.Module, cfg: TrainingConfig) -> torch.optim.Optimizer:
@@ -95,7 +79,7 @@ class SEM2Trainer:
             sem, data, variables=variables, device=cfg.device,
         )
         self.variables = batch.variables
-        _check_iv_batch(objective, batch, cfg.batch_size)
+        objective.validate_fit_data(batch, cfg.batch_size)
         self.loader = DataLoader(TensorDataset(batch.values), batch_size=cfg.batch_size, shuffle=True)
         if self.preparation_report["dropped_rows"]:
             logger.warning("Dropped %d rows with missing values.", self.preparation_report["dropped_rows"])
@@ -175,6 +159,7 @@ def fit(model: SEM2, data: pd.DataFrame, objective: SEM2Operator, config: Traini
 
 def main():
     """Small IV fitting smoke demo, not a fit-recovery benchmark."""
+    from ..operators.discrete_iv import DiscreteIVEnergyLoss
     from ..data.dummy import DummyDiscreteDataloader
     from ..default_configs import MLPConfig
     from ..model.models.discrete import SEM2Discrete
