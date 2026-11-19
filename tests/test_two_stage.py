@@ -102,7 +102,7 @@ def test_fit_recovers_two_stage_means_and_contrasts():
     variables = [VariableInfo(name, categorical=True, numeric_mapping={0: 0., 1: 1.})
                  for name in OBSERVED]
     config = TrainingConfig(device='cpu', optim='Adam', lr=0.1, epochs=100,
-                            batch_size=len(data), sample_bs=1, energy_score_unbiased=False,
+                            batch_size=len(data), sample_bs=1, energy_pair_estimator='Vstat',
                             rng_seed=5)
     objective = EnergyLoss(config, model)
     batch, report = prepare_data(model, data, variables=variables)
