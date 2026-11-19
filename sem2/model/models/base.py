@@ -102,8 +102,12 @@ class SEM2(nn.Module):
         specs, graph = parser.parse()
         return specs, graph, graph.expand(specs)
 
-    def _joint_draws(self, batch_size):
-        """Normally each exogenous node draws independently in the traversal."""
+    def _draw_joint_exogenous(self, batch_size):
+        """Return named draws for exogenous variables that must be sampled together.
+
+        By default each exogenous node samples itself during traversal. The
+        Gaussian subclass supplies columns of a joint draw here instead.
+        """
         return {}
 
     def _check_sem_type(self) -> None:
@@ -266,7 +270,7 @@ class SEM2(nn.Module):
             columns = self.admg.endogenous if target is None else (target,)
         # Unwrap interventions once and retain their supplied variable metadata.
         interventions = self._unpack_interventions(do_intervention, batch_size)
-        joint = self._joint_draws(batch_size)
+        joint = self._draw_joint_exogenous(batch_size)
         supplied = {} if do_intervention is None else dict(zip(do_intervention.names, do_intervention.variables))
         values, variables = [], []
         # Evaluate parents first, replacing intervened equations with fixed values.

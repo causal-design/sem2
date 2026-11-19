@@ -22,7 +22,10 @@ Correlated Gaussian exogenous variables
    covariance = model.cov_matrix(["X", "Y"])
 
 ``EX`` has a fixed marginal law. ``EY`` has mean zero and a learned standard
-deviation initialized at one. The edge permits their covariance to be learned;
+deviation initialized at one. The optimizer updates its log standard deviation:
+zero corresponds to a standard deviation of one, and exponentiation keeps it
+positive without constraining the optimizer. Declared scales are fixed.
+The edge permits their covariance to be learned;
 its initial value is zero. Joint draws are reused throughout each observation.
 An intervention replaces the named equation without conditioning the remaining
 exogenous variables. Use unit noise loadings when learning marginal variances

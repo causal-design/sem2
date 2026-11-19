@@ -151,8 +151,9 @@ class SEM2Linear(SEM2):
     def cov_matrix(self, nodes: list[str] | None = None) -> Tensor:
         r"""Model-implied covariance :math:`\Sigma = (I-B)^{-1}\Omega(I-B)^{-\mathsf{T}}`
 
-        Omega is the diagonal covariance of the exogenous inputs (the variance of
-        each exogenous node's distribution; 0 for endogenous nodes). If `nodes`
+        Omega contains the exogenous covariance in the corresponding rows and
+        columns of ``node_order``; endogenous rows and columns are zero. Its
+        exogenous block is diagonal for independent inputs. If `nodes`
         is given, the covariance is restricted to those nodes (e.g. the observed
         variables), in the given order.
 
@@ -165,21 +166,22 @@ class SEM2Linear(SEM2):
         -------
         torch.Tensor
             Shape (n_selected, n_selected), retaining parameter gradients.
-            Requires finite variances and independent scalar exogenous inputs.
+            Requires finite exogenous second moments.
         """
         N = len(self.node_order)
         B = self.coef_matrix()
 
         eye = torch.eye(N, device=self.device)
         a_inv = torch.linalg.solve_triangular(eye - B, eye, upper=False, unitriangular=True)
-        sigma = a_inv @ self._innovation_covariance(B) @ a_inv.T
+        sigma = a_inv @ self._noise_covariance_in_node_order(B) @ a_inv.T
 
         if nodes is not None:
             idx = torch.tensor([self._node_index[n] for n in nodes], device=self.device)
             sigma = sigma.index_select(0, idx).index_select(1, idx)
         return sigma
 
-    def _innovation_covariance(self, reference: Tensor) -> Tensor:
+    def _noise_covariance_in_node_order(self, reference: Tensor) -> Tensor:
+        """Place independent noise variances on the diagonal at exogenous nodes."""
         omega = reference.new_zeros(len(self.node_order))
         for name in self.node_order:
             node = self.node_dict[name]

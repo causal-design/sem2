@@ -18,7 +18,7 @@ class SEM2LinearGaussian(SEM2Linear):
     sem_type = SEMType.LINEAR_GAUSSIAN
 
     def _compile(self, parser):
-        specs, graph = parser.parse(joint_gaussian=True)
+        specs, graph = parser.parse(linear_gaussian=True)
         self.noise_names = tuple(sorted(graph.exogenous))
         self.free_scales = tuple(i for i, n in enumerate(self.noise_names) if n not in specs)
         for n in self.noise_names:
@@ -54,14 +54,16 @@ class SEM2LinearGaussian(SEM2Linear):
             corr = corr + raw / (1 - torch.linalg.eigvalsh(raw)[0])
         return scale[:, None] * corr * scale
 
-    def _innovation_covariance(self, reference):
+    def _noise_covariance_in_node_order(self, reference):
+        """Embed the joint noise covariance in the full node-by-node matrix."""
         matrix = reference.new_zeros(reference.shape)
         ix = torch.tensor([self._node_index[n] for n in self.noise_names],
                           dtype=torch.long, device=matrix.device)
         matrix[ix[:, None], ix] = self.noise_covariance().to(matrix)
         return matrix
 
-    def _joint_draws(self, batch_size):
+    def _draw_joint_exogenous(self, batch_size):
+        """Draw one Gaussian vector per observation and give each root its column."""
         if not self.noise_names:
             return {}
         factor = torch.linalg.cholesky(self.noise_covariance())
