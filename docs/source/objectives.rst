@@ -37,24 +37,16 @@ reuses the underlying Euclidean distances without changing the default matrix.
 
 For IV fitting, set ``batch_size`` at least as large as the dataset. Eligibility
 is checked once before training, after incomplete rows are removed: every declared
-instrument level needs at least two observations for U-statistics or one for
-V-statistics, in each observed baseline stratum. Conditional discrepancies use
+instrument level needs at least two observations. Conditional discrepancies use
 empirical group frequencies. The instrument itself does not need numerical scores
 because it selects groups rather than entering their distance calculation.
 
-The instrument may be any named, observed scalar variable with finite discrete
-support (including an endogenous node). Pass baseline variable names with
-``covariates=("C",)``. The scored margin contains the other observed endogenous
-state variables. Each stratum uses the same IV loss and strata are averaged
-by their empirical frequencies. For endogenous covariates, conditioning uses
-their model probabilities to reweight exogenous draws; the resulting normalized
-Monte Carlo estimate need not be unbiased even with distinct-pair terms.
-
-Once treatment and outcome are named, call ``loss.check_iv_graph("A", "Y")``.
-This checks exclusion and graphical separation of instrument and outcome given
-the baseline covariates after fixing treatment. It is not a strength test.
-Fitting assumes no unmeasured instrument--treatment confounding conditional
-on those covariates; treatment--outcome confounding is allowed.
+An instrument may be declared with its own distribution or defined by a
+``d(...)`` equation. In both cases its column must be observed. Fitting assumes
+no unmeasured instrument--treatment confounding; treatment--outcome confounding
+is allowed. Once treatment and outcome are named, ``loss.check_iv_graph("A", "Y")``
+checks exclusion and graphical separation after fixing treatment. It does not
+test instrument strength.
 
 Energy exponents are checked at construction and for explicit overrides, rather
 than for each distance calculation. Batch-size checks protect pair denominators;
