@@ -1,10 +1,10 @@
 """Energy fitting for discrete instrumental-variable problems."""
 from __future__ import annotations
+import networkx as nx
 import torch
 from .divergence import EnergyLoss
 from ..data.records import DataBatch, ScalarResult
 from ..default_configs import TrainingConfig
-from ..model.components.nodes import NodeExogenous
 from ..model.models.discrete import SEM2Discrete
 
 
@@ -15,9 +15,10 @@ class DiscreteIVEnergyLoss(EnergyLoss):
     Fitting uses the complete prepared dataset in one batch, with at least two
     observations per declared level. No levels are dropped or given pseudo-counts.
 
-    Callers supply a model encoding the IV assumptions. This class checks neither
-    those causal assumptions nor identification, and does not certify effect or
-    bound recovery.
+    Callers supply a model encoding the IV assumptions. Fitting assumes no
+    unmeasured instrument--treatment confounding; treatment--outcome confounding
+    is allowed. Use ``check_iv_graph`` separately once treatment and outcome
+    are named. A fit does not certify identification or bound recovery.
 
     Parameters
     ----------
@@ -26,7 +27,7 @@ class DiscreteIVEnergyLoss(EnergyLoss):
     model : SEM2Discrete
         Model encoding the supplied IV assumptions.
     instrument : str
-        Scalar exogenous variable with enumerated support of at least two levels.
+        Observed scalar variable with enumerated discrete support of at least two levels.
     sample_bs : int, optional
         Exogenous draws per instrument level; overrides the config count.
     beta : float, optional
@@ -42,8 +43,8 @@ class DiscreteIVEnergyLoss(EnergyLoss):
         if not isinstance(model, SEM2Discrete):
             raise TypeError("DiscreteIVEnergyLoss requires SEM2Discrete.")
         node = model.node_dict[instrument] if instrument in model.input_node else None
-        if not isinstance(node, NodeExogenous) or node.out_dim != 1:
-            raise ValueError("The instrument must be a scalar exogenous discrete node.")
+        if node is None or node.out_dim != 1:
+            raise ValueError("The instrument must name a scalar model variable.")
         support = node.support
         if support.constraint is None or not support.constraint.is_discrete or support.values is None:
             raise ValueError("The instrument requires enumerated discrete support.")
@@ -52,13 +53,36 @@ class DiscreteIVEnergyLoss(EnergyLoss):
         if len(self.levels) < 2:
             raise ValueError("The instrument requires at least two declared levels.")
 
+    def check_iv_graph(self, treatment: str, outcome: str) -> None:
+        """Check exclusion and separation from the outcome after fixing treatment.
+
+        Uses the supplied graph only. No instrument relevance or strength test.
+        """
+        z = self.instrument
+        if ({treatment, outcome} - self.model.input_node or len({z, treatment, outcome}) != 3):
+            raise ValueError("Specify distinct known instrument, treatment and outcome variables.")
+        graph = self.model.admg
+        g = nx.DiGraph(graph.directed)
+        g.add_nodes_from(graph.endogenous | graph.exogenous)
+        if nx.has_path(g.subgraph(set(g) - {treatment}), z, outcome):
+            raise ValueError("Exclusion fails: a directed path bypasses treatment.")
+        # A latent fork per bidirected edge preserves m-separation. Remove all
+        # incoming treatment arrows (including from the latent roots) for do(X).
+        for edge in graph.bidirected:
+            g.add_edges_from((edge, vertex) for vertex in edge)
+        g.remove_edges_from(list(g.in_edges(treatment)))
+        if not nx.is_d_separator(g, {z}, {outcome}, set()):
+            raise ValueError("Instrument and outcome are not separated after fixing treatment.")
+
     def _group_observations(self, observations: DataBatch) -> list[DataBatch]:
         """Return one batch of endogenous observations per instrument level.
 
         Group rows by their observed instrument value in ``self.levels`` order;
         exclude the instrument column from the variables whose fit is scored.
         """
-        names = [n for n in observations.names if n in self.model.state_node_names]
+        if self.instrument not in observations.names:
+            raise ValueError(f"Instrument {self.instrument!r} must be observed.")
+        names = [n for n in observations.names if n in self.model.state_node_names and n != self.instrument]
         outcomes = observations.subset(names)
         z = observations.select(self.instrument)[:, 0]
         return [outcomes[z == level] for level in self.levels]
