@@ -57,6 +57,8 @@ scores are needed for this graph-level check.
 API
 ---
 
+.. autofunction:: sem2.identification.check_iv_graph
+
 .. autofunction:: sem2.identification.marginalize_to_observed
 
 .. autofunction:: sem2.identification.is_identified

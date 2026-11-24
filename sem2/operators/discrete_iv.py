@@ -1,6 +1,5 @@
 """Energy fitting for discrete instrumental-variable problems."""
 from __future__ import annotations
-import networkx as nx
 import torch
 from .divergence import EnergyLoss
 from ..data.records import DataBatch, ScalarResult
@@ -17,7 +16,7 @@ class DiscreteIVEnergyLoss(EnergyLoss):
 
     Callers supply a model encoding the IV assumptions. Fitting assumes no
     unmeasured instrument--treatment confounding; treatment--outcome confounding
-    is allowed. Use ``check_iv_graph`` separately once treatment and outcome
+    is allowed. Use :func:`sem2.identification.check_iv_graph` once treatment and outcome
     are named. A fit does not certify identification or bound recovery.
 
     Parameters
@@ -52,27 +51,6 @@ class DiscreteIVEnergyLoss(EnergyLoss):
         self.levels = support.values.reshape(-1).tolist()
         if len(self.levels) < 2:
             raise ValueError("The instrument requires at least two declared levels.")
-
-    def check_iv_graph(self, treatment: str, outcome: str) -> None:
-        """Check exclusion and separation from the outcome after fixing treatment.
-
-        Uses the supplied graph only. No instrument relevance or strength test.
-        """
-        z = self.instrument
-        if ({treatment, outcome} - self.model.input_node or len({z, treatment, outcome}) != 3):
-            raise ValueError("Specify distinct known instrument, treatment and outcome variables.")
-        graph = self.model.admg
-        g = nx.DiGraph(graph.directed)
-        g.add_nodes_from(graph.endogenous | graph.exogenous)
-        if nx.has_path(g.subgraph(set(g) - {treatment}), z, outcome):
-            raise ValueError("Exclusion fails: a directed path bypasses treatment.")
-        # A latent fork per bidirected edge preserves m-separation. Remove all
-        # incoming treatment arrows (including from the latent roots) for do(X).
-        for edge in graph.bidirected:
-            g.add_edges_from((edge, vertex) for vertex in edge)
-        g.remove_edges_from(list(g.in_edges(treatment)))
-        if not nx.is_d_separator(g, {z}, {outcome}, set()):
-            raise ValueError("Instrument and outcome are not separated after fixing treatment.")
 
     def _group_observations(self, observations: DataBatch) -> list[DataBatch]:
         """Return one batch of endogenous observations per instrument level.

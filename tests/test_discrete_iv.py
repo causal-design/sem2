@@ -25,18 +25,3 @@ def test_iv_loss_scores_only_the_response_in_both_encodings(assignment):
     assert [v.name for v in result.variables] == ["A"]
     with pytest.raises(ValueError, match="must be observed"):
         loss.evaluate(batch.subset("A"))
-
-
-@pytest.mark.parametrize(("extra", "error"), [
-    ("", None), ("; EZ <-> EY", "not separated"), ("; W <- d(Z;levels=2)", "Exclusion"),
-])
-def test_iv_graph_checks(extra, error):
-    parents = "A,EY,W" if "W" in extra else "A,EY"
-    model = SEM2Discrete(f"Z <- d(EZ;levels=2); A <- d(Z,EA;levels=2); "
-                         f"Y <- d({parents};levels=2); EA <-> EY" + extra)
-    loss = DiscreteIVEnergyLoss(TrainingConfig(device="cpu"), model, "Z")
-    if error:
-        with pytest.raises(ValueError, match=error):
-            loss.check_iv_graph("A", "Y")
-    else:
-        loss.check_iv_graph("A", "Y")

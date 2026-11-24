@@ -44,7 +44,8 @@ because it selects groups rather than entering their distance calculation.
 An instrument may be declared with its own distribution or defined by a
 ``d(...)`` equation. In both cases its column must be observed. Fitting assumes
 no unmeasured instrument--treatment confounding; treatment--outcome confounding
-is allowed. Once treatment and outcome are named, ``loss.check_iv_graph("A", "Y")``
+is allowed. Once treatment and outcome are named,
+:func:`sem2.identification.check_iv_graph`
 checks exclusion and graphical separation after fixing treatment. It does not
 test instrument strength.
 
