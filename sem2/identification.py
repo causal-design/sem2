@@ -12,6 +12,30 @@ from sem2.model.construction.formula_parser import FormulaParser
 from sem2.model.models.base import SEM2
 
 
+def check_iv_graph(graph: _ADMG, *, instrument: str, treatment: str, outcome: str) -> None:
+    """Preliminary graphical check for an instrumental variable without covariates.
+
+    With treatment fixed, remove its vertex and incident edges, then marginalize
+    to instrument and outcome. Raise ValueError for invalid roles, a directed
+    instrument-to-outcome path bypassing treatment (exclusion), or any remaining
+    connection between instrument and outcome. Return None when both graphical
+    conditions hold. This does not test strength or validate the graph against data.
+    """
+    roles = {instrument, treatment, outcome}
+    if len(roles) != 3 or roles - (graph.endogenous | graph.exogenous):
+        raise ValueError("Specify distinct known instrument, treatment and outcome variables.")
+    fixed = _ADMG(
+        graph.endogenous - {treatment}, graph.exogenous - {treatment},
+        frozenset(edge for edge in graph.directed if treatment not in edge),
+        frozenset(edge for edge in graph.bidirected if treatment not in edge),
+    )
+    margin = fixed.marginalize({instrument, outcome})
+    if (instrument, outcome) in margin.directed:
+        raise ValueError("Exclusion fails: a directed path bypasses treatment.")
+    if margin.directed or margin.bidirected:
+        raise ValueError("Instrument and outcome are not separated after fixing treatment.")
+
+
 def marginalize_to_observed(model: SEM2 | _ADMG | str, *, observed: Collection[str]) -> NxMixedGraph:
     """Marginalize the formula's ADMG to the observed variables for y0.
 

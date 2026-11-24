@@ -1,9 +1,30 @@
 """Graphical identification against known causal graphs, without fitting."""
 import pytest
 
-from sem2.identification import is_identified, marginalize_to_observed
+from sem2.identification import check_iv_graph, is_identified, marginalize_to_observed
+from sem2.model.construction.formula_parser import FormulaParser
 from sem2.model.models.base import SEM2
 from sem2.model.construction.admg import _ADMG
+
+
+@pytest.mark.parametrize(("formula", "error"), [
+    ("A <- Z + U; Y <- A + U", None),
+    ("A <- Z; W <- Z; Y <- A + W", "Exclusion"),
+    ("Z <- H; A <- Z; Y <- A + H", "not separated"),
+    ("Z <- Y; A <- Z", "not separated"),
+    ("Z <- n(EZ); A <- Z; Y <- n(A,EY); EZ <-> EY", "not separated"),
+])
+def test_iv_graph_checks(formula, error):
+    _, graph = FormulaParser(formula).parse()
+    roles = dict(instrument="Z", treatment="A", outcome="Y")
+    if error:
+        with pytest.raises(ValueError, match=error):
+            check_iv_graph(graph, **roles)
+    else:
+        assert check_iv_graph(graph, **roles) is None
+        for invalid in ("Z", "unknown"):
+            with pytest.raises(ValueError, match="distinct known"):
+                check_iv_graph(graph, instrument="Z", treatment=invalid, outcome="Y")
 
 
 def test_marginalize_named_mixed_graph_without_expansion(monkeypatch):
