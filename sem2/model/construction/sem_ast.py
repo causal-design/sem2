@@ -129,12 +129,12 @@ Statement = ExogenousDecl | EndogenousDecl
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# NodeSpec (lowered IR consumed by _DAG and SEM2)
+# NodeSpec (lowered IR consumed by SEM2)
 # ══════════════════════════════════════════════════════════════════════════════
 
 @dataclass
 class NodeSpec:
-    """Lowered specification of a single node, consumed by _DAG and SEM2.
+    """Lowered specification of a single node, consumed by SEM2.
 
     This is the stable interface between the parsing frontend and the graph /
     model layers; it carries no tensors, device, or pytorch objects.

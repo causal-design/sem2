@@ -45,8 +45,8 @@ def _moments(model: SEM2Linear) -> pd.Series:
     indices = [operator.columns[name][0] for name in ["x", "y"]]
     covariance = covariance.detach()[indices][:, indices]
     return pd.Series({
-        "mean(x)": means[model.node_order.index("x")].item(),
-        "mean(y)": means[model.node_order.index("y")].item(),
+        "mean(x)": means[model.topological_order.index("x")].item(),
+        "mean(y)": means[model.topological_order.index("y")].item(),
         "var(x)": covariance[0, 0].item(),
         "cov(x,y)": covariance[0, 1].item(),
         "var(y)": covariance[1, 1].item(),

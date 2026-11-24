@@ -40,6 +40,14 @@ instrument level needs two or more observations for Ustat, one or more for Vstat
 Conditional discrepancies use empirical group frequencies. The instrument itself does not need numerical scores
 because it selects groups rather than entering their distance calculation.
 
+An instrument may be declared with its own distribution or defined by a
+``d(...)`` equation. In both cases its column must be observed. Fitting assumes
+no unmeasured instrument--treatment confounding; treatment--outcome confounding
+is allowed. Once treatment and outcome are named,
+:func:`sem2.identification.check_iv_graph`
+checks exclusion and graphical separation after fixing treatment. It does not
+test instrument strength.
+
 Energy exponents are checked at construction rather than at every evaluation.
 Batch-size checks protect pair denominators; they inspect tensor shapes, not device values.
 

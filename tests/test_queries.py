@@ -52,8 +52,8 @@ def test_natural_regime_seed_and_temporary_overrides():
     first = mean.evaluate()[0].value
     second = mean.evaluate()[0].value
     set_seed(51)
-    torch.testing.assert_close(first, 2 * model.sample(9)[0].select('noise').mean())
-    torch.testing.assert_close(second, 2 * model.sample(9)[0].select('noise').mean())
+    torch.testing.assert_close(first, 2 * model.sample(9)[0].select('exposure').mean())
+    torch.testing.assert_close(second, 2 * model.sample(9)[0].select('exposure').mean())
     query = ATE(model, outcome='response', alternative={'exposure': 0}, reference={}, sample_bs=9, seed=7)
     result, info = query.evaluate(sample_bs=13, seed=3)
     expected = MeanPotentialOutcome(model, outcome='response', intervention={}).evaluate(sample_bs=13, seed=3)[0]

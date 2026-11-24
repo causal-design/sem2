@@ -80,7 +80,7 @@ class EnergyLoss(SEM2Operator):
     def _evaluate_continuous(self, observations: DataBatch, *,
                              sample_bs: int) -> tuple[ScalarResult, dict]:
         """Compare named observations with realized continuous model draws."""
-        prediction, _ = self.model.sample(batch_size=sample_bs)
+        prediction, _ = self.model._sample(sample_bs, None, columns=observations.names)
         return self._energy_score(observations, prediction)
 
     def _evaluate_discrete(self, observations: DataBatch, *,

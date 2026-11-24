@@ -5,7 +5,7 @@ SEM2 is a research-stage PyTorch implementation of structural equation models. R
 ## Source map
 
 - `sem2/model/construction/formula_parser.py`: formula grammar, validation, and lowering to node specifications.
-- `sem2/model/construction/dag.py`: graph validation, topological order, observed-variable list, and inferred model type.
+- `sem2/model/construction/admg.py`: the named mixed graph, marginalization, and clique expansion for execution.
 - `sem2/model/components/nodes.py`: exogenous, linear, continuous MLP, and discrete MLP nodes.
 - `sem2/model/models/base.py`: general continuous `SEM2` construction and sampling.
 - `sem2/model/models/linear.py`: scalar linear path coefficients and model-implied moments.
@@ -43,6 +43,8 @@ Call `model.sample(...)`; `forward(...)` deliberately raises `NotImplementedErro
 Pass node configurations through `node_cfgs`, keyed by the left-hand-side node name. Treat tensor column order as unsafe unless it is checked against named model variables.
 
 ## Design conformance
+
+Use **marginalization** and **marginalize to** for product state spaces, probability distributions, and ADMGs. The graphical operation is motivated by taking the marginal probability distribution on the retained variables. Use these terms in code, tests, and documentation rather than “projection” or “latent projection” for this operation.
 
 Before changing model, data, or operator boundaries, read the agreed design direction in [`PROJECT.md`](PROJECT.md). Preserve compatibility with existing formulas, require named variable mappings at data boundaries, and keep application-specific roles out of graph-generic components.
 

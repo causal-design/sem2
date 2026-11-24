@@ -146,7 +146,7 @@ class LogLikelihood(SEM2LinearModelOperator):
             loc = self.loc.to(device=self.device, dtype=dtype)
         else:
             mu = self.model.mean_vector()
-            idx = torch.tensor(self.model._index(names), device=self.device)
+            idx = torch.tensor([self.model._node_index[n] for n in names], device=self.device)
             loc = mu.index_select(0, idx).to(dtype=dtype)
 
         if self.loc is not None and (loc.ndim != 1 or loc.shape[0] != len(names)):

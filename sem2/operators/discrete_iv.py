@@ -4,7 +4,6 @@ import torch
 from .divergence import EnergyLoss
 from ..data.records import DataBatch, ScalarResult
 from ..default_configs import TrainingConfig
-from ..model.components.nodes import NodeExogenous
 from ..model.models.discrete import SEM2Discrete
 
 
@@ -15,9 +14,10 @@ class DiscreteIVEnergyLoss(EnergyLoss):
     Fitting uses the complete prepared dataset in one batch. Each declared
     level needs two observations for Ustat or one for Vstat.
 
-    Callers supply a model encoding the IV assumptions. This class checks neither
-    those causal assumptions nor identification, and does not certify effect or
-    bound recovery.
+    Callers supply a model encoding the IV assumptions. Fitting assumes no
+    unmeasured instrument--treatment confounding; treatment--outcome confounding
+    is allowed. Use :func:`sem2.identification.check_iv_graph` once treatment and outcome
+    are named. A fit does not certify identification or bound recovery.
 
     Parameters
     ----------
@@ -26,7 +26,7 @@ class DiscreteIVEnergyLoss(EnergyLoss):
     model : SEM2Discrete
         Model encoding the supplied IV assumptions.
     instrument : str
-        Scalar exogenous variable with enumerated support of at least two levels.
+        Observed scalar variable with enumerated discrete support of at least two levels.
     sample_bs : int, optional
         Exogenous draws per instrument level; overrides the config count.
     beta : float, optional
@@ -42,8 +42,8 @@ class DiscreteIVEnergyLoss(EnergyLoss):
         if not isinstance(model, SEM2Discrete):
             raise TypeError("DiscreteIVEnergyLoss requires SEM2Discrete.")
         node = model.node_dict[instrument] if instrument in model.input_node else None
-        if not isinstance(node, NodeExogenous) or node.out_dim != 1:
-            raise ValueError("The instrument must be a scalar exogenous discrete node.")
+        if node is None or node.out_dim != 1:
+            raise ValueError("The instrument must name a scalar model variable.")
         support = node.support
         if support.constraint is None or not support.constraint.is_discrete or support.values is None:
             raise ValueError("The instrument requires enumerated discrete support.")
@@ -67,7 +67,9 @@ class DiscreteIVEnergyLoss(EnergyLoss):
         Group rows by their observed instrument value in ``self.levels`` order;
         exclude the instrument column from the variables whose fit is scored.
         """
-        names = [n for n in observations.names if n in self.model.state_node_names]
+        if self.instrument not in observations.names:
+            raise ValueError(f"Instrument {self.instrument!r} must be observed.")
+        names = [n for n in observations.names if n in self.model.state_node_names and n != self.instrument]
         outcomes = observations.subset(names)
         z = observations.select(self.instrument)[:, 0]
         return [outcomes[z == level] for level in self.levels]

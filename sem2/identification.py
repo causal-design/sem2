@@ -2,21 +2,46 @@
 from __future__ import annotations
 
 from collections.abc import Collection
-from itertools import combinations
 
 from y0.algorithm.identify import identify_outcomes
 from y0.dsl import Variable
 from y0.graph import NxMixedGraph
 
-from sem2.model.construction.dag import _DAG
+from sem2.model.construction.admg import _ADMG
+from sem2.model.construction.formula_parser import FormulaParser
+from sem2.model.models.base import SEM2
 
 
-def project_to_admg(model: _DAG | str, *, observed: Collection[str]) -> NxMixedGraph:
-    """Project a structural graph onto its observed variables.
+def check_iv_graph(graph: _ADMG, *, instrument: str, treatment: str, outcome: str) -> None:
+    """Preliminary graphical check for an instrumental variable without covariates.
+
+    With treatment fixed, remove its vertex and incident edges, then marginalize
+    to instrument and outcome. Raise ValueError for invalid roles, a directed
+    instrument-to-outcome path bypassing treatment (exclusion), or any remaining
+    connection between instrument and outcome. Return None when both graphical
+    conditions hold. This does not test strength or validate the graph against data.
+    """
+    roles = {instrument, treatment, outcome}
+    if len(roles) != 3 or roles - (graph.endogenous | graph.exogenous):
+        raise ValueError("Specify distinct known instrument, treatment and outcome variables.")
+    fixed = _ADMG(
+        graph.endogenous - {treatment}, graph.exogenous - {treatment},
+        frozenset(edge for edge in graph.directed if treatment not in edge),
+        frozenset(edge for edge in graph.bidirected if treatment not in edge),
+    )
+    margin = fixed.marginalize({instrument, outcome})
+    if (instrument, outcome) in margin.directed:
+        raise ValueError("Exclusion fails: a directed path bypasses treatment.")
+    if margin.directed or margin.bidirected:
+        raise ValueError("Instrument and outcome are not separated after fixing treatment.")
+
+
+def marginalize_to_observed(model: SEM2 | _ADMG | str, *, observed: Collection[str]) -> NxMixedGraph:
+    """Marginalize the formula's ADMG to the observed variables for y0.
 
     Parameters
     ----------
-    model : SEM2, _DAG or str
+    model : SEM2, _ADMG or str
         Model, parsed graph, or formula. Only declared dependencies are used;
         coefficients, distributions and fitted parameters impose no restrictions.
     observed : collection of str
@@ -31,56 +56,26 @@ def project_to_admg(model: _DAG | str, *, observed: Collection[str]) -> NxMixedG
 
     Notes
     -----
-    Compiler helpers are inlined before latent projection: they are computations,
-    not additional latent common causes. Directed edges represent directed paths
-    with latent internal nodes. Bidirected edges represent latent common causes
-    with paths to both endpoints having only latent internal nodes.
-    The supplied model and its parameters are not modified or sampled.
+    Works directly on the named graph. Neither executable nodes nor clique
+    sources are needed. If all vertices are observed, only the format changes.
     """
-    dag = _DAG(model) if isinstance(model, str) else model
-    if not isinstance(dag, _DAG):
-        raise TypeError("model must be a SEM2 model, parsed DAG, or formula string.")
+    if isinstance(model, str):
+        _, graph = FormulaParser(model).parse()
+    elif isinstance(model, SEM2):
+        graph = model.admg
+    elif isinstance(model, _ADMG):
+        graph = model
+    else:
+        raise TypeError("model must be a SEM2 model, parsed ADMG, or formula string.")
     observed = _names(observed, "observed")
-    scientific = {name for name, spec in dag.node_specs.items() if not spec.is_helper}
-    if unknown := observed - scientific:
-        raise ValueError(f"Unknown or internal observed variables: {sorted(unknown)}")
-
-    # Inline helper inputs in topological order, stopping at scientific variables.
-    parents: dict[str, set[str]] = {}
-    for name in dag.topological_order:
-        parents[name] = set()
-        for parent in dag.node_specs[name].predecessors:
-            if dag.node_specs[parent].is_helper:
-                parents[name].update(parents[parent])
-            else:
-                parents[name].add(parent)
-
-    children: dict[str, set[str]] = {name: set() for name in scientific}
-    for child in scientific:
-        for parent in parents[child]:
-            children[parent].add(child)
-
-    # First observed descendants: stop each path as soon as it reaches the margin.
-    frontier: dict[str, set[str]] = {}
-    for name in reversed(dag.topological_order):
-        if name not in scientific:
-            continue
-        frontier[name] = set()
-        for child in children[name]:
-            frontier[name].update({child} if child in observed else frontier[child])
-
-    directed = [(parent, child) for parent in sorted(observed)
-                for child in sorted(frontier[parent])]
-    bidirected = set()
-    for latent in scientific - observed:
-        bidirected.update(combinations(sorted(frontier[latent]), 2))
+    margin = graph.marginalize(observed)
     return NxMixedGraph.from_str_edges(
-        nodes=sorted(observed), directed=directed, undirected=sorted(bidirected),
+        nodes=sorted(observed), directed=sorted(margin.directed), undirected=sorted(margin.bidirected),
     )
 
 
 def is_identified(
-    model: _DAG | str,
+    model: SEM2 | _ADMG | str,
     *,
     observed: Collection[str],
     treatments: str | Collection[str],
@@ -90,8 +85,8 @@ def is_identified(
 
     Parameters
     ----------
-    model : SEM2, _DAG or str
-        Structural model, parsed graph, or formula; no fitting is required.
+    model : SEM2, _ADMG or str
+        Structural model, parsed mixed graph, or formula; no fitting is required.
     observed : collection of str
         Variables available together in one observed joint distribution.
     treatments : str or collection of str
@@ -103,7 +98,7 @@ def is_identified(
     -------
     bool
         Whether the full intervention distribution is identified in the
-        nonparametric causal model represented by the projected graph.
+        nonparametric causal model represented by the marginalized graph.
 
     Raises
     ------
@@ -119,7 +114,7 @@ def is_identified(
     or identification under additional parametric or deterministic restrictions.
     Conditional queries, data fusion and latent targets are not supported.
     """
-    graph = project_to_admg(model, observed=observed)
+    graph = marginalize_to_observed(model, observed=observed)
     treatments = _names(treatments, "treatments")
     outcomes = _names(outcomes, "outcomes")
     if not outcomes:
