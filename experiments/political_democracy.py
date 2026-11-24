@@ -53,7 +53,7 @@ def _structural_coefs(model: SEM2Linear) -> dict[str, float]:
     reference loading. Unit noise variances do not imply unit latent variances.
     """
     coefficients = model.coef_matrix().detach()
-    index = {name: i for i, name in enumerate(model.node_order)}
+    index = {name: i for i, name in enumerate(model.topological_order)}
     loading = {
         latent: coefficients[index[indicator], index[latent]]
         for latent, indicator in [("ind60", "x1"), ("dem60", "y1"), ("dem65", "y5")]

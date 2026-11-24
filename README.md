@@ -29,6 +29,7 @@ The package dependencies are declared in [`pyproject.toml`](pyproject.toml). The
 ```python
 from sem2.default_configs import LinearNodeConfig
 from sem2.model.models.linear import SEM2Linear
+from sem2.model.models.linear_gaussian import SEM2LinearGaussian
 
 model = SEM2Linear(
     "ex, ey ~ Normal(0,1); "
