@@ -111,6 +111,11 @@ def test_query_validation_precedes_sampling_and_integer_coercion():
         with pytest.raises(ValueError, match='each declared state'):
             MeanPotentialOutcome(model, outcome='response', intervention={},
                                  variable=VariableInfo('response', numeric_mapping={0: 0.}))
+        # Covering both states is not enough if two labels alias the same state.
+        aliases = VariableInfo('response', encoding={'no': 0, 'yes': 1, 'also yes': 1},
+                               numeric_mapping={'no': 0., 'yes': 1., 'also yes': 2.})
+        with pytest.raises(ValueError, match='each declared state'):
+            MeanPotentialOutcome(model, outcome='response', intervention={}, variable=aliases)
         with pytest.raises(ValueError, match='outcome'):
             MeanPotentialOutcome(model, outcome='missing', intervention={})
 

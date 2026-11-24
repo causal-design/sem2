@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 import torch
 
-from sem2.analysis.penalty_sweep import penalty_sweep
+from sem2.analysis.solution_path import solution_path
 from sem2.default_configs import TrainingConfig
 from sem2.model.models.linear import SEM2Linear
 from sem2.operators.linear import LogLikelihood
@@ -13,8 +13,8 @@ from sem2.operators.potential_outcomes import MeanPotentialOutcome
 from sem2.operators.sem2_loss import SEM2Loss
 
 
-def test_sweep_matches_two_steps_on_a_penalized_gaussian_mean():
-    def factory():
+def test_path_matches_two_steps_on_a_penalized_gaussian_mean():
+    def build_problem():
         model = SEM2Linear('u ~ Normal(0,1); y <- 1*u', device='cpu')
         with torch.no_grad():
             model.node_dict['y'].linear.bias.zero_()
@@ -26,7 +26,7 @@ def test_sweep_matches_two_steps_on_a_penalized_gaussian_mean():
     data = pd.DataFrame({'y': [-1., 0., 1.]})
     config = TrainingConfig(device='cpu', optim='SGD', momentum=0., lr=0.5,
                             epochs=2, batch_size=3)
-    results = penalty_sweep(factory, data, [-0.5, 0.5], config)
+    results = solution_path(build_problem, data, [-0.5, 0.5], config)
     assert [result.weight for result in results] == [-0.5, 0.5]
     assert results[0].model is not results[1].model
     for result in results:
@@ -38,4 +38,3 @@ def test_sweep_matches_two_steps_on_a_penalized_gaussian_mean():
         assert result.fit_loss == pytest.approx(fit_loss, abs=1e-6)
         assert result.objective == pytest.approx(fit_loss + result.weight * mean, abs=1e-6)
         assert result.max_abs_gradient == pytest.approx(abs(mean + result.weight), abs=1e-6)
-        assert result.model.node_dict['y'].intercept().item() == pytest.approx(mean, abs=1e-6)

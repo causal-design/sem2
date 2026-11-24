@@ -1,4 +1,4 @@
-"""Fresh-model fits across user-supplied signed target penalties."""
+"""Fresh-model fits across user-supplied signed target weights."""
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from math import isfinite
@@ -16,7 +16,7 @@ from sem2.trainer.trainer import fit
 
 
 @dataclass
-class SweepResult:
+class PathPoint:
     """One fitted model and its final, full-data evaluation in eval mode.
 
     ``objective`` is ``fit_loss + weight * target``. ``max_abs_gradient`` is
@@ -35,21 +35,21 @@ class SweepResult:
     model: SEM2
 
 
-def penalty_sweep(
-    factory: Callable[[], tuple[SEM2, SEM2Operator, SEM2Operator]],
+def solution_path(
+    build_problem: Callable[[], tuple[SEM2, SEM2Operator, SEM2Operator]],
     data: pd.DataFrame,
     weights: Sequence[float],
     config: TrainingConfig,
     *,
     variables: list[VariableInfo] | None = None,
-) -> list[SweepResult]:
-    """Minimize fit loss plus a signed target penalty for each supplied weight.
+) -> list[PathPoint]:
+    """Fit a fresh model at each supplied target weight.
 
     Parameters
     ----------
-    factory : callable
+    build_problem : callable
         Return a fresh model, a data-taking scalar fit loss to minimize, and a
-        model-only scalar target. Both operators must use that model. The factory
+        model-only scalar target. Both operators must use that model. The function
         controls initialization. Reusing the same model for two weights in this
         call is rejected.
     data : pandas.DataFrame
@@ -60,13 +60,13 @@ def penalty_sweep(
         observations alone. No weights, restarts or warm starts are added.
     config : TrainingConfig
         Existing training settings. rng_seed seeds training, not construction;
-        seed explicitly in or before the factory to control initialization.
+        seed explicitly in or before calling build_problem to control initialization.
     variables : list[VariableInfo], optional
         Named metadata, including categorical encodings and numerical scores.
 
     Returns
     -------
-    list[SweepResult]
+    list[PathPoint]
         Final component values, diagnostics and fitted models in eval mode.
         Components are evaluated once together after fitting, with sample_bs
         from config. Monte Carlo diagnostics can therefore vary between runs.
@@ -81,11 +81,11 @@ def penalty_sweep(
     weights = [float(weight) for weight in weights]
     if not weights or not all(isfinite(weight) for weight in weights):
         raise ValueError("weights must be a nonempty sequence of finite numbers.")
-    results: list[SweepResult] = []
+    results: list[PathPoint] = []
     for weight in weights:
-        model, fit_loss, target = factory()
+        model, fit_loss, target = build_problem()
         if any(model is previous.model for previous in results):
-            raise ValueError("factory must return a fresh model for each weight.")
+            raise ValueError("build_problem must return a fresh model for each weight.")
         if fit_loss.input_type != OperatorInput.DATA or target.input_type != OperatorInput.SELF:
             raise TypeError("Expected a data-taking fit loss and a model-only target.")
         objective = SEM2Loss([(fit_loss, 1.), (target, weight)])
@@ -101,7 +101,7 @@ def penalty_sweep(
         diagnostics = {key: value.detach() if isinstance(value, torch.Tensor) else value
                        for key, value in details.items()}
         diagnostics['preparation'] = preparation
-        results.append(SweepResult(
+        results.append(PathPoint(
             weight=weight,
             fit_loss=details[f'0:{type(fit_loss).__name__}'].item(),
             target=details[f'1:{type(target).__name__}'].item(),

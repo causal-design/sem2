@@ -105,6 +105,10 @@ This computes the intervention implied by the specified structural model. It doe
 - [`tests/`](tests/) contains the pytest suite.
 - [`experiments/`](experiments/) and [`notebooks/`](notebooks/) contain research and demonstration code, some of which uses older APIs.
 
+For fits across signed target weights, use `solution_path` from
+`sem2.analysis.solution_path`. Energy losses take a construction-time `beta`
+and `pair_estimator` (`"Ustat"` or `"Vstat"`); see the [objective guide](docs/source/objectives.rst).
+
 ## Testing
 
 Run the full suite from the repository root:

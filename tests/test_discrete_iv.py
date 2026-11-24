@@ -18,7 +18,7 @@ def test_iv_loss_scores_only_the_response_in_both_encodings(assignment):
         layer.bias.zero_()
     batch = DataBatch(torch.tensor([[0., 0.], [0., 0.], [1., 0.], [1., 1.]]),
                       ["Z", VariableInfo("A", categorical=True, numeric_mapping={0: 0., 1: 1.})])
-    loss = DiscreteIVEnergyLoss(TrainingConfig(device="cpu"), model, "Z", unbiased=False)
+    loss = DiscreteIVEnergyLoss(TrainingConfig(device="cpu"), model, "Z", pair_estimator="Vstat")
     result, _ = loss.evaluate(batch, sample_bs=4)
     # Binary half-energy distance is squared probability error in each group.
     assert result.value.item() == pytest.approx((.5**2 + (.75 - .5)**2) / 2)

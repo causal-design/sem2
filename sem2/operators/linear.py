@@ -156,8 +156,7 @@ class LogLikelihood(SEM2LinearModelOperator):
             )
         return loc
 
-    def evaluate(self, observations: DataBatch, *, sample_bs: int | None = None,
-                 beta: float | None = None) -> tuple[ScalarResult, dict]:
+    def evaluate(self, observations: DataBatch, *, sample_bs: int | None = None) -> tuple[ScalarResult, dict]:
         """Return the mean log-likelihood and detached batch diagnostics.
 
         Parameters
@@ -167,8 +166,6 @@ class LogLikelihood(SEM2LinearModelOperator):
             Selected columns are aligned by name and converted to the model's
             device and covariance dtype. Supply at least one row.
         sample_bs : int, optional
-            Accepted for objective composition; unused by this calculation.
-        beta : float, optional
             Accepted for objective composition; unused by this calculation.
 
         Returns
@@ -224,15 +221,12 @@ class PathAnalysis(SEM2LinearModelOperator):
     input_type = OperatorInput.SELF
     output_type = OperatorOutput.SCALAR
 
-    def evaluate(self, *, sample_bs: int | None = None,
-                 beta: float | None = None) -> tuple[torch.Tensor, dict]:
+    def evaluate(self, *, sample_bs: int | None = None) -> tuple[torch.Tensor, dict]:
         """Raise ``NotImplementedError`` without computing a result.
 
         Parameters
         ----------
         sample_bs : int, optional
-            Unused composition argument.
-        beta : float, optional
             Unused composition argument.
 
         Raises

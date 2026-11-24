@@ -13,15 +13,15 @@ Set defaults in ``TrainingConfig``::
     cfg = TrainingConfig(
         sample_bs=512,
         energy_score_beta=1.0,
-        energy_score_unbiased=True,
+        energy_pair_estimator='Ustat',
     )
     objective = EnergyLoss(cfg, model, beta=0.5)
 
-Constructor arguments override the config. ``evaluate(..., sample_bs=..., beta=...)``
-temporarily overrides the draw count and exponent without changing stored settings.
-For each within-sample pair term, ``unbiased=True`` uses a U-statistic: for
+Choose the exponent when constructing the loss. To use a different exponent,
+construct another loss. The draw count can still be changed per evaluation.
+For each within-sample pair term, ``pair_estimator="Ustat"`` uses a U-statistic: for
 ``m`` rows it averages over the ``m * (m - 1)`` ordered pairs of distinct
-rows. ``unbiased=False`` uses a V-statistic: all ``m * m`` ordered pairs,
+rows. ``pair_estimator="Vstat"`` uses a V-statistic: all ``m * m`` ordered pairs,
 including a row paired with itself. In the discrete model a row is a
 probability distribution, so its same-row contribution need not be zero.
 This setting does not change the cross term between data and model.
@@ -32,13 +32,12 @@ loss also subtracts the data/data term and uses half-energy-distance scaling.
 from the named state support and numerical mappings. ``EnergyLoss`` and
 ``DiscreteIVEnergyLoss`` construct it when the observed variables and scores are
 first available, then reuse it across batches and instrument groups. Changing
-the observed variables or scores rebuilds it. A temporary exponent override
-reuses the underlying Euclidean distances without changing the default matrix.
+the observed variables or scores rebuilds it.
 
 For IV fitting, set ``batch_size`` at least as large as the dataset. Eligibility
 is checked once before training, after incomplete rows are removed: every declared
-instrument level needs at least two observations. Conditional discrepancies use
-empirical group frequencies. The instrument itself does not need numerical scores
+instrument level needs two or more observations for Ustat, one or more for Vstat.
+Conditional discrepancies use empirical group frequencies. The instrument itself does not need numerical scores
 because it selects groups rather than entering their distance calculation.
 
 An instrument may be declared with its own distribution or defined by a
@@ -49,9 +48,8 @@ is allowed. Once treatment and outcome are named,
 checks exclusion and graphical separation after fixing treatment. It does not
 test instrument strength.
 
-Energy exponents are checked at construction and for explicit overrides, rather
-than for each distance calculation. Batch-size checks protect pair denominators;
-they inspect tensor shapes, not device values.
+Energy exponents are checked at construction rather than at every evaluation.
+Batch-size checks protect pair denominators; they inspect tensor shapes, not device values.
 
 .. autoclass:: sem2.operators.divergence.EnergyLoss
    :members: evaluate
