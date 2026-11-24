@@ -20,6 +20,10 @@ class _ADMG:
 
     @classmethod
     def from_equations(cls, specs: dict[str, NodeSpec], edges: set[tuple[str, str]]) -> "_ADMG":
+        """Build the ADMG from parsed node specifications and declared bidirected edges.
+
+        Directed edges come from the parents in each equation.
+        """
         endogenous = frozenset(n for n, s in specs.items() if not s.is_helper and s.node_type != "exogenous")
 
         def parents(name):
@@ -63,7 +67,10 @@ class _ADMG:
                      frozenset(directed), frozenset(bidirected))
 
     def expand(self, specs: dict[str, NodeSpec]) -> dict[tuple[str, ...], str]:
-        """Lower the parsed equations in place; return clique-to-source names."""
+        """Expand each nonempty exogenous clique into a noise source for execution.
+
+        Update the node specifications in place and return a map from cliques to source names.
+        """
         noises = nx.Graph()
         noises.add_nodes_from(sorted(self.exogenous))
         noises.add_edges_from(sorted(self.bidirected))
