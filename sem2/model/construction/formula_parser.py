@@ -3,14 +3,16 @@
 FormulaParser turns a formula string into an AST (see sem_ast), validates it,
 and lowers it to NodeSpec objects. This is the natural home for everything that
 knows about the *surface syntax* of the language and available distributions,
-so _DAG can stay a pure graph structure with no pytorch knowledge.
+including construction of the named mixed graph.
 """
 from __future__ import annotations
 import re
 import ast
 import difflib
 import keyword
+from itertools import pairwise
 
+from .admg import _ADMG, evaluation_order
 from .sem_ast import (
     Distribution,
     LinearTerm,
@@ -123,38 +125,38 @@ class FormulaParser:
     --------
     Parse a scalar linear model::
 
-        node_specs, input_node = FormulaParser("u ~ Normal(0,1); y <- 2*u").parse()
+        node_specs, graph = FormulaParser("u ~ Normal(0,1); y <- 2*u").parse()
     """
 
     def __init__(self, model_formula: str) -> None:
         self.model_formula = model_formula
         self.statements: list[Statement] = []
 
-    def parse(self) -> tuple[dict[str, NodeSpec], set[str]]:
-        """Parse the formula, returning (node_specs, input_node).
-
-        node_specs maps node name -> lowered NodeSpec. input_node is the set of
-        names that appear on any LHS.
-
-        Returns
-        -------
-        node_specs : dict[str, NodeSpec]
-            Expanded graph specifications, including private helper nodes.
-        input_node : set[str]
-            User-declared left-hand-side names, excluding generated helpers.
-
-        Notes
-        -----
-        Parsing validates syntax, distribution names and repeated parents;
-        graph construction separately validates references and acyclicity.
-        """
-        formula_list, input_node = self._parse_formula(self.model_formula)
+    def parse(self, *, linear_gaussian: bool = False) -> tuple[dict[str, NodeSpec], _ADMG]:
+        """Return the mechanism specifications and named ADMG, before clique expansion."""
+        formula_list, edges = self._parse_formula(self.model_formula)
         self.statements = [self._parse_statement(f) for f in formula_list]
         node_specs = {st.name: self._lower(st) for st in self.statements}
         for spec in node_specs.values():
             if len(set(spec.predecessors)) != len(spec.predecessors):
                 raise ValueError(f"Repeated parent in equation for {spec.name!r}.")
-        return node_specs, input_node
+        evaluation_order(node_specs)  # Reject directed cycles for graph-only queries too.
+        graph = _ADMG.from_equations(node_specs, edges)
+        if linear_gaussian:
+            if any(s.node_type != "linear" and
+                   not (s.node_type == "exogenous" and s.dist_name == "Normal")
+                   for s in node_specs.values()):
+                raise ValueError("Linear Gaussian formulas require linear equations and Normal exogenous variables.")
+            return node_specs, graph
+        # In the default SEM2 formula, these names denote collections of inputs
+        # to n(...) or d(...), not individual scalar variables.
+        shared = {n for edge in graph.bidirected for n in edge}
+        for spec in node_specs.values():
+            if spec.name in shared and spec.node_type == "exogenous":
+                raise ValueError(f"Cannot declare a distribution for bidirected variable {spec.name!r}.")
+            if spec.node_type == "linear" and shared.intersection(spec.predecessors):
+                raise ValueError(f"Bidirected exogenous variable in linear term of {spec.name!r} is unsupported.")
+        return node_specs, graph
 
     # ── Statement parsing (string -> AST) ─────────────────────────────────────
 
@@ -219,7 +221,7 @@ class FormulaParser:
 
         Preserve ordered parents, fixed versus learned coefficients, intercepts,
         levels and helper status. No tensors, random draws or fitted parameters
-        are created here; _DAG checks graph structure and SEM2 constructs nodes.
+        are created here; SEM2 constructs executable nodes.
         """
         if isinstance(st, ExogenousDecl):
             return NodeSpec(
@@ -327,15 +329,20 @@ class FormulaParser:
 
     # ── Formula parsing ───────────────────────────────────────────────────────
 
-    def _parse_formula(self, model_formula: str) -> tuple[list[str], set[str]]:
+    def _parse_formula(self, model_formula: str) -> tuple[list[str], set[tuple[str, str]]]:
         # Semicolons inside d(...; levels=N) belong to that mechanism, not the statement list.
         formula_list = self._split_rhs(re.sub(r"\s+", "", model_formula), ";")
 
         expanded_list = []
         input_node = set()
+        edges = set()
         for formula in formula_list:
             if ":" in formula:
                 raise ValueError("':' is reserved for internal helper names.")
+            if "<->" in formula:
+                for a, b in pairwise(formula.split("<->")):
+                    edges.add((min(a, b), max(a, b)))
+                continue
             vars_, formulas = self._expand_lhs(formula)
             for name in vars_:
                 if not name.isidentifier() or keyword.iskeyword(name):
@@ -349,7 +356,7 @@ class FormulaParser:
         for formula in expanded_list:
             formula_list.extend(self._expand_rhs(formula))
 
-        return formula_list, input_node
+        return formula_list, edges
 
     def _expand_lhs(self, formula: str) -> tuple[list[str], list[str]]:
         if "~" in formula:

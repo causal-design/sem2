@@ -77,7 +77,7 @@ class SEM2Node(RandomVariable, ABC, nn.Module):
     """Base class for all SEM nodes.
     Conceptually every node is a random variable:
 
-    Each node is fully initialised in __init__, so predecessor nodes must be passed in at construction time 
+    Each node is fully initialised in __init__, so predecessor nodes must be passed in at construction time
     so input dimensions can be computed immediately.
 
     Parameters
@@ -171,8 +171,8 @@ class NodeExogenous(SEM2Node):
     rhs : str
         Distribution expression retained for display.
     dist : torch.distributions.Distribution
-        Instantiated law, already on the intended device. Sampling uses
-        ``dist.sample``, not reparameterized ``rsample``.
+        Instantiated law, already on the intended device. Draws have no gradient
+        through distribution parameters.
     out_dim : int, default=1
         Draw width prepended to the distribution's batch/event dimensions.
     device : str or torch.device, default="cpu"
@@ -197,6 +197,8 @@ class NodeExogenous(SEM2Node):
         self.dist = dist
 
     def _forward_inner(self, x: list[torch.Tensor], batch_size: int = 1) -> torch.Tensor:
+        # PyTorch's Normal overrides sample() and rechecks the scale via torch.normal.
+        # For a fixed, validated scale this is redundant; keep one sampling path.
         return self.dist.sample([batch_size, self.out_dim])
 
 

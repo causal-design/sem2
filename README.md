@@ -29,6 +29,7 @@ The package dependencies are declared in [`pyproject.toml`](pyproject.toml). The
 ```python
 from sem2.default_configs import LinearNodeConfig
 from sem2.model.models.linear import SEM2Linear
+from sem2.model.models.linear_gaussian import SEM2LinearGaussian
 
 model = SEM2Linear(
     "ex, ey ~ Normal(0,1); "
@@ -66,6 +67,12 @@ Statements are separated by semicolons.
 | `y <- 1*x + 0.5*z` | Fix selected linear coefficients in the formula. |
 | `y <- n(x,z)` | Use a configurable MLP for a continuous mechanism. |
 | `y <- d(x,z; levels=2)` | Use a finite discrete mechanism with two states. |
+| `EX <-> EY` | Share exogenous inputs between neural or discrete mechanisms using bidirected clique expansion. |
+
+Right-hand-side variables without a defining equation default to independent
+standard-normal sources unless joined by bidirected edges. Ordinary samples
+return the endogenous variables defined by `<-`. See the
+[formula guide](docs/source/formulas.rst) for a worked example.
 
 Observed variables are determined by the data supplied to fitting and operators, rather than an `unobs(...)` clause in the structural formula. Select covariance variables explicitly by name, as in the example above.
 
@@ -73,7 +80,7 @@ Node configuration is passed through `node_cfgs`, keyed by the variable on the l
 
 ## Interventions and causal interpretation
 
-`set_nodes` replaces selected node values while the remaining equations are evaluated:
+`do_intervention` replaces selected node values while the remaining equations are evaluated:
 
 ```python
 import torch
@@ -82,7 +89,7 @@ from sem2.data.records import DataBatch
 n = 100
 samples_do_x1, _ = model.sample(
     batch_size=n,
-    set_nodes=DataBatch(torch.ones(n, 1), ["x"]),
+    do_intervention=DataBatch(torch.ones(n, 1), ["x"]),
 )
 ```
 
@@ -97,6 +104,10 @@ This computes the intervention implied by the specified structural model. It doe
 - [`sem2/trainer/trainer.py`](sem2/trainer/trainer.py) contains the package trainer.
 - [`tests/`](tests/) contains the pytest suite.
 - [`experiments/`](experiments/) and [`notebooks/`](notebooks/) contain research and demonstration code, some of which uses older APIs.
+
+For fits across signed target weights, use `solution_path` from
+`sem2.analysis.solution_path`. Energy losses take a construction-time `beta`
+and `pair_estimator` (`"Ustat"` or `"Vstat"`); see the [objective guide](docs/source/objectives.rst).
 
 ## Testing
 

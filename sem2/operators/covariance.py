@@ -5,6 +5,7 @@ from .operators_base import OperatorInput, OperatorOutput, SEM2Operator
 from ..data.records import DataBatch
 from ..model.models.base import SEM2
 from ..model.models.linear import SEM2Linear
+from ..model.construction.sem_types import SEMType
 from ..default_configs import TrainingConfig
 
 
@@ -66,7 +67,10 @@ class Covariance(SEM2Operator):
             sample_bs = self.sample_bs if sample_bs is None else sample_bs
             if sample_bs < 2:
                 raise ValueError("Covariance requires at least two Monte Carlo samples.")
-            prediction, _ = self.model.sample(sample_bs)
+            if SEMType.is_continuous(self.model.sem_type):
+                prediction, _ = self.model._sample(sample_bs, None, columns=self.names)
+            else:
+                prediction, _ = self.model.sample(sample_bs)
             if isinstance(prediction, DataBatch):
                 covariance = torch.cov(prediction.select(self.names).T)
             else:

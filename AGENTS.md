@@ -5,7 +5,7 @@ SEM2 is a research-stage PyTorch implementation of structural equation models. R
 ## Source map
 
 - `sem2/model/construction/formula_parser.py`: formula grammar, validation, and lowering to node specifications.
-- `sem2/model/construction/dag.py`: graph validation, topological order, observed-variable list, and inferred model type.
+- `sem2/model/construction/admg.py`: the named mixed graph, marginalization, and clique expansion for execution.
 - `sem2/model/components/nodes.py`: exogenous, linear, continuous MLP, and discrete MLP nodes.
 - `sem2/model/models/base.py`: general continuous `SEM2` construction and sampling.
 - `sem2/model/models/linear.py`: scalar linear path coefficients and model-implied moments.
@@ -38,11 +38,13 @@ Formula statements are separated by semicolons:
 - `y <- d(x,z; levels=2)` declares a finite discrete mechanism with two states.
 - Observed variables belong to the supplied data; `unobs(...)` is no longer part of the formula syntax.
 
-Call `model.sample(...)`; `forward(...)` deliberately raises `NotImplementedError`. Continuous sampling returns a `DataBatch` plus an auxiliary dictionary. Discrete sampling returns a `DiscreteJointDistribution` plus an auxiliary dictionary. Pass intervention assignments as a `DataBatch` through `set_nodes`.
+Call `model.sample(...)`; `forward(...)` deliberately raises `NotImplementedError`. Continuous sampling returns a `DataBatch` plus an auxiliary dictionary. Discrete sampling returns a `DiscreteJointDistribution` plus an auxiliary dictionary. Pass intervention assignments as a `DataBatch` through `do_intervention`.
 
 Pass node configurations through `node_cfgs`, keyed by the left-hand-side node name. Treat tensor column order as unsafe unless it is checked against named model variables.
 
 ## Design conformance
+
+Use **marginalization** and **marginalize to** for product state spaces, probability distributions, and ADMGs. The graphical operation is motivated by taking the marginal probability distribution on the retained variables. Use these terms in code, tests, and documentation rather than “projection” or “latent projection” for this operation.
 
 Before changing model, data, or operator boundaries, read the agreed design direction in [`PROJECT.md`](PROJECT.md). Preserve compatibility with existing formulas, require named variable mappings at data boundaries, and keep application-specific roles out of graph-generic components.
 
@@ -52,7 +54,7 @@ Detailed v0.1 plans are maintained in the private [documentation repository](htt
 
 Consult [`PROJECT.md`](PROJECT.md) before describing what the package currently supports. Claims in code, documentation, and pull requests must match inspected behavior. When functionality is incomplete, fail early with a precise message or label it experimental. Do not broaden a capability claim from a notebook, meeting report, or unmerged branch.
 
-Keep two causal boundaries explicit: `set_nodes` computes an intervention under the supplied model, not evidence that the graph is valid or an effect is identified; and numerical extrema from a partial-identification search are not sharp bounds without fit tolerances, restarts, diagnostics, and an identification argument or independent reference.
+Keep two causal boundaries explicit: `do_intervention` computes an intervention under the supplied model, not evidence that the graph is valid or an effect is identified; and numerical extrema from a partial-identification search are not sharp bounds without fit tolerances, restarts, diagnostics, and an identification argument or independent reference.
 
 ## Development and verification
 

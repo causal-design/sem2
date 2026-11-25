@@ -4,9 +4,9 @@ from typing import TYPE_CHECKING
 import torch
 from .operators_base import OperatorInput, OperatorOutput, SEM2Operator
 from .covariance import Covariance
-from .discrete_energy_loss import DiscreteEnergyLoss
-from ..data.records import DataBatch, ScalarResult
+from .discrete_energy_loss import DiscreteEnergyLoss, _power_distances, _energy_values
 from ..data.conversion import databatch_to_tensor
+from ..data.records import DataBatch, ScalarResult
 from ..model.construction.sem_types import SEMType
 from ..default_configs import TrainingConfig
 
@@ -15,16 +15,12 @@ if TYPE_CHECKING:
 
 
 class EnergyLoss(SEM2Operator):
-    # what does 'provisional energy code' mean?
-    # step-7 review: refers to our group reviewing the code? should this be deleted/updated before release
-    """Compare observations with draws or probabilities using provisional energy code.
+    """Compare observations with model draws or finite probabilities.
 
-    The calculation is retained as an executable placeholder pending Step-7
-    distance/exponent/scaling and estimator review; no new estimator is approved
-    by this layout/dispatch correction. IV specialization remains separate.
+    Quantitative variables use their supplied scale; categorical variables require
+    explicit numeric mappings. No standardization or category scoring is inferred.
 
-    Settings resolve as evaluation override > constructor override > config.
-    Per-call overrides do not change the stored defaults.
+    The distance exponent and pair estimator are fixed at construction.
 
     Parameters
     ----------
@@ -33,25 +29,27 @@ class EnergyLoss(SEM2Operator):
     model : SEM2
         Model to compare with observations, on the configured device.
     sample_bs : int, optional
-        Model draws; overrides ``cfg.sample_bs``. Use at least two.
+        Model draws; overrides ``cfg.sample_bs``. Corrected pairs need two.
     beta : float, optional
         Power applied to distances; overrides ``cfg.energy_score_beta``.
+    pair_estimator : {"Ustat", "Vstat"}, optional
+        Pair correction; overrides ``cfg.energy_pair_estimator`` at construction.
     """
     input_type = OperatorInput.DATA
     output_type = OperatorOutput.SCALAR
 
     def __init__(self, cfg: TrainingConfig, model: SEM2, *,
-                 sample_bs: int | None = None, beta: float | None = None) -> None:
+                 sample_bs: int | None = None, beta: float | None = None,
+                 pair_estimator: str | None = None) -> None:
         self.model = model
         self.device = cfg.device
         self.sample_bs = cfg.sample_bs if sample_bs is None else sample_bs
-        self.beta = cfg.energy_score_beta if beta is None else beta
-        self.discrete_loss = DiscreteEnergyLoss()
+        self.cfg = cfg._with_energy_settings(beta, pair_estimator)
+        self.discrete_loss: DiscreteEnergyLoss | None = None
         self._evaluate_model = (self._evaluate_continuous if SEMType.is_continuous(model.sem_type)
                                 else self._evaluate_discrete)
 
-    def evaluate(self, observations: DataBatch, *, sample_bs: int | None = None,
-                 beta: float | None = None) -> tuple[ScalarResult, dict]:
+    def evaluate(self, observations: DataBatch, *, sample_bs: int | None = None) -> tuple[ScalarResult, dict]:
         """Compare named observations with the current model distribution.
 
         Parameters
@@ -61,8 +59,6 @@ class EnergyLoss(SEM2Operator):
             discrete evaluation selects observed endogenous variables.
         sample_bs : int, optional
             Draw count for this call, leaving stored defaults unchanged.
-        beta : float, optional
-            Distance exponent for this call.
 
         Returns
         -------
@@ -71,46 +67,55 @@ class EnergyLoss(SEM2Operator):
             gradients. The continuous score omits the data/data constant.
         diagnostics : dict
             Cross and within-model distances; the discrete route also includes
-            the within-data term. Values are not detached.
+            the within-data term, total variation and largest cell-probability
+            error. Values are not detached.
         """
         sample_bs = self.sample_bs if sample_bs is None else sample_bs
-        beta = self.beta if beta is None else beta
-        if not isinstance(observations, DataBatch):
-            raise TypeError("observations must be a DataBatch.")
         observations = observations.to(self.device)
         unknown = set(observations.names) - self.model.input_node
         if unknown:
             raise ValueError(f"Unknown or internal observed variables: {sorted(unknown)}")
-        return self._evaluate_model(observations, sample_bs=sample_bs, beta=beta)
+        return self._evaluate_model(observations, sample_bs=sample_bs)
 
     def _evaluate_continuous(self, observations: DataBatch, *,
-                             sample_bs: int, beta: float) -> tuple[ScalarResult, dict]:
+                             sample_bs: int) -> tuple[ScalarResult, dict]:
         """Compare named observations with realized continuous model draws."""
-        prediction, _ = self.model.sample(batch_size=sample_bs)
-        return self._energy_score(observations, prediction, beta=beta)
+        prediction, _ = self.model._sample(sample_bs, None, columns=observations.names)
+        return self._energy_score(observations, prediction)
 
     def _evaluate_discrete(self, observations: DataBatch, *,
-                          sample_bs: int, beta: float) -> tuple[ScalarResult, dict]:
+                          sample_bs: int) -> tuple[ScalarResult, dict]:
         """Align observed endogenous names with the enumerated model law."""
         names = [name for name in observations.names if name in self.model.state_node_names
                  and not self.model.node_specs[name].is_helper]
         outcomes = observations.subset(names)
+        loss = self._get_discrete_energy_loss(outcomes)
         prediction, _ = self.model.sample(batch_size=sample_bs)
-        return self.discrete_loss.energy_dist(outcomes, prediction, beta=beta)
+        return loss.energy_dist(outcomes, prediction)
 
-    def _energy_score(self, observations: DataBatch, prediction: DataBatch,
-                      *, beta: float) -> tuple[ScalarResult, dict]:
+    def _get_discrete_energy_loss(self, observations: DataBatch) -> DiscreteEnergyLoss:
+        """Reuse cached state distances until the observed variables or their scores change."""
+        if self.discrete_loss is None or self.discrete_loss.states.variables != observations.variables:
+            states = DataBatch(self.model.all_states, self.model.state_node_names).select(observations.names)
+            self.discrete_loss = DiscreteEnergyLoss(
+                self.cfg, DataBatch(states, observations.variables),
+            )
+        return self.discrete_loss
+
+    def _energy_score(self, observations: DataBatch, prediction: DataBatch) -> tuple[ScalarResult, dict]:
         """Compare observations [N, D] with named draws [M, D], allowing N != M."""
-        targets = databatch_to_tensor(observations)
+        targets = _energy_values(observations)
+        # The same scoring metadata was checked for the observations above.
         draws = databatch_to_tensor(DataBatch(prediction.select(observations.names), observations.variables)).to(targets)
         n = draws.shape[0]
-        if not len(observations) or n < 2:
-            raise ValueError("Energy score requires observations and at least two model draws.")
+        if not len(observations) or n < 1 or (self.cfg.energy_pair_estimator == "Ustat" and n < 2):
+            raise ValueError("Energy score requires observations and enough model draws for the pair estimator.")
         # Cross term: average every observation/model pair, even when N != M.
-        cross = (torch.cdist(targets, draws) ** beta).mean()
-        distances = torch.cdist(draws, draws) ** beta
+        cross = _power_distances(torch.cdist(targets, draws), self.cfg.energy_score_beta).mean()
+        distances = _power_distances(torch.cdist(draws, draws), self.cfg.energy_score_beta)
         # Model pair term: omit self-pairs for the unbiased finite-sample estimate.
-        pair = (distances.sum() - distances.diagonal().sum()) / (n * (n - 1))
+        pair = ((distances.sum() - distances.diagonal().sum()) / (n * (n - 1))
+                if self.cfg.energy_pair_estimator == "Ustat" else distances.mean())
         value = cross - pair / 2
         return ScalarResult(value, "energy_score", observations.variables), {
             "energy_score": value, "estimated-true distance": cross, "estimated-estimated distance": pair
@@ -132,7 +137,6 @@ class WeightedFrobeniusDistance(SEM2Operator):
     discrepancy used in SEM estimation (cf. lavaan's ULS objective). A weight
     matrix W supplies elementwise weighted least squares; this corresponds to
     diagonal weighting of vectorized residuals, not a general GLS quadratic form.
-    beta is accepted for scalar-objective composition but does not affect this loss.
 
     Parameters
     ----------
@@ -159,8 +163,7 @@ class WeightedFrobeniusDistance(SEM2Operator):
         self.covariance = Covariance(model, sample_bs=sample_bs, cfg=cfg)
         self.weight = weight
 
-    def evaluate(self, observations: DataBatch, *, sample_bs: int | None = None,
-                 beta: float | None = None) -> tuple[ScalarResult, dict]:
+    def evaluate(self, observations: DataBatch, *, sample_bs: int | None = None) -> tuple[ScalarResult, dict]:
         """Return the weighted squared covariance discrepancy.
 
         Parameters
@@ -170,8 +173,6 @@ class WeightedFrobeniusDistance(SEM2Operator):
             order. Uses stored values, not numeric mappings.
         sample_bs : int, optional
             Draw-count override; unused for analytical linear covariance.
-        beta : float, optional
-            Accepted for composition; unused.
 
         Returns
         -------
@@ -180,8 +181,6 @@ class WeightedFrobeniusDistance(SEM2Operator):
         diagnostics : dict
             Detached scalar under ``weighted_frobenius_distance``.
         """
-        if not isinstance(observations, DataBatch):
-            raise TypeError("observations must be a DataBatch.")
         batch = observations if self.observed_vars is None else observations.subset(self.observed_vars)
         covariance, _ = self.covariance.evaluate(sample_bs=sample_bs)
         indices = [i for n in batch.names for i in self.covariance.columns[n]]

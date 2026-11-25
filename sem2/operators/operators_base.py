@@ -30,13 +30,14 @@ class SEM2Operator(ABC):
     # maybe make even more clear this is shared between operators representing objectives?
     """Common result contract; concrete evaluators declare explicit arguments.
 
-    Scalar objectives share optional sample_bs and beta keywords for composition.
-    sample_bs applies to Monte Carlo sampling, beta only to energy calculations.
-    Other terms accept these known settings without changing their calculation.
+    Scalar objectives share the optional sample_bs keyword for composition.
     """
     model: SEM2
     input_type: OperatorInput
     output_type: OperatorOutput
+
+    def validate_fit_data(self, observations: DataBatch, batch_size: int) -> None:
+        """Check objective-specific requirements once on the prepared fitting data."""
 
     @abstractmethod
     def evaluate(self, *args, **kwargs) -> tuple[ScalarResult | DataBatch | DiscreteJointDistribution | torch.Tensor, dict]:

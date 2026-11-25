@@ -99,11 +99,13 @@ class TrainingConfig(BaseModel):
     epochs : int, default=12
         Positive number of passes through the data.
     rng_seed : int, optional
-        Explicit training/query seed; None does not reseed.
+        Explicit training seed; None does not reseed. Queries have independent seeds.
     sample_bs : int, default=512
         Default operator Monte Carlo count, separate from data batch size.
     energy_score_beta : float, default=1.0
-        Default exponent used by energy operators.
+        Distance exponent, strictly between zero and two.
+    energy_pair_estimator : {"Ustat", "Vstat"}, default="Ustat"
+        Use distinct row pairs (Ustat) or all row pairs (Vstat).
 
     Examples
     --------
@@ -131,7 +133,19 @@ class TrainingConfig(BaseModel):
     sample_bs: int = 512                           # Sample batch size for distribution sampling
 
     # Energy score
-    energy_score_beta: float = 1.
+    energy_score_beta: float = Field(default=1., gt=0, lt=2)
+    energy_pair_estimator: Literal["Ustat", "Vstat"] = "Ustat"
+
+    def _with_energy_settings(self, beta: float | None, pair_estimator: str | None) -> "TrainingConfig":
+        """Resolve constructor overrides once, using the same validation as config defaults."""
+        if beta is None and pair_estimator is None:
+            return self
+        settings = self.model_dump()
+        if beta is not None:
+            settings["energy_score_beta"] = beta
+        if pair_estimator is not None:
+            settings["energy_pair_estimator"] = pair_estimator
+        return TrainingConfig(**settings)
 
     @model_validator(mode="after")
     def _resolve_device(self) -> "TrainingConfig":

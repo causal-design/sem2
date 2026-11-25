@@ -34,11 +34,19 @@ identification.
    training
 
 .. toctree::
+   :maxdepth: 1
+   :caption: Examples
+
+   political-democracy
+
+.. toctree::
    :maxdepth: 2
    :caption: Operators
 
    objectives
    queries
+   identification
+   solution-path
    operators
    operator-contracts
 

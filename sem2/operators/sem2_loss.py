@@ -8,8 +8,7 @@ class SEM2Loss(SEM2Operator):
 
     Component conventions are unchanged: a negative log-likelihood weight gives
     a minimization objective. Diagnostics use index:class prefixes to avoid collisions.
-    sample_bs overrides Monte Carlo counts and beta overrides energy exponents;
-    components not using a setting leave their calculation unchanged.
+    sample_bs overrides the Monte Carlo count for components that use sampling.
 
     Parameters
     ----------
@@ -28,8 +27,11 @@ class SEM2Loss(SEM2Operator):
             if component.output_type != OperatorOutput.SCALAR:
                 raise TypeError("Loss components must return ScalarResult.")
 
-    def evaluate(self, observations: DataBatch, *, sample_bs: int | None = None,
-                 beta: float | None = None) -> tuple[ScalarResult, dict]:
+    def validate_fit_data(self, observations: DataBatch, batch_size: int) -> None:
+        for component, _ in self.loss_components:
+            component.validate_fit_data(observations, batch_size)
+
+    def evaluate(self, observations: DataBatch, *, sample_bs: int | None = None) -> tuple[ScalarResult, dict]:
         """Evaluate the weighted sum without changing component conventions.
 
         Parameters
@@ -39,8 +41,6 @@ class SEM2Loss(SEM2Operator):
             are model-only.
         sample_bs : int, optional
             Monte Carlo override forwarded to each component.
-        beta : float, optional
-            Energy-exponent override forwarded to each component.
 
         Returns
         -------
@@ -50,16 +50,14 @@ class SEM2Loss(SEM2Operator):
             Unweighted detached component values and prefixed component details.
             Details retain each component's own gradient convention.
         """
-        if not isinstance(observations, DataBatch):
-            raise TypeError("observations must be a DataBatch.")
         # Start with a Python zero so the components determine tensor dtype/device.
         total = 0
         metrics, variables = {}, {}
         for index, (component, weight) in enumerate(self.loss_components):
             if component.input_type == OperatorInput.DATA:
-                result, details = component.evaluate(observations, sample_bs=sample_bs, beta=beta)
+                result, details = component.evaluate(observations, sample_bs=sample_bs)
             else:
-                result, details = component.evaluate(sample_bs=sample_bs, beta=beta)
+                result, details = component.evaluate(sample_bs=sample_bs)
             total = total + weight * result.value
             variables.update((v.name, v) for v in result.variables)
             label = f"{index}:{type(component).__name__}"

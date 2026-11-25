@@ -4,6 +4,53 @@ Objectives and composition
 Energy discrepancies
 --------------------
 
+Energy losses use Euclidean distances on quantitative values or explicitly scored
+categories. Supply ``VariableInfo.numeric_mapping`` for categorical variables;
+integer category codes alone do not define a distance.
+
+Set defaults in ``TrainingConfig``::
+
+    cfg = TrainingConfig(
+        sample_bs=512,
+        energy_score_beta=1.0,
+        energy_pair_estimator='Ustat',
+    )
+    objective = EnergyLoss(cfg, model, beta=0.5)
+
+Choose the exponent when constructing the loss. To use a different exponent,
+construct another loss. The draw count can still be changed per evaluation.
+For each within-sample pair term, ``pair_estimator="Ustat"`` uses a U-statistic: for
+``m`` rows it averages over the ``m * (m - 1)`` ordered pairs of distinct
+rows. ``pair_estimator="Vstat"`` uses a V-statistic: all ``m * m`` ordered pairs,
+including a row paired with itself. In the discrete model a row is a
+probability distribution, so its same-row contribution need not be zero.
+This setting does not change the cross term between data and model.
+The continuous loss is an energy score; the discrete
+loss also subtracts the data/data term and uses half-energy-distance scaling.
+
+``DiscreteEnergyLoss(cfg, states)`` precomputes its distance matrix at construction
+from the named state support and numerical mappings. ``EnergyLoss`` and
+``DiscreteIVEnergyLoss`` construct it when the observed variables and scores are
+first available, then reuse it across batches and instrument groups. Changing
+the observed variables or scores rebuilds it.
+
+For IV fitting, set ``batch_size`` at least as large as the dataset. Eligibility
+is checked once before training, after incomplete rows are removed: every declared
+instrument level needs two or more observations for Ustat, one or more for Vstat.
+Conditional discrepancies use empirical group frequencies. The instrument itself does not need numerical scores
+because it selects groups rather than entering their distance calculation.
+
+An instrument may be declared with its own distribution or defined by a
+``d(...)`` equation. In both cases its column must be observed. Fitting assumes
+no unmeasured instrument--treatment confounding; treatment--outcome confounding
+is allowed. Once treatment and outcome are named,
+:func:`sem2.identification.check_iv_graph`
+checks exclusion and graphical separation after fixing treatment. It does not
+test instrument strength.
+
+Energy exponents are checked at construction rather than at every evaluation.
+Batch-size checks protect pair denominators; they inspect tensor shapes, not device values.
+
 .. autoclass:: sem2.operators.divergence.EnergyLoss
    :members: evaluate
 

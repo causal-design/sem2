@@ -1,6 +1,7 @@
 # Defer annotation evaluation so forward references in type hints resolve lazily
 # on Python < 3.14.
 from __future__ import annotations
+from collections.abc import Collection
 import warnings
 from dataclasses import replace
 import torch
@@ -8,7 +9,8 @@ from torch import nn
 from torch import Tensor
 
 from ..components.nodes import NodeExogenous, NodeLinear, NodeMLP, NodeMLPDiscrete, SEM2Node
-from ..construction.dag import _DAG
+from ..construction.admg import evaluation_order
+from ..construction.formula_parser import FormulaParser
 from ..construction.sem_types import SEMType
 from ...data.records import DataBatch, VariableInfo
 from ...default_configs import LinearNodeConfig, MLPConfig
@@ -19,15 +21,12 @@ from ...default_configs import LinearNodeConfig, MLPConfig
 # ════════════════════════════════════════════════════════════════════════════════════
 
 
-# Docs here should correspond better to docs for the linear/discrete model? 
+# Docs here should correspond better to docs for the linear/discrete model?
 # Wording is currently quite different
 # E.g. here: continuous SEM. Associatied with a DAG whose nodes are PyTorch modules.
 # (see linear and discrete model definitions for the other comments)
-class SEM2(_DAG, nn.Module):
-    """Structural Equation Model: a DAG whose nodes are PyTorch modules.
-
-    Inherits graph structure and parsing from DAG, and parameter registration
-    and training from nn.Module.
+class SEM2(nn.Module):
+    """Structural equation model with a named ADMG and executable PyTorch nodes.
 
     Attributes
     ----------
@@ -38,11 +37,9 @@ class SEM2(_DAG, nn.Module):
     input_node : set[str]
         User-declared names, excluding helpers; not observation status.
     topological_order : list[str]
-        Parent-before-child order including helpers.
-    node_order : list[str]
-        Canonical matrix order, copied from topological_order.
-    graph : dict[str, list[str]]
-        Node names mapped to ordered parent names.
+        Parent-before-child order including helpers, also used for full model matrices.
+    admg : _ADMG
+        The named mixed graph, before expansion into executable nodes.
     statements : list
         Typed syntax records produced by formula parsing.
     inferred_sem_type : SEMType
@@ -73,8 +70,15 @@ class SEM2(_DAG, nn.Module):
         device : str or torch.device, default="cpu"
             Device for node parameters and exogenous distribution tensors.
         """
-        _DAG.__init__(self, model_formula)
-        nn.Module.__init__(self)
+        super().__init__()
+        self.model_formula = model_formula
+        parser = FormulaParser(model_formula)
+        self.node_specs, self.admg, self.clique_sources = self._compile(parser)
+        self.statements = parser.statements
+        self.input_node = self.admg.endogenous | (self.admg.exogenous & self.node_specs.keys())
+        self.topological_order = evaluation_order(self.node_specs)
+        self._node_index = {n: i for i, n in enumerate(self.topological_order)}
+        self.inferred_sem_type = SEMType.from_specs(self.node_specs.values())
         self.device = device
 
         # Compare the formula's inferred type against the type this class expects,
@@ -90,6 +94,18 @@ class SEM2(_DAG, nn.Module):
         # Register all nodes as submodules so PyTorch tracks parameters
         self.node_dict = nn.ModuleDict(name_to_node)
         self.node_dict.to(device)
+
+    def _compile(self, parser):
+        specs, graph = parser.parse()
+        return specs, graph, graph.expand(specs)
+
+    def _draw_joint_exogenous(self, batch_size):
+        """Return named draws for exogenous variables that must be sampled together.
+
+        By default each exogenous node samples itself during traversal. The
+        Gaussian subclass supplies columns of a joint draw here instead.
+        """
+        return {}
 
     def _check_sem_type(self) -> None:
         """Warn if the formula's inferred sem_type differs from the sem_type this
@@ -181,7 +197,7 @@ class SEM2(_DAG, nn.Module):
         categorical = isinstance(node, NodeMLPDiscrete) or isinstance(node.dist, torch.distributions.Categorical)
         return VariableInfo(name, dim=node.out_dim, categorical=categorical)
 
-    def _unpack_interventions(self, set_nodes: DataBatch | None, batch_size: int) -> dict[str, Tensor]:
+    def _unpack_interventions(self, do_intervention: DataBatch | None, batch_size: int) -> dict[str, Tensor]:
         """Unpack a named intervention batch into per-node tensors.
 
         Input has shape [batch_size, sum(variable.dim)]; each dictionary value
@@ -192,32 +208,32 @@ class SEM2(_DAG, nn.Module):
         """
         if batch_size < 1:
             raise ValueError("batch_size must be positive.")
-        if set_nodes is None:
+        if do_intervention is None:
             return {}
-        if not isinstance(set_nodes, DataBatch):
-            raise TypeError("set_nodes must be a DataBatch.")
-        if len(set_nodes) != batch_size:
+        if not isinstance(do_intervention, DataBatch):
+            raise TypeError("do_intervention must be a DataBatch.")
+        if len(do_intervention) != batch_size:
             raise ValueError("Intervention rows must match batch_size.")
         values = {}
-        for variable in set_nodes.variables:
+        for variable in do_intervention.variables:
             name = variable.name
             if name not in self.input_node:
                 raise ValueError(f"Unknown or internal intervention node: {name!r}")
             node = self.node_dict[name]
-            value = set_nodes.select(name)
+            value = do_intervention.select(name)
             if variable.dim != node.out_dim:
                 raise ValueError(f"Intervention dimension does not match {name!r}.")
             values[name] = value
         return values
 
-    def sample(self, batch_size: int = 1, set_nodes: DataBatch | None = None) -> tuple[DataBatch, dict]:
-        """Return named draws and intervention provenance, excluding helpers.
+    def sample(self, batch_size: int = 1, do_intervention: DataBatch | None = None) -> tuple[DataBatch, dict]:
+        """Return endogenous draws and intervention provenance.
 
         Parameters
         ----------
         batch_size : int, default=1
             Positive number of draws.
-        set_nodes : DataBatch, optional
+        do_intervention : DataBatch, optional
             Intervention values with one row per draw and matching node widths.
             Supply valid stored values on the model device; no broadcasting,
             category encoding or support validation is performed.
@@ -228,7 +244,7 @@ class SEM2(_DAG, nn.Module):
             Values of shape (batch_size, total_width), in topological order.
             Internal helper nodes are excluded.
         details : dict
-            ``interventions`` contains the supplied ``set_nodes`` object.
+            ``interventions`` contains the supplied ``do_intervention`` object.
 
         Notes
         -----
@@ -236,10 +252,10 @@ class SEM2(_DAG, nn.Module):
         structural equations; they do not establish causal identification.
         """
         # Share the sampling loop with queries that stop at a specific target.
-        return self._sample(batch_size, set_nodes)
+        return self._sample(batch_size, do_intervention)
 
-    def _sample(self, batch_size: int, set_nodes: DataBatch | None,
-                target: str | None = None) -> tuple[DataBatch, dict]:
+    def _sample(self, batch_size: int, do_intervention: DataBatch | None,
+                target: str | None = None, *, columns: Collection[str] | None = None) -> tuple[DataBatch, dict]:
         """One traversal for full samples and target-only queries.
 
         The private target option lets queries stop early without duplicating
@@ -247,26 +263,32 @@ class SEM2(_DAG, nn.Module):
         """
         if target is not None and target not in self.input_node:
             raise ValueError(f"Unknown or internal target node: {target!r}")
+        if columns is None:
+            columns = self.admg.endogenous if target is None else (target,)
         # Unwrap interventions once and retain their supplied variable metadata.
-        interventions = self._unpack_interventions(set_nodes, batch_size)
-        supplied = {} if set_nodes is None else dict(zip(set_nodes.names, set_nodes.variables))
+        interventions = self._unpack_interventions(do_intervention, batch_size)
+        joint = self._draw_joint_exogenous(batch_size)
+        supplied = {} if do_intervention is None else dict(zip(do_intervention.names, do_intervention.variables))
         values, variables = [], []
         # Evaluate parents first, replacing intervened equations with fixed values.
         for name in self.topological_order:
             node = self.node_dict[name]
             if name in interventions:
                 node.set_value(interventions[name])
+            elif name in joint:
+                node.set_value(joint[name])
             else:
                 node([self.node_dict[p].get_value() for p in node.predecessors], batch_size)
             # Keep compiler helpers out of the returned batch.
-            if not self.node_specs[name].is_helper and (target is None or name == target):
+            if name in columns:
                 values.append(node.get_value())
                 variables.append(supplied[name] if name in supplied else self._variable_info(name))
             if name == target:
                 break
         # Stack variable blocks in the same order as their metadata.
-        result = DataBatch(torch.cat(values, dim=-1), variables)
-        return result, {"interventions": set_nodes}
+        result = DataBatch(torch.cat(values, dim=-1) if values else
+                           torch.empty(batch_size, 0, device=self.device), variables)
+        return result, {"interventions": do_intervention}
 
     def forward(self, *args, **kwargs):
         raise NotImplementedError(f"call the sample() method instead of forward() or calling the model directly.")
